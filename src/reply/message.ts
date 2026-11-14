@@ -6,6 +6,11 @@
 // text, and nothing of it is shown. Streamed (the narrator live, or a two-step connection set to
 // stream anyway): the text goes out as it is written, held back by sentences while a rule that
 // interrupts covers it, as the tag form does, and the message's end releases it.
+//
+// Once the reply went out, this way or another, every message's text is working text: shown to
+// nobody, and nothing is said of it. Plain text carries no mark of a reply the way a tag does, so
+// none of it is a second reply: a message of text alone after the reply simply ends the run, as any
+// message without calls does.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { JsonValue, ReplySink } from "../contract";
 import type { TextChannel } from "../loop/channel";
@@ -24,12 +29,10 @@ export interface MessageReplyOptions {
   tailSentences: number;
   /**
    * Asked just before the reply's first text is shown, never sooner (a reply cut before anything of
-   * it showed takes nothing): false when the reply is another form's, or went out already; this one
-   * is then not shown. Absent: always this form's.
+   * it showed takes nothing): false when the reply is another form's, or went out already; this
+   * message's text is then working text, not shown and not answered. Absent: always this form's.
    */
   claim?(): boolean;
-  /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
-  second?: string;
   /** The reply begins to show: its first text is about to go out. */
   onBegin?(): void;
   /** The reply is complete and was sent on: once. */
@@ -42,13 +45,8 @@ export class MessageReply implements TextChannel {
   #state: "none" | "open" | "released" = "none";
   /** The text of the message under way. */
   #message = "";
-  /** This message is a reply that cannot be shown. */
-  #refused = false;
-  /**
-   * A reply was not shown: the agent is told after the message, once in the generation, so text after
-   * the reply never buys it call after call (each answer is a further call).
-   */
-  #second: "unsaid" | "due" | "said" = "unsaid";
+  /** This message's text is not the reply's to show: the reply went out another way, or another way has it. */
+  #unshown = false;
 
   constructor(options: MessageReplyOptions) {
     this.#o = options;
@@ -76,22 +74,18 @@ export class MessageReply implements TextChannel {
 
   begin(): void {
     this.#message = "";
-    this.#refused = false;
+    this.#unshown = false;
   }
 
   write(piece: string): void {
     this.#message += piece;
-    if (!this.#o.stream || this.#refused || piece === "") return;
-    if (this.#state === "released") {
-      this.#refuse();
-      return;
-    }
+    if (!this.#o.stream || this.#state === "released" || this.#unshown || piece === "") return;
     this.#state = "open";
     this.#release.hold(piece);
   }
 
   release(): void {
-    if (this.#state === "open" && !this.#refused) this.#flush(false);
+    if (this.#state === "open") this.#flush(false);
   }
 
   cut(): string {
@@ -103,24 +97,21 @@ export class MessageReply implements TextChannel {
 
   end(message: AssistantMessage): void {
     if (this.#o.stream) {
-      if (this.#state === "open" && !this.#refused && this.#flush(true)) this.#finish();
+      if (this.#state === "open" && this.#flush(true)) this.#finish();
       return;
     }
+    if (this.#state === "released") return;
     const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall" || isClosing(part.arguments as JsonValue));
     if (!replies) return;
-    if (this.#state === "released") {
-      this.#refuse();
-      return;
-    }
     this.#release.hold(this.#message);
     if (this.#flush(true)) this.#finish();
   }
 
-  /** Sends on what may be shown. False when the reply was not this form's as its first text was to go out: none of this message is shown, and the agent is told. */
+  /** Sends on what may be shown. False when the reply was not this form's as its first text was to go out: none of this message is shown. */
   #flush(all: boolean): boolean {
     if (this.#release.flush(all)) return true;
     this.#state = "none";
-    this.#refuse();
+    this.#unshown = true;
     return false;
   }
 
@@ -129,17 +120,6 @@ export class MessageReply implements TextChannel {
     if (this.#o.claim?.() === false) return false;
     this.#o.onBegin?.();
     return true;
-  }
-
-  answers(): string[] {
-    if (this.#second !== "due") return [];
-    this.#second = "said";
-    return this.#o.second !== undefined ? [this.#o.second] : [];
-  }
-
-  #refuse(): void {
-    this.#refused = true;
-    if (this.#second === "unsaid") this.#second = "due";
   }
 
   #finish(): void {

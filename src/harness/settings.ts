@@ -29,8 +29,8 @@
 //   rules:
 //     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
 //                                      written, and stretches of a tool's arguments or result
-//   models:
-//     effort: { <connection>: high }   the effort every agent on a connection thinks at, by the connection's
+//   effort:
+//     connections: { <connection>: high } the effort every agent on a connection thinks at, by the connection's
 //                                      name or its id, whatever its definition says: off, minimal, low,
 //                                      medium, high, xhigh or max; none by default
 
@@ -41,7 +41,7 @@ import { SEARCH_HITS } from "../tools/search";
 
 export type ReplyFormSetting = "tags" | "two-step";
 
-/** Every effort a definition's `effort:` takes, which `models.effort` takes too. */
+/** Every effort a definition's `effort:` takes, which `effort.connections` takes too. */
 const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
 
 /** The user's limits on sub-agents (§10.11: "sub-agent depth and count ... every one is a setting"). */
@@ -214,15 +214,16 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const results = section("results");
   const tools = section("tools");
   const rules = section("rules");
-  const models = section("models");
+  // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
+  const effort = section("effort");
   const efforts: Record<string, Effort> = {};
-  const effortValue = models["effort"];
-  if (isMapping(effortValue)) {
-    for (const [connection, value] of Object.entries(effortValue)) {
-      const effort = oneOf<Effort>(`models.effort.${connection}`, value, Object.keys(EFFORTS) as Effort[]);
-      if (effort !== undefined) efforts[connection] = effort;
+  const connectionsValue = effort["connections"];
+  if (isMapping(connectionsValue)) {
+    for (const [connection, value] of Object.entries(connectionsValue)) {
+      const named = oneOf<Effort>(`effort.connections.${connection}`, value, Object.keys(EFFORTS) as Effort[]);
+      if (named !== undefined) efforts[connection] = named;
     }
-  } else if (effortValue !== undefined) passed("models.effort", effortValue);
+  } else if (connectionsValue !== undefined) passed("effort.connections", connectionsValue);
 
   return {
     turn: {

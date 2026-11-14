@@ -1,6 +1,6 @@
-// The setting `models.effort` (Appendix D.1, per connection): an agent on a connection it names
-// thinks at the setting's effort, whatever its definition says; on any other connection, at its
-// definition's.
+// The setting `effort.connections` (Appendix D.1, per connection): an agent on a connection it
+// names thinks at the setting's effort, whatever its definition says; on any other connection, at
+// its definition's. It lives apart from `models`, where a host keeps its connections document.
 import { afterEach, expect, test } from "bun:test";
 import { request, type Stage, stage } from "./support";
 
@@ -23,6 +23,11 @@ async function effortAsked(config?: string): Promise<unknown> {
 
 test("an agent on a connection the setting names thinks at the setting's effort; elsewhere, at its definition's", async () => {
   expect(await effortAsked()).toBe("low");
-  expect(await effortAsked("models:\n  effort:\n    Floor: high\n")).toBe("high");
-  expect(await effortAsked("models:\n  effort:\n    Another: high\n")).toBe("low");
+  expect(await effortAsked("effort:\n  connections:\n    Floor: high\n")).toBe("high");
+  expect(await effortAsked("effort:\n  connections:\n    Another: high\n")).toBe("low");
+});
+
+test("the setting stands beside the host's connections document under `models`, and nothing under `models` sets an effort", async () => {
+  expect(await effortAsked("models:\n  v: 1\n  default: Floor\n  connections: []\neffort:\n  connections:\n    Floor: high\n")).toBe("high");
+  expect(await effortAsked("models:\n  effort:\n    Floor: high\n")).toBe("low");
 });

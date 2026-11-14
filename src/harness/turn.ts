@@ -363,11 +363,13 @@ export class Turn {
     const { form, stream } = formFor(settings, connection);
     let tags: ReplyTags | undefined;
     let intentFile: string | undefined;
+    let contractText = "";
     if (contract !== undefined) {
       tags = tagsOf(contract.header);
       const file = contract.header["intent_file"];
       intentFile = typeof file === "string" && file !== "" ? file : undefined;
-      texts.push(contract.render({ form: form === "tags" ? { tags: true } : { two_step: true } }).text);
+      contractText = joined([contract.render({ form: form === "tags" ? { tags: true } : { two_step: true } }).text]);
+      texts.push(contractText);
     }
     if (form === "tags" && tags === undefined) return "This connection's replies are marked by tags, and no reply contract in force names them.";
     // The tool guide: the guide of each family of the tools the lead holds, where its file is (`.tools/<family>.md`).
@@ -388,6 +390,7 @@ export class Turn {
       stream,
       ...(tags !== undefined ? { tags } : {}),
       ...(intentFile !== undefined ? { intentFile } : {}),
+      ...(contractText !== "" ? { contract: contractText } : {}),
     };
   }
 
@@ -429,6 +432,8 @@ export class Turn {
       ...(noticesText.length > 0 ? { prompt_notices: noticesText.join("\n") } : {}),
       ...(req.briefing.length > 0 ? { blocks: req.briefing.map((part) => ({ name: part.name, text: part.text })) } : {}),
       ...(places.turn !== undefined ? { turn_files: places.turn } : {}),
+      // The reply contract again, exactly as the opening block holds it: the template decides whether and where.
+      ...(opening.contract !== undefined ? { reply_contract: opening.contract } : {}),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;

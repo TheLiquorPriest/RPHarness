@@ -1,5 +1,5 @@
 ---
-description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. Take a part out and it is no longer shown. It lays facts out; it asks for nothing.
+description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. Take a part out and it is no longer shown. Its last part is the reply contract again, exactly as the opening block holds it, so it is the last thing read before the reply is written; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing.
 ---
 # Briefing for this turn
 
@@ -55,3 +55,9 @@ The reply already begins with these words. The chat application puts them in fro
 
 This turn's files are in {{turn_files}}
 {{/turn_files}}
+{{#reply_contract}}
+
+## How the reply is marked
+
+{{reply_contract}}
+{{/reply_contract}}

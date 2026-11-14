@@ -50,6 +50,11 @@ describe("the two-step form", () => {
     expect(opening).toContain("Working text goes in files, never in a message.");
     expect(opening).toContain("written first to `scratch/intent.md` in the turn's folder");
     expect(opening).not.toContain("<reply>");
+    // RPH's own briefing, last, ends on the same contract, rendered for the same form.
+    const briefing = textOf(s.model.requests[0]!.messages.at(-1)!);
+    expect(briefing).toContain("Working text goes in files, never in a message.");
+    expect(briefing).toEndWith("If one comes back with a report, you get another call to read it.");
+    expect(briefing).not.toContain("<reply>");
     expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
     expect(s.told[0]!.payload).toBe(intent);
   });

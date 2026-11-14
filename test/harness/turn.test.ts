@@ -1,8 +1,11 @@
 // A whole turn on the folder host, under the drafted guidance (§10.2, §10.3, §10.7, §10.11): one
 // model call for a simple turn, with the lead's context in its blocks and the prompt's messages in
 // the order sent; the intent record told to the host before any tool runs; the reply streamed as it
-// is written; a tool nobody registered left out and reported; and the turn's call limit.
+// is written; a tool nobody registered left out and reported; and the turn's call limit. Under RPH's
+// own guidance: the reply contract shown again at the briefing's end only when its template says so.
 import { afterEach, describe, expect, test } from "bun:test";
+import { join } from "node:path";
+import { SHIPPED_GUIDANCE } from "../../src/index";
 import { gate, PROMPT, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
@@ -105,6 +108,48 @@ describe("a simple turn", () => {
 
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["The lamp gutters.", " Wren swears softly."]);
     expect(sink.finished).toHaveLength(1);
+  });
+});
+
+describe("where the reply contract is shown", () => {
+  /** The last line of RPH's own reply contract, which runs from its heading to here. */
+  const LAST_LINE = "If one comes back with a report, you get another call to read it.";
+
+  /** The reply contract as a text holds it, from its heading to its last line, or "" when it holds none. */
+  function contractIn(text: string): string {
+    const start = text.indexOf("# The reply contract");
+    const end = start < 0 ? -1 : text.indexOf(LAST_LINE, start);
+    return end < 0 ? "" : text.slice(start, end + LAST_LINE.length);
+  }
+
+  test("RPH's own briefing names it: the contract is in the opening block and again, word for word, as the briefing's last part", async () => {
+    const s = (open = await stage({ answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }] }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+
+    const sent = s.model.requests[0]!.messages;
+    const contract = contractIn(textOf(sent[0]!));
+    expect(contract).toContain("whatever the player should see goes between `<reply>` and `</reply>`");
+    expect(contract).not.toContain("Working text goes in files");
+    const briefing = textOf(sent.at(-1)!);
+    expect(briefing).toStartWith("# Briefing for this turn");
+    expect(briefing).toEndWith(`This turn's files are in sessions/s1/turns/t1/\n\n## How the reply is marked\n\n${contract}`);
+  });
+
+  test("a briefing template with the field taken out leaves the contract in the opening block only", async () => {
+    const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "briefing.md")).text();
+    const without = shipped.replace(/\{\{#reply_contract\}\}[\s\S]*\{\{\/reply_contract\}\}\n?/, "");
+    expect(without).not.toContain("{{reply_contract}}");
+    const s = (open = await stage({ files: { ".prompts/briefing.md": without }, answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }] }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+
+    const sent = s.model.requests[0]!.messages;
+    expect(contractIn(textOf(sent[0]!))).toContain("whatever the player should see goes between `<reply>` and `</reply>`");
+    const briefing = textOf(sent.at(-1)!);
+    expect(contractIn(briefing)).toBe("");
+    expect(briefing).not.toContain("How the reply is marked");
+    expect(briefing).toEndWith("This turn's files are in sessions/s1/turns/t1/");
   });
 });
 

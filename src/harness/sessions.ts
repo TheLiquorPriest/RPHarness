@@ -23,6 +23,8 @@ export interface Opening {
   stream: boolean;
   tags?: ReplyTags;
   intentFile?: string;
+  /** The reply contract as this block holds it, rendered for its form: the briefing's `reply_contract`. */
+  contract?: string;
 }
 
 export interface SessionState {

@@ -1,0 +1,447 @@
+// What the rest of RPH asks of the guidance files (§5), and what it gets back. Everything an agent
+// does by default is in a file the user can read, change or switch off; the code behind this API
+// loads those files and holds no opinion of its own about how a turn is run.
+//
+// Who calls what:
+// - The harness, when a session opens: `definition(name)` and `stack(name)` for the opening block,
+//   and `snapshot(stack)`, which it keeps with the session.
+// - The harness, for each briefing: `stack(name, { situations })` for the files added for the turn,
+//   and `changes(snapshot, stack)` with `changesText` for the files changed since the session opened.
+//   "Apply now" is a new `stack(name)` and a new snapshot.
+// - The tools: `skills()` for the prompt's index, `skill(name)` for a body, `tool(name)` for a tool's
+//   description.
+// - The harness, wherever it sends a model text of its own: `part(name)`.
+// - The runner, for the user's triggered rules: one `RuleRun` per run, from `ruleRun(options)`.
+// - The pages: `definitions()`, `stackParts(name)`, `rules()` and `problems()`.
+//
+// The files, by kind (each kind's folder at each level is the host's, `Layer.folders`):
+// - Instruction files: plain markdown at a level's root, named by a definition's `reads`
+//   (`TURN` is `TURN.md`). No header. Never filled in.
+// - Agent definitions, `<agents>/<name>.md`: a header and a body (DEFINITION_FIELDS).
+// - Skills, `<skills>/<name>/SKILL.md`: a header and a body (SKILL_FIELDS).
+// - Rules, `<rules>/<name>.md`: a header and a body (RULE_FIELDS). Under `<rules>/examples/` a rule is
+//   listed and never in force.
+// - Prompt parts, `<prompts>/<name>.md`, and tool descriptions, `<tools>/<name>.md`: an optional
+//   header (any fields; `description` and `format` are read) and a body that is a template.
+// - Config, the file each level names (`Layer.config`): `off:` and `added:` are read (CONFIG_KEYS).
+//
+// Levels. Files are read through the host's `FilesPort`: shipped, then global, then character, then
+// chat. A file of the same name at a nearer level replaces the farther one, of every kind. A name
+// listed in any level's `off:` is off at every level. A file that does not parse is reported by path
+// and line, is not used, and the farther file of its name is not used in its place.
+//
+// Rules (§5.4). `description:`; `agents:`, `all` or a list of definitions (it must be there: code
+// holds no default about whom a rule is for); `needs:`, names the rule is in force only while each
+// is (a rule's, an instruction file's, or `<kind>/<name>`, written as `off:` entries are); `turns:`,
+// on an always-on rule, the situations it is for, which hand it over for those turns' briefings
+// instead of the opening block. At most one trigger: `condition:`, a JavaScript regular expression,
+// with `scope:` (`text`, `thinking`, `reply`, `arguments` or `result`, the last two as
+// `arguments:<tool>` or `result:<tool>` with a glob, `*` for any), `interrupt: never` (left out, a
+// match on what is being written stops the call) and `hold: true` (on a tool's arguments, the text
+// comes back instead of running the tool); `question:`, with `scope:` (`text`, `thinking` or
+// `reply`); `at:` (`turn-start`, `run-end`, `before-compaction`), with or without `fact:`; `every:`,
+// a number of turns, with or without `fact:`. `repeat:` is `once per turn` when left out, or
+// `once per session`, `after N turns`, `always`. A pattern on a tool's result looks at its text,
+// then its reports, then a line `marked <mark>` for each of its marks.
+//
+// Templates. `{{name.path}}` puts a field in; `{{#name}}…{{/name}}` shows its block when the field
+// is present and not empty (once per item for a list, with `{{.}}` as the item; once for anything
+// else, with `{{.}}` as the value); `{{^name}}…{{/name}}` shows its block when the field is absent
+// or empty. Nothing else. Empty: absent, null, false, 0, "", an empty list, an object with no fields.
+// A line that holds nothing but a block's opening or closing tag leaves no line behind. A list put in
+// with `{{name}}` is its items joined by ", ". An object may hold its own value under the key ".":
+// that value is what `{{name}}` puts in and what a block tests, while its other keys are its
+// fields (a fact is such an object: `{{stage.unperceived}}` is its count and
+// `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
+// item first, then outwards; a prompt part's own header fields are the outermost.
+
+import type { AgentRef, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult } from "../contract/index";
+import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
+
+// ---------------------------------------------------------------- where things come from
+
+/** The file something was loaded from: its path in the agents' view, its level, and its SHA-256 when read. */
+export interface Source {
+  path: string;
+  level: LayerLevel;
+  hash: string;
+}
+
+/** A farther file of the same name that a nearer one replaces (§5.2). */
+export interface Replaced {
+  level: LayerLevel;
+  path: string;
+}
+
+/**
+ * Something wrong with a file, in words a user can act on: which file, which line where one can be
+ * named, and what to change. A problem never stops a turn: the file, or the field, is left out.
+ */
+export interface Problem {
+  path: string;
+  level?: LayerLevel;
+  /** The line of the file, counted from 1. */
+  line?: number;
+  message: string;
+}
+
+// ---------------------------------------------------------------- templates
+
+/** A value a template can put in: JSON, where an object may hold its own value under "." (see the head of this file). */
+export type Field = JsonValue;
+
+/** The named fields a template is filled from. An absent or undefined field is absent. */
+export type Fields = { readonly [name: string]: Field | undefined };
+
+/** A template filled in: its text, and every field it put in that had no value (by path, in order, once each). */
+export interface Rendered {
+  text: string;
+  missing: string[];
+}
+
+/** A template as parsed from a file. */
+export interface Template {
+  /** The text as written. */
+  readonly text: string;
+  /** Every field it names, put in or tested, by path as written, in the order they first appear. */
+  readonly fields: readonly string[];
+  render(fields?: Fields): Rendered;
+}
+
+// ---------------------------------------------------------------- agent definitions
+
+/** The header fields of an agent definition. Anything else in its header is reported. */
+export const DEFINITION_FIELDS = ["name", "description", "model", "effort", "tools", "reads", "given", "limits"] as const;
+
+/** An agent's own limits from its definition (§10.11). Each absent is no limit of the definition's. */
+export interface DefinitionLimits {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  /** Wall time, in milliseconds. The header gives it in seconds (`time: 90`). */
+  time?: number;
+}
+
+/** An agent definition (§5.4): the nearest file of its name. */
+export interface AgentDefinition {
+  /** Its file's name, without `.md`: what `AgentRef.definition` names. */
+  name: string;
+  description: string;
+  /** The connection profile it runs on, as the header names it (`default`). */
+  model?: string;
+  effort?: Effort;
+  /** The tools it holds, by name, as written. */
+  tools: string[];
+  /** The instruction files of its stack, in order; `rules` stands for the always-on rules it is named in. */
+  reads: string[];
+  /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */
+  given: string[];
+  limits: DefinitionLimits;
+  /** Its body: the agent's instructions, a template (`You are {{character.name}}.`). */
+  instructions: Template;
+  source: Source;
+  replaces: Replaced[];
+}
+
+// ---------------------------------------------------------------- skills
+
+/** The header fields of a skill. Anything else in its header is reported. */
+export const SKILL_FIELDS = ["name", "description"] as const;
+
+/** A skill as the prompt's index shows it (§5.4): its folder's name and what it is for. */
+export interface SkillEntry {
+  name: string;
+  description: string;
+  source: Source;
+  replaces: Replaced[];
+}
+
+/** A skill with its body, for an agent that asked for it. */
+export interface Skill extends SkillEntry {
+  body: string;
+}
+
+// ---------------------------------------------------------------- prompt parts and tool descriptions
+
+/** Where a part lives: `.prompts/` for prompt parts, `.tools/` for tool descriptions (each level's own folder of that kind). */
+export type PartKind = "prompts" | "tools";
+
+interface PartBase {
+  /** Its file's name, without `.md`. */
+  name: string;
+  kind: PartKind;
+  /** What it is, from its header, for the pages. */
+  description?: string;
+  /** Every field of its header, as written: `tags` of the reply contract, for one. */
+  header: JsonObject;
+  source: Source;
+  replaces: Replaced[];
+}
+
+/** A part whose body is one template. */
+export interface TemplatePart extends PartBase {
+  format: "template";
+  template: Template;
+  /** The body filled in; the part's header fields are the outermost fields, and `fields` stand over them. */
+  render(fields?: Fields): Rendered;
+}
+
+/** A part whose header says `format: lines`: one `name: text` template per line (`notices`, `progress`). */
+export interface LinesPart extends PartBase {
+  format: "lines";
+  /** The lines' names, in the file's order. */
+  names: string[];
+  lines: ReadonlyMap<string, Template>;
+  /** One line filled in; undefined when the file holds no line of that name, which means it is not shown. */
+  line(name: string, fields?: Fields): string | undefined;
+}
+
+export type PromptPart = TemplatePart | LinesPart;
+
+// ---------------------------------------------------------------- the instruction stack
+
+/**
+ * One part of an agent's stack (§5.2). `part` names it the way `off:` lists name it: the definition
+ * as `agents/<name>`, an instruction file by its name (`TURN`), a rule as `rules/<name>`. A part left
+ * out has `left`, and its `path` and `level` say which file is not given, or for `missing` where it
+ * would be.
+ */
+export interface StackEntry extends StackPart {
+  kind: "definition" | "instruction" | "rule";
+  replaces: Replaced[];
+  /** Its whole text as given: an instruction file or a rule as written, the definition's body as written. Absent when left out. */
+  text?: string;
+  /** For a part handed over for the briefing: the situations that add it (`swipe`). */
+  situations?: string[];
+}
+
+/**
+ * An agent's stack: its definition first, then each file its `reads` names in that order (`rules`:
+ * the always-on rules it is named in, the shipped level's first, then global, character, chat, by
+ * name within a level), then what the briefing is handed, when its definition is given `briefing`:
+ * the files the config's `added:` table names for the situations at hand, and the always-on rules
+ * whose `turns:` name one of them. Every entry its definition names is here, given or left out.
+ */
+export interface Stack {
+  agent: string;
+  entries: StackEntry[];
+  problems: Problem[];
+}
+
+/** What the opening block held when a session opened, kept with the session (JSON). */
+export interface StackSnapshot {
+  agent: string;
+  parts: { part: string; path: string; level: LayerLevel; hash: string }[];
+}
+
+/**
+ * A part of the opening block that no longer stands (§5.2, §10.2): its file was edited or replaced
+ * (`changed`), a file now given that was not (`added`), or one no longer given (`off`, with why).
+ * `text` is the whole current text, for `changed` and `added`.
+ */
+export interface FileChange {
+  part: string;
+  change: "changed" | "added" | "off";
+  /** The file now in force; for `off`, the file the opening block held. */
+  path: string;
+  level: LayerLevel;
+  text?: string;
+  why?: StackLeft;
+}
+
+// ---------------------------------------------------------------- rules
+
+/** The header fields of a rule. Anything else in its header is reported. */
+export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "scope", "question", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
+
+// ---------------------------------------------------------------- facts
+
+/** RPH's own facts. */
+export type OwnFactName = "todo.open" | "reply.released" | "prompt.notices";
+
+/** RPH's own facts' values at a moment, given by whoever keeps them (the todo list, the reply, the prompt's notices). Absent: unknown, and a rule that tests it does not fire. */
+export type OwnFactValues = Partial<Record<OwnFactName, FactValue>>;
+
+/** Reads RPH's own facts for an agent at a moment. */
+export type OwnFactsReader = (scope: Scope, agent: AgentRef) => OwnFactValues | Promise<OwnFactValues>;
+
+/** Every fact a rule can test: RPH's own and the host's (through `FactsPort`). */
+export interface Facts {
+  /** RPH's own first, then the host's. A host's fact of an own fact's name is left out. */
+  defs(): FactDef[];
+  /** The values of the facts named that have one now. */
+  read(scope: Scope, agent: AgentRef, names: readonly string[]): Promise<Record<string, FactValue>>;
+}
+
+// ---------------------------------------------------------------- the rule engine
+
+/**
+ * What the rules remember across the turns of a session (JSON): the caller keeps it with the session
+ * and hands it back to the next run. A new session starts with none.
+ */
+export interface RuleMemory {
+  /** Turns begun under it (`RuleRun.turnStart`): what `every:` and `repeat: after N turns` count. */
+  turns: number;
+  /** The turn count at which a rule last fired, by `<rule> <agent definition>`. */
+  fired: Record<string, number>;
+  /** Texts held for the next briefing: a question rule answered yes about a reply already shown. */
+  held: { agent: string; firing: Fired["firing"]; text: string }[];
+}
+
+export interface RuleRunOptions {
+  facts: Facts;
+  /** The session's memory; none for a new session. */
+  memory?: RuleMemory;
+}
+
+/** A tool call as the rules see it before the tool runs. */
+export interface ToolCallSeen {
+  id: string;
+  tool: string;
+  args: JsonValue;
+}
+
+/** What rules on a tool's arguments did: one that holds the tool (its text comes back instead of running it), and those whose text comes back with the result. */
+export interface ToolCallFired {
+  hold?: Fired;
+  remind: Fired[];
+}
+
+/** A message as written, for the `question:` rules: its text, its thinking, and the reply it wrote, if any. */
+export interface MessageSeen {
+  text: string;
+  thinking?: string;
+  reply?: string;
+}
+
+/** A `question:` rule to put to the judging model about what an agent just wrote. */
+export interface Question {
+  id: string;
+  rule: string;
+  agent: AgentRef;
+  question: string;
+  watched: "text" | "thinking" | "reply";
+  /** What it is asked about. */
+  text: string;
+}
+
+/**
+ * A question answered yes: the rule fired. `now`: add its text and give the agent another call.
+ * `briefing`: the reply was already shown, so its text is held for the next briefing (`turnStart`).
+ */
+export interface Answered {
+  fired: Fired;
+  deliver: "now" | "briefing";
+}
+
+/** A rule due in the briefing. `carried`: it fired in an earlier turn (held for this briefing); its firing was told then. */
+export interface BriefingFired extends Fired {
+  carried?: true;
+}
+
+/**
+ * The user's triggered rules for one run (a turn, a job, a talk): the rules in force when it began,
+ * which fire on the events the runner hands them, with their texts filled from the facts' fields.
+ * Each method answers which rules fire and keeps to their `repeat:`; what happens next (stopping a
+ * stream, another call, a held tool) is the runner's. On the stream a rule fires at most once in one model call.
+ *
+ * A rule's text is filled from the facts its text names (each placed by its dotted name; the fact
+ * it tests counts only the groups it picks) and, for a pattern, `matched` (what it matched) and
+ * `tool` (the tool's name, on a tool's arguments or result). On the stream nothing is read: a
+ * pattern's text there is filled from `matched` alone.
+ */
+export interface RuleRun {
+  /** Rules whose `fact:` or text names a fact, a group or a field nobody gives (found when the run began), and rules whose facts could not be read (as it goes; the run goes on without them). */
+  readonly problems: Problem[];
+  /** A turn begins: counts it, and gives what is due in the lead's briefing: rules `at: turn-start` whose fact holds, rules whose `every:` comes round, and texts held from the last turn. */
+  turnStart(agent: AgentRef): Promise<BriefingFired[]>;
+  /** The rules on what `agent` is writing (`text`, `thinking`, `reply`), for its runner. */
+  stream(agent: AgentRef): StreamRules;
+  /** Rules `at: run-end` whose fact holds, for any agent. */
+  readonly runEnd: RunEndRules;
+  /** Before a tool runs: rules on its arguments. */
+  toolCall(agent: AgentRef, call: ToolCallSeen): Promise<ToolCallFired>;
+  /** After a tool ran: rules on its result; their texts are added to it. */
+  toolResult(agent: AgentRef, call: { id: string; tool: string }, result: ToolResult): Promise<Fired[]>;
+  /** Before a session's earlier turns are summarized: rules `at: before-compaction`. The agent gets one call with their texts first. */
+  beforeCompaction(agent: AgentRef): Promise<Fired[]>;
+  /** After a message: the `question:` rules to put to the judging model. */
+  questions(agent: AgentRef, message: MessageSeen): Question[];
+  /** The judging model's answer to a question; undefined when the rule does not fire. */
+  answered(question: Question, yes: boolean): Promise<Answered | undefined>;
+  /** The memory as it stands now, for the caller to keep with the session. */
+  memory(): RuleMemory;
+}
+
+// ---------------------------------------------------------------- config
+
+/** The keys of a level's config file read here. Everything else in it is other code's. */
+export const CONFIG_KEYS = {
+  /** Names switched off: `rules/perceptions-owed`, `TURN` (with or without `.md`, with a level's own folder name or a mount in front, as the Files page writes them). */
+  off: "off",
+  /** Which situation adds which instruction files to the briefing: `swipe: [SWIPE]`. A nearer level's entry for a situation replaces a farther one's. */
+  added: "added",
+} as const;
+
+// ---------------------------------------------------------------- the whole
+
+/** The guidance of one scope, read through the host's `FilesPort` as it stands now. Each answer is read once and kept: ask a new one to see later changes. */
+export interface Guidance {
+  readonly scope: Scope;
+  layers(): Promise<Layer[]>;
+  /** Every problem found in every file of the tree. Loads everything. */
+  problems(): Promise<Problem[]>;
+
+  /** The definition in force of that name; undefined when there is none, it is off, or it is broken (see `problems`). */
+  definition(name: string): Promise<AgentDefinition | undefined>;
+  /** Every definition in force, for the Files page. */
+  definitions(): Promise<DefinitionView[]>;
+
+  /**
+   * An agent's stack. With `situations` (the turn's kind and what happened since the last one:
+   * `swipe`, `delete`), the briefing entries are those added for them; without, every entry the
+   * `added:` table could add, each with its situations, for the Files page.
+   */
+  stack(agent: string, options?: { situations?: readonly string[] }): Promise<Stack>;
+  /** An agent's stack as the contract's Files page has it. */
+  stackParts(agent: string): Promise<StackPart[]>;
+
+  /** The skills' index: every skill in force, by name. */
+  skills(): Promise<SkillEntry[]>;
+  skill(name: string): Promise<Skill | undefined>;
+
+  /** A prompt part in force, from the prompts folders. */
+  part(name: string): Promise<PromptPart | undefined>;
+  /** A tool's description in force, from the tools folders (`<tools>/<tool's name>.md`). */
+  tool(name: string): Promise<PromptPart | undefined>;
+
+  /** Every rule file, examples and broken ones included, as the Rules page lists them. */
+  rules(): Promise<RuleView[]>;
+  /** The triggered rules in force now, for one run. */
+  ruleRun(options: RuleRunOptions): Promise<RuleRun>;
+}
+
+// ---------------------------------------------------------------- the ways in (each exported from `./index` by this name)
+
+/** `loadGuidance`: the guidance of a scope. Nothing is read until it is asked for. */
+export type LoadGuidance = (files: FilesPort, scope: Scope) => Guidance;
+
+/** `createFacts`: RPH's own facts, read by `own` at each moment, and the host's through its port. */
+export type CreateFacts = (host: FactsPort, own: OwnFactsReader) => Facts;
+
+/** `snapshot`: what an opening block built from `stack` holds, to keep with the session. */
+export type TakeSnapshot = (stack: Stack) => StackSnapshot;
+
+/** `changes`: what of the opening block no longer stands, given the same agent's stack now; in the stack's order, then what went. */
+export type FindChanges = (opened: StackSnapshot, now: Stack) => FileChange[];
+
+/**
+ * `changesText`: the briefing's text for the files changed since the session opened, from the
+ * `notices` part's `file_changed` and `file_off` lines (fields `path` and `part`), each changed
+ * file's line followed by its whole text. A line the user deleted is not shown; a changed file's
+ * text is given all the same.
+ */
+export type ChangesText = (changes: readonly FileChange[], notices: PromptPart | undefined) => string;
+
+/** `parseTemplate`: a template from text, or the problems that keep it from being one. `firstLine` is the file's line the text starts on. */
+export type ParseTemplate = (text: string, at: { path: string; level?: LayerLevel; firstLine: number }) => { template?: Template; problems: Problem[] };

@@ -1,0 +1,107 @@
+// A file's header: the YAML between two `---` lines at its top, read by Bun's own YAML parser, and
+// the body after it. Bun's error does not say which line it failed on, so a header that does not
+// parse is reported at the line after the longest leading run of its lines that does.
+
+import type { LayerLevel } from "../contract/index";
+import type { Problem } from "./api";
+
+/** The file a problem is about. */
+export interface At {
+  path: string;
+  level?: LayerLevel;
+}
+
+export interface Split {
+  /** Whether the file starts with a header at all. */
+  has: boolean;
+  /** Its fields; undefined when there is none, or it does not parse (see `problems`). */
+  header?: Record<string, unknown>;
+  /** The header's lines as written, to find the line a field is on. */
+  lines: string[];
+  body: string;
+  /** The file's line the body starts on. */
+  bodyLine: number;
+  problems: Problem[];
+}
+
+const FENCE = /^---[ \t]*$/;
+
+/** The text with a leading byte-order mark dropped and every line ending made "\n". */
+export function normalized(text: string): string {
+  return (text.startsWith("\uFEFF") ? text.slice(1) : text).replace(/\r\n?/g, "\n");
+}
+
+export function problemAt(at: At, line: number | undefined, message: string): Problem {
+  return { path: at.path, ...(at.level !== undefined ? { level: at.level } : {}), ...(line !== undefined ? { line } : {}), message };
+}
+
+/** The YAML in `lines`, of which the first is the file's line `firstLine`; or the problem, at the line it fails on. */
+export function parseYaml(lines: readonly string[], firstLine: number, at: At, what: string): { value: unknown } | { problem: Problem } {
+  try {
+    return { value: Bun.YAML.parse(lines.join("\n")) };
+  } catch (error) {
+    let good = 0;
+    for (let k = lines.length - 1; k >= 1; k--) {
+      try {
+        Bun.YAML.parse(lines.slice(0, k).join("\n"));
+        good = k;
+        break;
+      } catch {
+        // A shorter run is tried next.
+      }
+    }
+    const reason = (error instanceof Error ? error.message : String(error)).replace(/^YAML Parse error:\s*/, "");
+    return {
+      problem: problemAt(at, firstLine + good, `Line ${firstLine + good} of ${what} cannot be read (${reason}). Each line is \`name: value\`; put a value that holds \`: \` or starts with [ { ' " * & or # in quotes, and indent with spaces, not tabs.`),
+    };
+  }
+}
+
+/** Whether a value is a plain object: what a YAML mapping parses to. */
+export function isMapping(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** Splits a file into its header and its body. A file that does not start with a `---` line has no header, and its whole text is the body. */
+export function splitHeader(text: string, at: At): Split {
+  const lines = normalized(text).split("\n");
+  if (!FENCE.test(lines[0] ?? "")) return { has: false, lines: [], body: lines.join("\n"), bodyLine: 1, problems: [] };
+  const end = lines.findIndex((line, i) => i > 0 && FENCE.test(line));
+  if (end === -1) {
+    return { has: true, lines: [], body: "", bodyLine: lines.length + 1, problems: [problemAt(at, 1, "The header that starts on line 1 has no closing line. End it with a line that holds only `---`.")] };
+  }
+  const own = lines.slice(1, end);
+  const split: Split = { has: true, lines: own, body: lines.slice(end + 1).join("\n"), bodyLine: end + 2, problems: [] };
+  const parsed = parseYaml(own, 2, at, "the header");
+  if ("problem" in parsed) {
+    split.problems.push(parsed.problem);
+    return split;
+  }
+  if (parsed.value === null || parsed.value === undefined) split.header = {};
+  else if (isMapping(parsed.value)) split.header = parsed.value;
+  else split.problems.push(problemAt(at, 2, "The header must be `name: value` lines, one field to a line."));
+  return split;
+}
+
+/** The file's line a top-level field is on: the first of `lines` (the file's line `firstLine` onwards) that starts with `name:`. A header's lines start on line 2. */
+export function fieldLine(lines: readonly string[], name: string, firstLine = 2): number | undefined {
+  const starts = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*:`);
+  const i = lines.findIndex((line) => starts.test(line));
+  return i === -1 ? undefined : i + firstLine;
+}
+
+/** A header field given as one name or a list of names: the names, or undefined when it is neither. */
+export function nameList(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return [];
+  if (typeof value === "string") return value.trim() === "" ? [] : [value.trim()];
+  if (Array.isArray(value) && value.every((v) => typeof v === "string")) return value.map((v: string) => v.trim()).filter((v) => v !== "");
+  return undefined;
+}
+
+/** Problems for the header's fields that are not among `known`. */
+export function unknownFields(split: Split, known: readonly string[], at: At, what: string): Problem[] {
+  if (split.header === undefined) return [];
+  return Object.keys(split.header)
+    .filter((key) => !known.includes(key))
+    .map((key) => problemAt(at, fieldLine(split.lines, key), `\`${key}\` is not a field ${what} has, and is not read. Its fields are: ${known.join(", ")}.`));
+}

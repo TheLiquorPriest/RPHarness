@@ -9,8 +9,13 @@ import { fileURLToPath } from "node:url";
 import { parseTemplate } from "../files";
 import type { Template } from "../files/api";
 
-/** The folder of RPH's own shipped files, to put under a host's files as the lowest layer. */
-export const SHIPPED_GUIDANCE = fileURLToPath(new URL("../../guidance/", import.meta.url));
+/**
+ * The folder of RPH's own shipped files, to put under a host's files as the lowest layer. A host
+ * that bundles the harness copies the folder beside its bundle and has its build put the copy's
+ * place, relative to the bundle, in `RPH_GUIDANCE_DIR`: in a bundle every module has the bundle's
+ * own address, so the path from this file would point outside it.
+ */
+export const SHIPPED_GUIDANCE = fileURLToPath(new URL(process.env.RPH_GUIDANCE_DIR ?? "../../guidance/", import.meta.url));
 
 /** One of RPH's own prompt parts, read from the shipped folder: a template with no header. */
 export async function shippedTemplate(name: string): Promise<Template> {

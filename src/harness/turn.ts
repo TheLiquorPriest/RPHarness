@@ -40,7 +40,7 @@ import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { HeldSink, IntentWait } from "./intents";
 import { requestPath, sentMessages } from "./requests";
-import { keepOnly, memoryAt, type Opening, type Sessions, turnAt, unsaid } from "./sessions";
+import { keepOnly, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
@@ -401,7 +401,8 @@ export class Turn {
 
     const at = env.clock.now();
     const messages: AgentMessage[] = [];
-    if (opening.given.some((ref) => ref.startsWith("prompt:*"))) {
+    // A request that carries no prompt (a run that writes nothing into the chat) is given no frame introducing one.
+    if (opening.given.some((ref) => ref.startsWith("prompt:*")) && req.prompt.length > 0) {
       const framing = joined([template(frame)?.render().text ?? ""]);
       if (framing !== "") messages.push(systemMessage(framing, at));
       const prompt = promptMessages(req.prompt, model.model, at);
@@ -420,7 +421,7 @@ export class Turn {
       if (text !== "") carriedAt = messages.push(systemMessage(text, at)) - 1;
     }
     if (opening.given.includes("briefing")) {
-      const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places, session.withoutIntent.has(turnAt(file.log, begun.parent) ?? ""));
+      const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places);
       if (text !== undefined) messages.push(systemMessage(joined([text]), at));
     }
     // Every other name the lead is given, found as a sub-agent's is, after the briefing.
@@ -703,7 +704,7 @@ export class Turn {
   }
 
   /** The briefing (§10.2 block 4), laid out by its template, or undefined when it holds nothing. */
-  async #briefing(guidance: Guidance, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], places: Places, lastWithoutIntent: boolean): Promise<string | undefined> {
+  async #briefing(guidance: Guidance, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], places: Places): Promise<string | undefined> {
     if (layout === undefined) return undefined;
     const req = this.#req;
     const situations = [...new Set([req.kind, ...req.since.map((item) => item.kind)])];
@@ -734,8 +735,6 @@ export class Turn {
       ...(opening.form === "two-step" && opening.intentFile !== undefined && places.turn !== undefined ? { intent_path: `${places.turn}${opening.intentFile}` } : {}),
       // The reply contract again, exactly as the opening block holds it: the template decides whether and where.
       ...(opening.contract !== undefined ? { reply_contract: opening.contract } : {}),
-      // The turn this one follows released its reply with no intent record taken before it: the template decides whether to say so.
-      ...(lastWithoutIntent ? { last_reply_without_intent: true } : {}),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;
@@ -918,7 +917,6 @@ export class Turn {
     this.#tell(
       this.#held.out().then((withIntent) => {
         const release: Release = { by, form, ...(path !== undefined ? { path } : {}), length: text.length, ...(withIntent ? {} : { withoutIntent: true as const }) };
-        if (!withIntent) this.#c.sessions.of(this.scope).withoutIntent.add(this.scope.turn);
         this.#trace.event(by, parent, { kind: "released", release });
         return env.events.released(this.scope, release);
       }),

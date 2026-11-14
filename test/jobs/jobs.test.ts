@@ -229,6 +229,55 @@ describe("a job an agent starts", () => {
   });
 });
 
+describe("a job the player starts", () => {
+  /** What the keeper writes, and a call that would need another call. */
+  const ONE_MORE: Reply = { pieces: [{ text: "Counted three so far." }, { call: "todo", args: { items: [{ text: "count the rest" }] } }] };
+
+  test("is held to a token limit of its own: it ends with what it wrote, and its record says which limit stopped it", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [{ ...ONE_MORE, usage: { input: 90, output: 30 } }] }));
+
+    const started = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 100 } });
+    await jobEnded(s, "done");
+
+    expect(toldJobs(s).at(-1)).toMatchObject({ id: started.id, state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "job", max: 100, value: 120 } });
+    expect(s.model.requests).toHaveLength(1);
+  });
+
+  test("its own token limit counts a token read again from the cache at the player's weight: a job of cached re-reads runs past the count in full and stops at the weighted one", async () => {
+    // Each call: 100 tokens sent without the cache, 2,000 read from it, 50 written. In full, 2,150 a call; at a tenth, 350.
+    const call = (n: number): Reply => ({ pieces: [{ text: `Counted ${n} so far.` }, { call: "todo", args: { items: [{ text: "count the rest" }] } }], usage: { input: 100, cacheRead: 2_000, output: 50 } });
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [call(1), call(2), call(3)] }));
+
+    await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 1_000 } });
+    await jobEnded(s, "done");
+
+    // Past 1,000 in full after the first call, it went on; at the weight, it stopped after the third, at 1,050.
+    expect(s.model.requests).toHaveLength(3);
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted 3 so far.", limit: { limit: "tokens", per: "job", max: 1_000, value: 1_050 } });
+  });
+
+  test("a limit its start gives never loosens the player's setting for a job's run", async () => {
+    const s = (open = await stage({ config: "jobs:\n  run:\n    calls: 1\n", files: { ".agents/keeper.md": KEEPER() }, answers: [ONE_MORE] }));
+
+    await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { calls: 5 } });
+    await jobEnded(s, "done");
+
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
+  });
+
+  test("its brief is framed by RPH's job-brief part, as a job of the player's, not as work for the lead on one turn", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [{ pieces: [{ text: "Counted seven." }] }] }));
+
+    await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    await jobEnded(s, "done");
+
+    const brief = textOf(s.model.requests[0]!.messages.find((message) => message.role === "user")!);
+    expect(brief).toStartWith("You are working on a job the player started.");
+    expect(brief).toContain(BRIEF);
+    expect(brief).not.toContain("working for the lead");
+  });
+});
+
 describe("who works in a job", () => {
   test("every agent of a job's run carries the job's id, its own agent and the sub-agent it starts; the turn's own agents carry none", async () => {
     const clerkBrief = "Note the bell count.";

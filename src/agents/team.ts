@@ -24,6 +24,8 @@ import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, Tea
 
 /** The frame every brief is laid out by (`.prompts/delegate-brief.md`). */
 const BRIEF_PART = "delegate-brief";
+/** The frame of the brief of a job the user started, whose agent works for nobody above it, in no turn (`.prompts/job-brief.md`). */
+const JOB_BRIEF_PART = "job-brief";
 /** How a question comes back to the agent that asked for the work (`.prompts/question.md`). */
 const QUESTION_PART = "question";
 /** The lines of the team's answers, and how a chat message and a lore entry are laid out in what an agent is given (`.prompts/delegation.md`). */
@@ -117,6 +119,7 @@ export interface FirstAgent {
 /** What the team reads once a turn, the first time it is asked to do anything. */
 interface Loaded {
   brief: TemplatePart | undefined;
+  jobBrief: TemplatePart | undefined;
   question: TemplatePart | undefined;
   lines: LinesPart | undefined;
   words: Words;
@@ -271,8 +274,9 @@ export class Team implements TeamWork {
     const slice = d.slice?.bind(d);
     const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
     const attachments = given.blocks.map((block) => ({ name: block.name, text: block.text }));
-    // Without the frame, the brief and what it is given go as they are, one after another.
-    const brief = loaded.brief?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
+    // A job the user started has nobody above its agent: its brief has a frame of its own. Without the frame, the brief and what it is given go as they are, one after another.
+    const frame = origin.agent === undefined ? loaded.jobBrief : loaded.brief;
+    const brief = frame?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
     const rules = d.rules();
     const keep = d.keep?.(ref);
     const questions = d.questions?.();
@@ -338,9 +342,9 @@ export class Team implements TeamWork {
   #load(): Promise<Loaded> {
     this.#loaded ??= (async (): Promise<Loaded> => {
       const { guidance } = this.#d;
-      const [brief, question, lines] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART)]);
+      const [brief, jobBrief, question, lines] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(JOB_BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART)]);
       const wordLines = lines?.format === "lines" ? lines : undefined;
-      return { brief: template(brief), question: template(question), lines: wordLines, words: (name, fields) => wordLines?.line(name, fields) };
+      return { brief: template(brief), jobBrief: template(jobBrief), question: template(question), lines: wordLines, words: (name, fields) => wordLines?.line(name, fields) };
     })().catch((error: unknown) => {
       // A read that failed is tried again by the next call.
       this.#loaded = undefined;

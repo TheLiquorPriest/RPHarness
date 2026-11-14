@@ -39,11 +39,34 @@ export interface JobView {
   limit?: LimitHit;
 }
 
-/** A job the user starts: the definition its agent runs as, what to do, and what it is given by name. */
+/**
+ * Limits of one job's own run (§10.11), beside the user's `jobs.run` settings: each holds only where
+ * it is tighter than the setting's, so a start can tighten what the settings allow and never loosen
+ * it. Each is a whole number above 0; absent leaves the setting's alone.
+ */
+export interface JobLimits {
+  /** Model calls across every agent of the job's run. */
+  calls?: number;
+  /** Tokens sent, cached ones included, across every agent of the job's run: each in full. */
+  tokensIn?: number;
+  /** Tokens written across every agent of the job's run: each in full. */
+  tokensOut?: number;
+  /**
+   * Tokens sent and written together, counted as the day's job tokens are: a token read again from
+   * a provider's cache at the weight the setting `jobs.cachedWeight` gives (a tenth of one by
+   * default), every other token in full. The record of a job it stopped gives that count.
+   */
+  tokens?: number;
+  /** Seconds of the job's run, as `jobs.run.time` is written. */
+  time?: number;
+}
+
+/** A job the user starts: the definition its agent runs as, what to do, what it is given by name, and limits of its own. A job held to one of them ends with what it has, and its record says which (`JobView.limit`). */
 export interface JobStart {
   agent: string;
   brief: string;
   attach?: string[];
+  limits?: JobLimits;
 }
 
 export interface JobsApi {

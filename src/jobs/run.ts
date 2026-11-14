@@ -4,7 +4,7 @@
 // sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools.
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
-import type { AgentRef, Environment, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
+import type { AgentRef, Environment, JobLimits, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import { TurnGate } from "../harness/gate";
 import { Judges } from "../harness/judge";
@@ -48,6 +48,8 @@ export interface JobAsk {
   over?: Budget;
   /** What all of the user's jobs have spent in the user's day, which this one's calls count into as they are made. */
   spent: Usage;
+  /** Limits of its own, from the user's start: each held where it is tighter than the settings'. */
+  limits?: JobLimits;
 }
 
 /** How a job's run ended: its agent's outcome, what every agent of it spent, and a limit of the run's own it reached. */
@@ -89,10 +91,22 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     window: settings.ruleWindow,
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
-  const { time, ...counted } = settings.jobs.run;
+  // The settings' limits on a job's run, each made tighter where the start gave a tighter one of its own; never looser.
+  const given = ask.limits ?? {};
+  const tighter = (setting: number | undefined, asked: number | undefined): number | undefined => (asked === undefined ? setting : setting === undefined ? asked : Math.min(setting, asked));
+  const time = tighter(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
+  const calls = tighter(settings.jobs.run.calls, given.calls);
+  const tokensIn = tighter(settings.jobs.run.tokensIn, given.tokensIn);
+  const tokensOut = tighter(settings.jobs.run.tokensOut, given.tokensOut);
   // A job started by another job's agent spends from that job's run, which spends from the day; any other, from the day.
   const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, { used: ask.spent, cachedWeight: settings.jobs.cachedWeight });
-  const budget = new Budget("job", counted, ask.over ?? day);
+  // Its own `tokens` count a cached re-read at the weight the day's job tokens do, so the two limits on a job's tokens mean the same; tokens in and out count in full, as the run limits they tighten.
+  const budget = new Budget(
+    "job",
+    { ...(calls !== undefined ? { calls } : {}), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(given.tokens !== undefined ? { tokens: given.tokens } : {}) },
+    ask.over ?? day,
+    { cachedWeight: settings.jobs.cachedWeight },
+  );
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
   const keep = (agent: AgentRef): KeepRequest | undefined => {

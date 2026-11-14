@@ -111,6 +111,24 @@ describe("a simple turn", () => {
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["The lamp gutters.", " Wren swears softly."]);
     expect(sink.finished).toHaveLength(1);
   });
+
+  test("a request that carries no prompt is given no frame introducing one; one that carries a prompt is", async () => {
+    /** Whether any message of a stage's first request holds the frame part's words, rendered from the file in force. */
+    const framed = async (prompt: TurnRequest["prompt"]): Promise<boolean> => {
+      const s = (open = await stage({ answers: [{ pieces: [{ text: "<reply>Settled.</reply>" }] }] }));
+      const part = await loadGuidance(s.env.files, request("t1").scope).part("prompt-frame");
+      const frame = part?.format === "template" ? part.render().text.trim() : "";
+      if (frame === "") throw new Error("The stage has no frame part.");
+      await s.turn(request("t1", { lead: "lead", prompt }));
+      const holds = s.model.requests[0]!.messages.some((message) => textOf(message).includes(frame));
+      await s.close();
+      open = undefined;
+      return holds;
+    };
+
+    expect(await framed([])).toBe(false);
+    expect(await framed(PROMPT)).toBe(true);
+  });
 });
 
 describe("where the reply contract is shown", () => {

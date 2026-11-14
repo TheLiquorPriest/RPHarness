@@ -1,20 +1,17 @@
 // The wait for the intent record (§10.3, the setting `reply.intentWait`): a tool and the reply wait
 // for the host to take the intent record written before them, so the Live page and the turn's
 // record hold it first, but never longer than the user's bound; nothing is refused. A reply that
-// went out with no intent record taken before it says so on its release, for the Turn page, and
-// the briefing of the turn after it may say so too. Everything here is invented.
+// went out with no intent record taken before it says so on its release, for the Turn page and the
+// host. Everything here is invented.
 import { afterEach, expect, test } from "bun:test";
 import type { TurnEvents } from "../../src/contract";
-import { request, type Stage, stage, textOf, WatchedSink } from "./support";
+import { request, type Stage, stage, WatchedSink } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
   await open?.close();
   open = undefined;
 });
-
-const BRIEFING = "---\ndescription: Fixture briefing.\n---\nFixture briefing for this turn.\n{{#last_reply_without_intent}}\nFixture: the last reply went out without its intent record.\n{{/last_reply_without_intent}}\n";
-const SAID = "Fixture: the last reply went out without its intent record.";
 
 /** The host, its taking of intent records held back while `holding` is set. */
 function slowHost(holding: { now: boolean; taken: Promise<void> }): (inner: TurnEvents) => TurnEvents {
@@ -27,12 +24,11 @@ function slowHost(holding: { now: boolean; taken: Promise<void> }): (inner: Turn
   });
 }
 
-test("the reply waits for the host to take its intent record no longer than the setting, then goes out marked as without it; the next briefing can say so", async () => {
+test("the reply waits for the host to take its intent record no longer than the setting, then goes out marked as without it", async () => {
   const taken = Promise.withResolvers<void>();
   const holding = { now: true, taken: taken.promise };
   const s = (open = await stage({
     config: "reply:\n  intentWait: 1\n",
-    files: { ".prompts/briefing.md": BRIEFING },
     events: slowHost(holding),
     answers: [
       { pieces: [{ text: "<intent>Wants: news of the boat.</intent><reply>No boat tonight.</reply>" }] },
@@ -64,8 +60,6 @@ test("the reply waits for the host to take its intent record no longer than the 
   expect(s.trace.of("released").map((record) => record.event.release.withoutIntent)).toEqual([true, undefined, true]);
   const told = s.told.flatMap((item) => (item.kind === "released" && typeof item.payload === "object" && item.payload !== null ? [item.payload] : []));
   expect(told.map((payload) => ("withoutIntent" in payload ? payload.withoutIntent : undefined))).toEqual([true, undefined, true]);
-  // Each turn's briefing, last in its request, says so of the turn it follows, as its template has it.
-  expect(s.model.requests.map((req) => textOf(req.messages.at(-1)!).includes(SAID))).toEqual([false, true, false]);
 });
 
 test("a tool waits for the host to take the intent record no longer than the setting, then runs", async () => {

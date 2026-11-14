@@ -11,13 +11,13 @@
 // that was running and lists it as interrupted, with what it had done; the day's counts of jobs and
 // of their tokens are kept there too.
 import type { DelegateCall } from "../agents/tools";
-import type { AgentRef, JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
+import type { JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
 import { loadGuidance } from "../files";
 import { lines } from "../harness/means";
 import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
-import { type Budget, emptyUsage, type LoopToolResult, type ParentCall } from "../loop";
+import { emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
-import { type JobCore, type PreparedJob, prepareJob } from "./run";
+import { type JobAsk, type JobCore, type PreparedJob, prepareJob } from "./run";
 import type { JobsWork, RunJobs } from "./tool";
 
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
@@ -132,7 +132,7 @@ export class Jobs implements JobsApi, JobsWork {
     const starter = ctx.agent.job === undefined ? undefined : this.#live.get(ctx.agent.job);
     let begun: Begun;
     try {
-      begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, call, ctx.agent, { agent: ctx.agent.id, run: ctx.run, call: ctx.callId }, starter?.prepared.budget);
+      begun = await this.#begin({ scope: { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, call, by: ctx.agent, parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId }, ...(starter !== undefined ? { over: starter.prepared.budget } : {}) });
     } catch (error) {
       run.started -= 1;
       throw error;
@@ -172,9 +172,11 @@ export class Jobs implements JobsApi, JobsWork {
     return keptView(await this.#core.env.store.get(`${KEPT}${id}`));
   }
 
-  /** The user starts a job, tied to no turn. It rejects when none can be started; the error says why, for the host. */
+  /** The user starts a job, tied to no turn, held to the limits it was given where they are tighter than the settings'. It rejects when none can be started; the error says why, for the host. */
   async start(scope: Scope, start: JobStart): Promise<JobView> {
-    const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids() }, { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, undefined, undefined, undefined);
+    const bad = Object.entries(start.limits ?? {}).find(([, value]) => value !== undefined && !(Number.isInteger(value) && value > 0));
+    if (bad !== undefined) throw new Error(`No job was started: its limit ${bad[0]} is ${String(bad[1])}, and a limit is a whole number above 0.`);
+    const begun = await this.#begin({ scope: { user: scope.user, chat: scope.chat, session: this.#core.ids() }, call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
     if ("view" in begun) return { ...begun.view };
     if ("hit" in begun && begun.hit.limit === "tokens") throw new Error(`No job was started: what jobs sent and wrote today counts as ${begun.hit.value} tokens, and the setting allows ${begun.hit.max}.`);
     if ("hit" in begun) throw new Error(`No job was started: ${begun.hit.value} jobs were started today${begun.hit.connection !== undefined ? ` on ${begun.hit.connection}` : ""}, and the setting allows ${begun.hit.max}.`);
@@ -211,11 +213,12 @@ export class Jobs implements JobsApi, JobsWork {
    * started once the user's jobs have spent the day's tokens, and none such is counted among the
    * day's jobs.
    */
-  async #begin(scope: Scope, call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined, over: Budget | undefined): Promise<Begun> {
+  async #begin(ask: Omit<JobAsk, "id" | "spent">): Promise<Begun> {
+    const { scope, call, by, parent } = ask;
     const core = this.#core;
     const id = core.ids();
     const spend = await this.#spend(scope.user);
-    const prepared = await prepareJob({ ...core, jobs: this }, { id, scope, call, spent: spend.used, ...(by !== undefined ? { by } : {}), ...(parent !== undefined ? { parent } : {}), ...(over !== undefined ? { over } : {}) });
+    const prepared = await prepareJob({ ...core, jobs: this }, { ...ask, id, spent: spend.used });
     if (!("run" in prepared)) return prepared;
     const own = jobCountsFor(prepared.settings, prepared.connection);
     const hit = prepared.day.reached(prepared.agent) ?? (await this.#count(scope.user, prepared.settings, own));

@@ -43,11 +43,9 @@ test("the rules' memory is kept for the turns given, and a turn that follows one
   ]);
   const memory = (name: string) => ({ fixture: name }) as unknown as RuleMemory;
   for (const name of ["t1", "t2", "t2b"]) state.memories.set(name, memory(name));
-  state.withoutIntent.add("t2");
 
   keepOnly(state, new Set(["t1", "t2b"]));
   expect([...state.memories.keys()]).toEqual(["t1", "t2b"]);
-  expect([...state.withoutIntent]).toEqual([]);
   expect(memoryAt(state, log, "e2")).toEqual(memory("t1"));
   expect(memoryAt(state, log, "e3")).toEqual(memory("t2b"));
 

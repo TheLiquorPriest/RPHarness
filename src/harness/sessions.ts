@@ -45,8 +45,6 @@ export interface SessionState {
   memories: Map<string, RuleMemory>;
   /** The tools each agent definition lists that nobody registered, as the log was told them, by the definition. */
   unregistered: Map<string, Set<string>>;
-  /** The turns whose reply went out with no intent record taken before it, for the briefing of the turn after. */
-  withoutIntent: Set<string>;
 }
 
 /** Of the tools a definition lists that nobody registered, those the log has not been told of in this session: each is said once, when it is first found. */
@@ -78,22 +76,13 @@ export function memoryAt(state: SessionState, log: SessionLog, from: string | nu
   return undefined;
 }
 
-/** The turn a turn hanging at `from` follows: the turn of the nearest entry on that path that is one of a turn's. */
-export function turnAt(log: SessionLog, from: string | null): string | undefined {
-  for (let at = from === null ? undefined : log.get(from); at !== undefined; at = at.parent === null ? undefined : log.get(at.parent)) {
-    if (at.type !== "opened" && at.turn !== undefined) return at.turn;
-  }
-  return undefined;
-}
-
 /**
- * Keeps what the rules remembered, and which replies went out with no intent record, only for
- * `turns`: the turns on a turn's path, which a later turn can still follow. One that left the path
- * is forgotten; a turn that follows it after all starts from the nearest one kept before it.
+ * Keeps what the rules remembered only for `turns`: the turns on a turn's path, which a later turn
+ * can still follow. One that left the path is forgotten; a turn that follows it after all starts
+ * from the nearest one kept before it.
  */
 export function keepOnly(state: SessionState, turns: ReadonlySet<string>): void {
   for (const turn of state.memories.keys()) if (!turns.has(turn)) state.memories.delete(turn);
-  for (const turn of state.withoutIntent) if (!turns.has(turn)) state.withoutIntent.delete(turn);
 }
 
 function keyOf(scope: Scope): string {
@@ -108,7 +97,7 @@ export class Sessions {
     const key = keyOf(scope);
     let state = this.#sessions.get(key);
     if (state === undefined) {
-      state = { openings: new Map(), memories: new Map(), unregistered: new Map(), withoutIntent: new Set() };
+      state = { openings: new Map(), memories: new Map(), unregistered: new Map() };
       this.#sessions.set(key, state);
     }
     return state;

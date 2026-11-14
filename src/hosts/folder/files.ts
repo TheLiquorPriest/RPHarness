@@ -9,8 +9,8 @@ import type { Serial } from "./disk";
 import { codeOf, sha256, writeWhole } from "./disk";
 import type { JournalLine } from "./shape";
 import type { Site } from "./site";
-import type { Located } from "./view";
-import { folderLayers, folderPlaces, inView, kindOf, locate, MOUNTS, refusalFor, viewPath, writableFor } from "./view";
+import type { Located, TopView } from "./view";
+import { folderLayers, folderPlaces, kindOf, locate, MOUNTS, refusalFor, topView, viewPath, writableFor } from "./view";
 
 /** The most hits a find gives when its query names no limit. */
 export const FIND_LIMIT = 200;
@@ -52,8 +52,8 @@ interface Walked {
   disk: string;
 }
 
-/** Everything below a folder, `depth` folders deep, in the order of their paths: no links, nothing but files and folders, and at a level's top only what is part of the view. */
-async function* walk(level: LayerLevel, rest: readonly string[], disk: string, depth: number): AsyncGenerator<Walked> {
+/** Everything below a folder, `depth` folders deep, in the order of their paths: no links, nothing but files and folders, and at a level's top only what `top` says is part of the view. */
+async function* walk(level: LayerLevel, rest: readonly string[], disk: string, depth: number, top: TopView): AsyncGenerator<Walked> {
   let found;
   try {
     found = await readdir(disk, { withFileTypes: true });
@@ -62,25 +62,28 @@ async function* walk(level: LayerLevel, rest: readonly string[], disk: string, d
     if (code === "ENOENT" || code === "ENOTDIR") return;
     throw error;
   }
-  const entries = found
-    .filter((d) => !d.isSymbolicLink() && (d.isDirectory() || d.isFile()) && (rest.length > 0 || inView(level, d.name, d.isDirectory())))
-    .map((d) => ({ name: d.name, folder: d.isDirectory() }))
-    .sort(byPath);
+  const entries: { name: string; folder: boolean }[] = [];
+  for (const d of found) {
+    if (d.isSymbolicLink() || !(d.isDirectory() || d.isFile())) continue;
+    if (rest.length === 0 && !(await top(d.name))) continue;
+    entries.push({ name: d.name, folder: d.isDirectory() });
+  }
+  entries.sort(byPath);
   for (const e of entries) {
     const below = [...rest, e.name];
     const at = join(disk, e.name);
     yield { rest: below, folder: e.folder, disk: at };
-    if (e.folder && depth > 1) yield* walk(level, below, at, depth - 1);
+    if (e.folder && depth > 1) yield* walk(level, below, at, depth - 1, top);
   }
 }
 
 /** The files at or below a found path, in the order of their paths. */
-async function* filesAt(at: Located): AsyncGenerator<Walked> {
+async function* filesAt(at: Located, top: TopView): AsyncGenerator<Walked> {
   if (at.is === "file") {
     yield { rest: at.rest, folder: false, disk: at.disk };
     return;
   }
-  for await (const e of walk(at.level, at.rest, at.disk, Number.POSITIVE_INFINITY)) if (!e.folder) yield e;
+  for await (const e of walk(at.level, at.rest, at.disk, Number.POSITIVE_INFINITY, top)) if (!e.folder) yield e;
 }
 
 /** A file's path below the folder a find looked under; a file found itself is its own name. */
@@ -147,16 +150,18 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
   }
 
   async function find(scope: Scope, query: FileQuery): Promise<FileHit[] | Refused> {
-    const lookup = await locate(await site.location(scope), query.path ?? "");
+    const loc = await site.location(scope);
+    const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
     const limit = query.limit ?? FIND_LIMIT;
     const hits: FileHit[] = [];
     if (at.is === "none" || limit <= 0) return hits;
+    const top = await topView(loc, at.level);
 
     if (query.by === "list") {
       if (at.is === "file") return [await fileHit(at.level, at.rest, at.disk)];
-      for await (const e of walk(at.level, at.rest, at.disk, query.depth ?? 1)) {
+      for await (const e of walk(at.level, at.rest, at.disk, query.depth ?? 1, top)) {
         if (hits.length >= limit) break;
         hits.push(e.folder ? { path: viewPath(at.level, e.rest), type: "folder", level: at.level, kind: kindOf(at.level, e.rest) } : await fileHit(at.level, e.rest, e.disk));
       }
@@ -170,7 +175,7 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
 
     if (query.by === "glob") {
       const glob = new Bun.Glob(query.pattern);
-      for await (const f of filesAt(at)) {
+      for await (const f of filesAt(at, top)) {
         if (hits.length >= limit) break;
         if (glob.match(below(at, f.rest))) hits.push(await fileHit(at.level, f.rest, f.disk));
       }
@@ -179,7 +184,7 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
 
     const pattern = new RegExp(query.literal === true ? query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query.pattern, query.ignoreCase === true ? "i" : "");
     const only = query.glob === undefined ? undefined : new Bun.Glob(query.glob);
-    for await (const f of filesAt(at)) {
+    for await (const f of filesAt(at, top)) {
       if (hits.length >= limit) break;
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;

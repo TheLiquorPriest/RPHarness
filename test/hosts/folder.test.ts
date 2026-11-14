@@ -65,6 +65,27 @@ describe("folder host", () => {
     expect(await host.files.read(scope, "@global/../host/facts.json")).toEqual({ status: "missing", path: "host/facts.json" });
   });
 
+  test("a folder hidden from the view stays hidden under any spelling of its name, for read, list, glob and grep", async () => {
+    const notes = join(levelDir(place, KIT_SEED, "character"), "other-chat", "persistent-workspace");
+    await mkdir(notes, { recursive: true });
+    await writeFile(join(notes, "vault.md"), "The vault opens to the word quillfeather.\n");
+    // On a file system that ignores case these all name the chats folder; on one that does not, nothing.
+    for (const chats of ["chats", "CHATS", "Chats", "chat\u017F"]) {
+      const path = `@global/${chats}/${KIT_SEED.character}/other-chat/persistent-workspace/vault.md`;
+      const read = await host.files.read(scope, path);
+      expect({ path, text: read.status === "read" ? read.text : null }).toEqual({ path, text: null });
+      for (const query of [{ by: "list", depth: 5 }, { by: "glob", pattern: "**/*" }, { by: "grep", pattern: "quillfeather" }] as const) {
+        const found = await host.files.find(scope, { ...query, path: `@global/${chats}` });
+        expect({ chats, by: query.by, found: Array.isArray(found) ? found.map((h) => h.path) : [] }).toEqual({ chats, by: query.by, found: [] });
+      }
+    }
+    for (const defaults of ["defaults", "DEFAULTS", "default\u017F"]) {
+      const read = await host.files.read(scope, `@global/${defaults}/TURN.md`);
+      expect({ defaults, text: read.status === "read" ? read.text : null }).toEqual({ defaults, text: null });
+    }
+    expect(await host.files.find(scope, { by: "grep", pattern: "quillfeather", path: "@global/" })).toEqual([]);
+  });
+
   test("dropping an agent's writes puts back what it wrote this turn, and keeps a file someone changed after it", async () => {
     const threads = "persistent-workspace/story/threads.md";
     const seeded = await readFile(join(chatDir(), threads), "utf8");
@@ -199,7 +220,7 @@ describe("folder host", () => {
   });
 });
 
-describe("the kit fails a host that breaks the jail", () => {
+describe("the kit fails a host that breaks the jail, or shows one user another's data", () => {
   const root = join(import.meta.dir, "..", "..");
 
   async function runKit(file: string): Promise<{ code: number; output: string }> {
@@ -220,5 +241,12 @@ describe("the kit fails a host that breaks the jail", () => {
     expect(code).not.toBe(0);
     expect(output).toMatch(/\(fail\) .*a path that leaves the view is refused, for reads, finds and writes, and nothing lands outside/);
     expect(output).toMatch(/\b1 fail\b/);
+  }, 30_000);
+
+  test("another user's scope given the first user's chat, lore, files and prompt", async () => {
+    const { code, output } = await runKit("./test/hosts/leaky-users.kit.ts");
+    expect(code).not.toBe(0);
+    for (const area of ["files", "chat", "lore", "prompt"]) expect(output).toMatch(new RegExp(`\\(fail\\) .*> ${area} > another user's scope reads none of this user's`));
+    expect(output).toMatch(/\b4 fail\b/);
   }, 30_000);
 });

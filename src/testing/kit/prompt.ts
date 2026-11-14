@@ -2,9 +2,9 @@
 // them, the same prompt gives the same layout, and a prompt map comes back as it was saved.
 
 import { expect, test } from "bun:test";
-import type { AgentRef, LocatedSlices, PromptMap, PromptMessage } from "../../contract/index";
+import type { AgentRef, LocatedSlices, PromptMap, PromptMessage, PromptNotice } from "../../contract/index";
 import type { KitContext } from "./context";
-import { layoutHash } from "./context";
+import { KIT_OTHER_USER, layoutHash, unlessRefused } from "./context";
 
 const MAPPER: AgentRef = { id: "kit-mapper-1", definition: "mapper", job: "kit-job-1" };
 
@@ -67,14 +67,32 @@ export function promptCases(ctx: KitContext<"prompt">): void {
     expect(await ctx.env.prompt.map(turn(2))).toEqual(edited);
   });
 
-  test("where the slices were found this turn is kept", async () => {
+  test("the host takes where the slices were found this turn, with a notice of every kind", async () => {
+    // The compiler holds this list to every kind of notice there is.
+    const notices: { [K in PromptNotice["kind"]]: Extract<PromptNotice, { kind: K }> } = {
+      changed: { kind: "changed", marker: "card" },
+      gone: { kind: "gone", marker: "persona" },
+      unclaimed: { kind: "unclaimed", message: 2, start: 0, end: 12 },
+      order: { kind: "order", markers: ["card", "preset.main"] },
+      preset: { kind: "preset", was: null, now: ctx.seed.preset },
+      unmapped: { kind: "unmapped" },
+      incomplete: { kind: "incomplete" },
+    };
     const located: LocatedSlices = {
       preset: ctx.seed.preset,
       slices: [{ marker: "preset.main", kind: "instructions", at: [{ message: 0, start: 0, end: 10 }], length: 10, hash: layoutHash("kit") }],
-      unclaimed: [],
-      notices: [{ kind: "changed", marker: "card" }, { kind: "unmapped" }],
+      unclaimed: [{ message: 2, start: 0, end: 12 }],
+      notices: Object.values(notices),
       front: { length: 120, brokenBy: "card" },
     };
-    await ctx.env.prompt.saveLocated(ctx.scope, located);
+    await expect(ctx.env.prompt.saveLocated(ctx.scope, located)).resolves.toBeUndefined();
+  });
+
+  test("another user's scope reads none of this user's prompt or prompt map", async () => {
+    const foreign = { ...ctx.scope, user: KIT_OTHER_USER };
+    const mine = new Set((await ctx.env.prompt.layout(ctx.scope)).messages.map((m) => m.hash));
+    const layout = await unlessRefused(ctx.env.prompt.layout(foreign));
+    const map = await unlessRefused(ctx.env.prompt.map(foreign));
+    expect({ messages: (layout?.messages ?? []).filter((m) => mine.has(m.hash)).length, map }).toEqual({ messages: 0, map: undefined });
   });
 }

@@ -18,8 +18,8 @@ export interface FactDef {
    */
   by?: string[];
   /**
-   * The fields its value may carry beyond its count and names, which a rule's text can show
-   * (`{{history.leaving.range}}`). Absent: it has none.
+   * The fields its value may carry beyond its count and names, which a rule's text shows by the
+   * fact's full name and the field's (`{{history.leaving.uncovered.range}}`). Absent: it has none.
    */
   fields?: string[];
 }

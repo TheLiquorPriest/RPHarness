@@ -49,6 +49,21 @@ export interface KitContext<A extends KitArea> {
   make: KitPartFactory<A>;
 }
 
+/** A user the kit's host does not serve, for the cases that put another user against it. */
+export const KIT_OTHER_USER = "kit-other-user";
+
+/**
+ * A call made for another user's scope: what it gave, or undefined when the host refused that scope
+ * outright, as a host that serves one user only may.
+ */
+export async function unlessRefused<T>(call: Promise<T>): Promise<T | undefined> {
+  try {
+    return await call;
+  } catch {
+    return undefined;
+  }
+}
+
 /** SHA-256 of a text's UTF-8, lower-case hex. */
 export function sha256(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");

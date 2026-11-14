@@ -82,7 +82,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
 }
 
 export function traceCases(ctx: KitContext<"trace">): void {
-  test("the trace takes an event of every kind, and streaming text, and keeps them", async () => {
+  test("the trace takes an event of every kind, and streaming text, without throwing, and its flush resolves", async () => {
     const lead: AgentRef = { id: "kit-lead", definition: "author" };
     const scope: Scope = ctx.scope;
     const events = Object.values(everyKind(lead));
@@ -93,6 +93,6 @@ export function traceCases(ctx: KitContext<"trace">): void {
     const sub: TraceRecord = { seq: events.length + 1, run: ctx.scope.turn, scope, at: 2_000, agent: { id: "kit-gm-1", definition: "gm", parent: "kit-lead" }, parent: { agent: "kit-lead", run: ctx.scope.turn, call: "kit-call-3" }, event: { kind: "agent_started", definition: "gm", connection: "kit-connection", model: "kit-model", session: "kit-gm-session", given: [] } };
     expect(() => ctx.env.trace.event(sub)).not.toThrow();
     expect(() => ctx.env.trace.delta({ run: ctx.scope.turn, agent: "kit-lead", call: 1, text: "Wren", thinking: "quietly", at: 1_500 })).not.toThrow();
-    await ctx.env.trace.flush();
+    await expect(ctx.env.trace.flush()).resolves.toBeUndefined();
   });
 }

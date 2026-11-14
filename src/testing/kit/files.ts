@@ -5,9 +5,16 @@ import { randomUUID } from "node:crypto";
 import { expect, test } from "bun:test";
 import type { AgentRef, FileOp, LayerLevel } from "../../contract/index";
 import type { KitContext } from "./context";
-import { hitsOf, landed, mountOf, sha256, viewPicture } from "./context";
+import { hitsOf, KIT_OTHER_USER, landed, mountOf, sha256, unlessRefused, viewPicture } from "./context";
 
 const ORDER: LayerLevel[] = ["shipped", "global", "character", "chat"];
+
+/** The first line of the chat's own `AGENTS.md`: a line only the chat level holds, so found anywhere else, the chat leaked there. */
+function chatOnlyLine(ctx: KitContext<"files">): string {
+  const agents = ctx.seed.files.find((f) => f.level === "chat" && f.path === "AGENTS.md");
+  if (agents === undefined) throw new Error("The seed has no chat-level AGENTS.md.");
+  return agents.text.split("\n")[0] ?? "";
+}
 
 /** The agent the kit writes as: a sub-agent of the turn's lead. */
 export const KIT_AGENT: AgentRef = { id: "kit-agent-1", definition: "kit-scribe", parent: "kit-lead" };
@@ -187,5 +194,37 @@ export function fileCases(ctx: KitContext<"files">): void {
     }
     // Nothing named for this run appears anywhere the host keeps things, nor beside it.
     expect(await landed(ctx.place, sentinel)).toEqual([]);
+  });
+
+  test("no chat and no shipped default shows under the global mount, whatever the spelling of their folders; the chat's own lines show at its own level only", async () => {
+    const layers = await ctx.env.files.layers(ctx.scope);
+    const global = mountOf(layers, "global");
+    // On a file system that ignores case these name the same two folders; on one that does not, nothing.
+    for (const name of ["chats", "CHATS", "Chats", "chat\u017F", "defaults", "DEFAULTS", "Defaults", "default\u017F"]) {
+      for (const query of [{ by: "list", depth: 4 }, { by: "glob", pattern: "**/*" }, { by: "grep", pattern: "." }] as const) {
+        const found = await ctx.env.files.find(ctx.scope, { ...query, path: `${global}${name}` });
+        expect({ name, by: query.by, found: Array.isArray(found) ? found.map((h) => h.path) : [] }).toEqual({ name, by: query.by, found: [] });
+      }
+    }
+    const line = chatOnlyLine(ctx);
+    for (const layer of layers.filter((l) => l.level !== "chat")) {
+      const found = hitsOf(await ctx.env.files.find(ctx.scope, { by: "grep", pattern: line, literal: true, path: layer.mount }));
+      expect({ level: layer.level, found: found.map((h) => h.path) }).toEqual({ level: layer.level, found: [] });
+    }
+  });
+
+  test("another user's scope reads none of this user's files", async () => {
+    const layers = await ctx.env.files.layers(ctx.scope);
+    const foreign = { ...ctx.scope, user: KIT_OTHER_USER };
+    const leaks: string[] = [];
+    // Shipped defaults are every user's; the other levels are this user's own.
+    for (const f of ctx.seed.files.filter((f) => f.level !== "shipped")) {
+      const path = mountOf(layers, f.level) + f.path;
+      const read = await unlessRefused(ctx.env.files.read(foreign, path));
+      if (read?.status === "read" && read.text === f.text) leaks.push(path);
+    }
+    const found = await unlessRefused(ctx.env.files.find(foreign, { by: "grep", pattern: chatOnlyLine(ctx), literal: true }));
+    if (Array.isArray(found)) leaks.push(...found.map((h) => h.path));
+    expect(leaks).toEqual([]);
   });
 }

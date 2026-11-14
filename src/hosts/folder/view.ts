@@ -30,8 +30,12 @@ const CHAT_FOLDERS = { agents: "agents", rules: "rules", skills: "skills", hooks
 const GENERATED_FILES: Record<string, true> = { "LORE-INDEX.md": true, "PROMPT-MAP.md": true };
 /** The folders of a turn agents may write in (§5.1). */
 const TURN_FOLDERS = ["queries", "scratch", "output", "cache"] as const;
-/** The global level's folders that are not part of it in the view: other chats, and the shipped level, mounted on its own. */
-const GLOBAL_HIDDEN: Record<string, true> = { chats: true, defaults: true };
+/**
+ * The global level's folders that are not part of it in the view: other chats, and the shipped
+ * level, mounted on its own. They are hidden by what they are on disk, not by how a path spells
+ * them: on a file system that ignores case, `CHATS` and `chatſ` are `chats`.
+ */
+const GLOBAL_HIDDEN = ["chats", "defaults"] as const;
 
 /** The levels, farthest first, as every chat of the folder host has them. */
 export function folderLayers(): Layer[] {
@@ -94,15 +98,43 @@ export function viewPath(level: LayerLevel, rest: readonly string[]): string {
   return level === "chat" ? rest.join("/") : `${MOUNTS[level]}${rest.join("/")}`;
 }
 
+/** A folder's identity on disk (its device and inode), without following a link; undefined when nothing is there or it is no folder. */
+async function folderIdentity(path: string): Promise<string | undefined> {
+  let found;
+  try {
+    found = await lstat(path, { bigint: true });
+  } catch (error) {
+    const code = codeOf(error);
+    if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+    throw error;
+  }
+  return found.isDirectory() ? `${found.dev}:${found.ino}` : undefined;
+}
+
+/** Whether an entry right under a level's own folder, by its name as given, is part of the view. */
+export type TopView = (name: string) => Promise<boolean>;
+
 /**
- * Whether an entry right under a level's folder is part of the view: the global level leaves out
- * `chats/` and `defaults/`; a character level shows its files and its guidance folders, not its
- * chats.
+ * What is part of the view right under a level's own folder. At the global level, everything but
+ * the folders `GLOBAL_HIDDEN` names, matched by what they are on disk; at a character level, its
+ * files and its guidance folders by their exact names, every other folder there being a chat;
+ * everything at the others.
  */
-export function inView(level: LayerLevel, name: string, folder: boolean): boolean {
-  if (level === "global") return GLOBAL_HIDDEN[name] !== true;
-  if (level === "character") return !folder || CHARACTER_FOLDER_NAMES[name] === true;
-  return true;
+export async function topView(loc: ChatLocation, level: LayerLevel): Promise<TopView> {
+  const folder = levelFolder(loc, level);
+  if (level === "global") {
+    const hidden = new Set<string>();
+    for (const name of GLOBAL_HIDDEN) {
+      const at = await folderIdentity(join(loc.files, name));
+      if (at !== undefined) hidden.add(at);
+    }
+    return async (name) => {
+      const at = await folderIdentity(join(folder, name));
+      return at === undefined || !hidden.has(at);
+    };
+  }
+  if (level === "character") return async (name) => CHARACTER_FOLDER_NAMES[name] === true || (await folderIdentity(join(folder, name))) === undefined;
+  return async () => true;
 }
 
 /** The segments from the tree's folder down to a level's own folder. */
@@ -138,7 +170,8 @@ export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
   const level: LayerLevel = first === "@global" ? "global" : first === "@character" ? "character" : first === "@shipped" ? "shipped" : "chat";
   const rest = level === "chat" ? segments : segments.slice(1);
   const normalized = viewPath(level, rest);
-  if (rest.length >= 2 && rest[0] !== undefined && !inView(level, rest[0], true)) return { ok: false, path: normalized, reason: "outside" };
+  const top = rest[0];
+  if (top !== undefined && !(await (await topView(loc, level))(top))) return { ok: false, path: normalized, reason: "outside" };
 
   // Links are not followed (§5.1): every part that exists, from the tree's folder down, is looked at itself.
   const parts = [...levelBase(loc, level), ...rest];
@@ -161,7 +194,6 @@ export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
       break;
     }
   }
-  if (rest.length === 1 && rest[0] !== undefined && is === "folder" && !inView(level, rest[0], true)) return { ok: false, path: normalized, reason: "outside" };
   return { ok: true, at: { path: normalized, level, rest, disk: join(loc.files, ...parts), kind: kindOf(level, rest), is } };
 }
 

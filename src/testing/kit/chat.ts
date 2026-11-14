@@ -4,6 +4,7 @@
 import { expect, test } from "bun:test";
 import type { AgentRef } from "../../contract/index";
 import type { KitContext } from "./context";
+import { KIT_OTHER_USER, unlessRefused } from "./context";
 
 /** The kit's lead: it plays no character, so it reads every entry (§9.4). */
 const KIT_LEAD: AgentRef = { id: "kit-lead", definition: "author" };
@@ -43,6 +44,15 @@ export function chatCases(ctx: KitContext<"chat">): void {
     expect(await ctx.env.chat.search(ctx.scope, { text: "tide", within: { from: 0, to: 2 } })).toEqual([]);
     expect(await ctx.env.chat.search(ctx.scope, { text: "quillfeather" })).toEqual([]);
   });
+
+  test("another user's scope reads none of this user's chat", async () => {
+    const foreign = { ...ctx.scope, user: KIT_OTHER_USER };
+    const ids = ctx.seed.messages.map((m) => m.id);
+    const info = await unlessRefused(ctx.env.chat.info(foreign));
+    const read = (await unlessRefused(ctx.env.chat.read(foreign, { from: 0, to: ctx.seed.messages.length }))) ?? [];
+    const found = (await unlessRefused(ctx.env.chat.search(foreign, { text: "lighthouse lantern tide" }))) ?? [];
+    expect({ length: info?.length ?? 0, seen: [...read, ...found].map((m) => m.id).filter((id) => ids.includes(id)) }).toEqual({ length: 0, seen: [] });
+  });
 }
 
 export function loreCases(ctx: KitContext<"lore">): void {
@@ -73,5 +83,14 @@ export function loreCases(ctx: KitContext<"lore">): void {
   test("what activated for the turn's prompt; nothing for a scope with no turn", async () => {
     expect(await ctx.env.lore.activated(ctx.scope)).toEqual(ctx.seed.prompts[0].activated);
     expect(await ctx.env.lore.activated({ user: ctx.scope.user, chat: ctx.scope.chat, session: ctx.scope.session })).toEqual([]);
+  });
+
+  test("another user's scope reads none of this user's lore", async () => {
+    const foreign = { ...ctx.scope, user: KIT_OTHER_USER };
+    const mine = (e: { id: string; title: string }) => ctx.seed.lore.some((s) => s.id === e.id && s.title === e.title);
+    const read = (await unlessRefused(ctx.env.lore.read(foreign, ctx.seed.lore.map((e) => e.id), KIT_LEAD))) ?? [];
+    const found = (await unlessRefused(ctx.env.lore.search(foreign, { text: "saltglass harbor bronze bell" }, KIT_LEAD))) ?? [];
+    const activated = (await unlessRefused(ctx.env.lore.activated(foreign))) ?? [];
+    expect([...read, ...found, ...activated].filter(mine).map((e) => e.id)).toEqual([]);
   });
 }

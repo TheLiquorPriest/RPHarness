@@ -35,10 +35,12 @@ export interface Sampling {
  * `unplayed`: replies made without the host. `job`: a job finished, with what it changed. `awaiting`:
  * a change waits for the user. `restacked`: an earlier swipe was flipped, and later turns' changes
  * were applied again. `player-edit`: the user's own corrections. `saved-differs`: what the chat
- * application saved is not what was released. `cut-short`: part of a reply was saved.
+ * application saved is not what was released. `cut-short`: part of a reply was saved. `swiped`:
+ * another attempt of the newest reply is showing. `request`: something the user asked for outside
+ * the chat (a panel, a page). `migrated`: the chat was carried over from an earlier system.
  */
 export interface SinceItem {
-  kind: "edit" | "delete" | "unplayed" | "job" | "awaiting" | "restacked" | "player-edit" | "saved-differs" | "cut-short";
+  kind: "edit" | "delete" | "unplayed" | "job" | "awaiting" | "restacked" | "player-edit" | "saved-differs" | "cut-short" | "swiped" | "request" | "migrated";
   text: string;
   /** The turn it is about, where there is one. */
   turn?: string;

@@ -1,5 +1,5 @@
 ---
-description: What a compaction's summary keeps and drops. This is the text a summary of a session's earlier turns is written from, and the one home of what it keeps. It is the whole of the summary call's instructions; what the lead carried from the turns being summarized follows it, laid out by the carried part.
+description: What a compaction's summary keeps and drops. This is the text a summary of a session's earlier turns is written from, and the one home of what it keeps. It is the whole of the summary call's instructions; what the lead did in the turns being summarized follows it, laid out by the carried part, after the summary so far where there is one. When those turns are more than the model takes, they are sent in pieces, oldest first, each after the summary written from the pieces before it, and the summary of the last piece is the one kept.
 ---
 Write what the lead must still have after the detail is gone, and nothing else:
 
@@ -10,3 +10,5 @@ Write what the lead must still have after the detail is gone, and nothing else:
 5. Anything the player asked for that still stands.
 
 Leave out what the chat history already tells: what happened, and who said what.
+
+Where a summary so far comes first, yours takes its place: keep from it what still stands.

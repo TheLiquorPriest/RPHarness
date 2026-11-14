@@ -195,7 +195,7 @@ describe("the lead's tools", () => {
 
     expect(outcome.status).toBe("released");
     const declared = s.model.requests[0]!.tools.map((tool) => tool.name).sort();
-    expect(declared).toEqual(["agent_message", "chat_read", "chat_search", "delegate", "file_find", "file_read", "file_write", "gap_check", "job_start", "lore_read", "lore_search", "reply_release", "skill_load", "suggest", "todo", "tool_search", "tool_use", "world_query", "write_reply"]);
+    expect(declared).toEqual(["agent_message", "chat_read", "chat_search", "delegate", "file_find", "file_read", "file_write", "gap_check", "job_start", "lore_read", "lore_search", "prompt", "reply_release", "skill_load", "suggest", "todo", "tool_search", "tool_use", "world_query", "write_reply"]);
     const reported = s.logged.find((line) => line.level === "warn" && line.message.startsWith("Tools the lead's definition lists are registered by nobody"));
     expect(reported?.fields?.["tools"]).toContain("roll");
     // The folder host has no other stores and no web searcher, so nobody registers the searches of them.

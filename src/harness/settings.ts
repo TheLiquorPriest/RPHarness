@@ -47,12 +47,17 @@
 //   trace:
 //     requests: first                  which calls' requests are kept in the turn's folder, each message
 //                                      as role and text: first (each agent's first call), all, or none
+//   prompt:
+//     kept: 50                         turns of a chat whose prompts are kept, so the next turn's, or a swipe's, is
+//                                      compared with the turn it follows; a turn older than that is compared with none
 //   compaction:
 //     reserve: 16384                   tokens kept free for the answer: a session's earlier turns are summarized
 //                                      when the lead's first call of a turn would not fit its model's window less this
 //     keepTurns: 3                     the newest of a session's earlier turns that a summary never stands for
 //     records: 6000                    tokens of records the records mode carries before they are folded into
 //                                      the summary by a compaction
+//     saveCalls: 1                     model calls the lead makes in its call at the moment before a compaction: the
+//                                      tools of the last of them run, and nothing after them
 //   jobs:
 //     atOnce: 2                        jobs running at once, the user's across every chat; one started past it waits
 //                                      for a place
@@ -120,12 +125,15 @@ export interface Settings {
   efforts: Readonly<Record<string, Effort>>;
   /** Which calls' requests are kept in the turn's folder. */
   requests: RequestsSetting;
+  /** Turns of a chat whose prompts are kept, so the next turn's is compared with the turn it follows (§4.8). */
+  promptKept: number;
   /**
    * When a session's earlier turns are summarized (§11): the tokens kept free for the answer, how
-   * many of the newest turns are kept as they were, and the tokens of carried records past which
-   * the records mode folds them into the summary.
+   * many of the newest turns are kept as they were, the tokens of carried records past which the
+   * records mode folds them into the summary, and the model calls the lead makes in its call at the
+   * moment before a compaction.
    */
-  compaction: { reserve: number; keepTurns: number; records: number };
+  compaction: { reserve: number; keepTurns: number; records: number; saveCalls: number };
   jobs: JobSettings;
 }
 
@@ -187,9 +195,12 @@ export const DEFAULT_SETTINGS: Settings = {
   efforts: {},
   // What the floor test and the Turn page read (§17.1: the Author's first request), at one file per agent a turn.
   requests: "first",
+  // Appendix D.1's 50 turn folders kept whole per chat (§5.5): a turn older than that is compared with none.
+  promptKept: 50,
   // Appendix D.1: the reserve pi's coding agent keeps (16,384 tokens), the newest 3 turns kept as
-  // they are, and records folded once they pass 6,000 tokens.
-  compaction: { reserve: 16_384, keepTurns: 3, records: 6_000 },
+  // they are, and records folded once they pass 6,000 tokens. §11: the lead gets one call with the
+  // rule's text before anything is summarized.
+  compaction: { reserve: 16_384, keepTurns: 3, records: 6_000, saveCalls: 1 },
   // Today's build's own (LumiAH's `jobs.atOnce` and `jobs.budget`: 60 rounds of calls, 600,000
   // tokens in, 60,000 out, 15 minutes), kept as §10.11 says. Today's build counted no jobs a day.
   jobs: { atOnce: 2, connections: {}, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
@@ -308,6 +319,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const tools = section("tools");
   const rules = section("rules");
   const trace = section("trace");
+  const promptSection = section("prompt");
   const compaction = section("compaction");
   // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
   const effort = section("effort");
@@ -375,10 +387,12 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     ...(judge !== undefined ? { judge } : {}),
     efforts,
     requests: oneOf<RequestsSetting>("trace.requests", trace["requests"], ["first", "all", "none"]) ?? DEFAULT_SETTINGS.requests,
+    promptKept: count("prompt.kept", promptSection["kept"]) ?? DEFAULT_SETTINGS.promptKept,
     compaction: {
       reserve: whole("compaction.reserve", compaction["reserve"]) ?? DEFAULT_SETTINGS.compaction.reserve,
       keepTurns: whole("compaction.keepTurns", compaction["keepTurns"]) ?? DEFAULT_SETTINGS.compaction.keepTurns,
       records: count("compaction.records", compaction["records"]) ?? DEFAULT_SETTINGS.compaction.records,
+      saveCalls: count("compaction.saveCalls", compaction["saveCalls"]) ?? DEFAULT_SETTINGS.compaction.saveCalls,
     },
     jobs: {
       atOnce: count("jobs.atOnce", jobsSection["atOnce"]) ?? DEFAULT_SETTINGS.jobs.atOnce,

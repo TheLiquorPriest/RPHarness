@@ -2,7 +2,8 @@
 // fixed when the session opened, with the tools it held and the snapshot of its stack that later
 // briefings are compared with; and what the user's rules remember, as each turn left it, so that a
 // swipe starts from its parent's and not from the attempt it replaces (§6.3, §10.10). Kept while the
-// harness runs: a restart forgets it.
+// harness runs and the session is open, and for the turns a later turn can still follow: a restart
+// forgets it, and so does the host closing the session.
 import type { JsonSchema, Scope } from "../contract";
 import type { RuleMemory, StackSnapshot } from "../files/api";
 import type { ReplyTags } from "../reply/tags";
@@ -83,17 +84,36 @@ export function turnAt(log: SessionLog, from: string | null): string | undefined
   return undefined;
 }
 
+/**
+ * Keeps what the rules remembered, and which replies went out with no intent record, only for
+ * `turns`: the turns on a turn's path, which a later turn can still follow. One that left the path
+ * is forgotten; a turn that follows it after all starts from the nearest one kept before it.
+ */
+export function keepOnly(state: SessionState, turns: ReadonlySet<string>): void {
+  for (const turn of state.memories.keys()) if (!turns.has(turn)) state.memories.delete(turn);
+  for (const turn of state.withoutIntent) if (!turns.has(turn)) state.withoutIntent.delete(turn);
+}
+
+function keyOf(scope: Scope): string {
+  return JSON.stringify([scope.user, scope.chat, scope.session]);
+}
+
 export class Sessions {
   readonly #sessions = new Map<string, SessionState>();
 
   /** The session a scope names, opened when first asked for. */
   of(scope: Scope): SessionState {
-    const key = JSON.stringify([scope.user, scope.chat, scope.session]);
+    const key = keyOf(scope);
     let state = this.#sessions.get(key);
     if (state === undefined) {
       state = { openings: new Map(), memories: new Map(), unregistered: new Map(), withoutIntent: new Set() };
       this.#sessions.set(key, state);
     }
     return state;
+  }
+
+  /** The host closed the session: what is kept of it is let go. Open again (its closing turn left the path), its next turn begins it anew, opening block and all. */
+  drop(scope: Scope): void {
+    this.#sessions.delete(keyOf(scope));
   }
 }

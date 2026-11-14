@@ -2,10 +2,11 @@
 // request's `carry`: what the lead did in each (continuing: its intent records, its calls and what
 // came back), its own record of each (records: the file the carried part's header names, in that
 // turn's folder), or only the summary the session opened with (nothing). Where the session was
-// compacted, the newest summary on the path stands for the turns before the first it kept, and only
-// the turns from there are carried. The fields here are laid out by the carried part; every word the
-// lead reads of them is the part's, its own, a tool's, a summary's or the host's. The session file
-// keeps no thinking, so none is ever carried.
+// compacted, the newest summary on the path that still stands stands for the turns before the first
+// it kept, and only the turns from there are carried; the summary the session opened with is carried
+// beside it. The fields here are laid out by the carried part; every word the lead reads of them is
+// the part's, its own, a tool's, a summary's or the host's. The session file keeps no thinking, so
+// none is ever carried.
 import type { Carry, FilesPort, JsonObject, Log, Scope } from "../contract";
 import type { Fields } from "../files/api";
 import { isMapping } from "../files/header";
@@ -40,15 +41,31 @@ export function pathTurns(log: SessionLog, to: string | null): PathTurn[] {
   return turnsOn(log, log.path(to));
 }
 
-/** The newest summary on a path. */
-function newestSummary(path: readonly SessionEntry[]): CompactedEntry | undefined {
-  return path.findLast((entry): entry is CompactedEntry => entry.type === "compacted");
+/**
+ * The newest summary on a path that still stands. A summary stands for every turn before the first
+ * it kept, on its own line of the file, as they stood when it was written: once one of them leaves
+ * the path after that (deleted, or an attempt shown again in its place), it no longer stands, and
+ * the one before it is taken, or none. So a turn that left reaches no later request through a
+ * summary: the turns it stood for are carried as they are now, and the next compaction summarizes
+ * them again from the file.
+ */
+function newestSummary(log: SessionLog, path: readonly SessionEntry[]): CompactedEntry | undefined {
+  for (let at = path.length - 1; at >= 0; at -= 1) {
+    const entry = path[at]!;
+    if (entry.type !== "compacted") continue;
+    const written = log.path(entry.id, true);
+    const kept = written.findIndex((step) => step.id === entry.kept);
+    const stood = written.slice(0, kept < 0 ? written.length - 1 : kept);
+    if (!stood.some((step) => step.type === "turn" && log.leftAfter(step.turn, entry.id))) return entry;
+  }
+  return undefined;
 }
 
-/** The turns a summary leaves as they were: those on the path from the first it kept. With no summary, every one. */
-function unsummarized(turns: readonly PathTurn[], path: readonly SessionEntry[], compacted: CompactedEntry | undefined): PathTurn[] {
+/** The turns a summary leaves as they were: those on the path from the first it kept (or the attempt shown again in its place). With no summary, every one. */
+function unsummarized(log: SessionLog, turns: readonly PathTurn[], path: readonly SessionEntry[], compacted: CompactedEntry | undefined): PathTurn[] {
   if (compacted === undefined) return [...turns];
-  const start = path.findIndex((entry) => entry.id === compacted.kept);
+  const kept = log.inPlaceOf(compacted.kept);
+  const start = path.findIndex((entry) => entry.id === kept);
   // The turn it kept first is not on this path: the turn the summary was written for, before its own entry.
   if (start < 0) return [];
   const after = new Set(path.slice(start).map((entry) => entry.id));
@@ -86,10 +103,21 @@ export interface CarriedInput {
   compacted?: CompactedEntry;
 }
 
-/** The carried part's fields: the mode, the summary the turns follow, and the turns. Undefined when there is neither summary nor turn. */
-function fieldsOf(carry: Carry, summary: string | undefined, turns: readonly JsonObject[]): Fields | undefined {
-  if ((summary === undefined || summary === "") && turns.length === 0) return undefined;
-  return { ...(carry !== "nothing" ? { [carry]: true } : {}), ...(summary !== undefined && summary !== "" ? { summary } : {}), turns: [...turns] };
+/** A summary that says something. */
+function said(text: string | undefined): text is string {
+  return text !== undefined && text !== "";
+}
+
+/**
+ * The carried part's fields: the mode; the summary the turns follow (`summary`), which is the newest
+ * compaction's, or before any the one the session opened with; that one again beside a compaction's
+ * (`opened`), so a compaction never takes the place of what the scene opened with; and the turns.
+ * Undefined when there is none of them.
+ */
+function fieldsOf(carry: Carry, opened: string | undefined, compacted: string | undefined, turns: readonly JsonObject[]): Fields | undefined {
+  const summary = said(compacted) ? compacted : opened;
+  if (!said(summary) && turns.length === 0) return undefined;
+  return { ...(carry !== "nothing" ? { [carry]: true } : {}), ...(said(compacted) && said(opened) ? { opened } : {}), ...(said(summary) ? { summary } : {}), turns: [...turns] };
 }
 
 /**
@@ -102,10 +130,10 @@ export async function carriedFields(input: CarriedInput): Promise<Fields | undef
   const { carry, tree, from } = input;
   const path = tree.path(from);
   const opened = path.findLast((entry) => entry.type === "opened")?.summary;
-  if (carry === "nothing") return fieldsOf(carry, opened, []);
-  const compacted = input.compacted ?? newestSummary(path);
-  const turns = unsummarized(turnsOn(tree, path), path, compacted);
-  return fieldsOf(carry, compacted?.summary ?? opened, carry === "continuing" ? continuing(turns) : await records(input, turns));
+  if (carry === "nothing") return fieldsOf(carry, opened, undefined, []);
+  const compacted = input.compacted ?? newestSummary(tree, path);
+  const turns = unsummarized(tree, turnsOn(tree, path), path, compacted);
+  return fieldsOf(carry, opened, compacted?.summary, carry === "continuing" ? continuing(turns) : await records(input, turns));
 }
 
 /** What the records a block of the records mode carries weigh, by the model layer's estimate: each record's text, and not the summary they follow. */
@@ -129,23 +157,66 @@ export interface Compaction {
 
 /**
  * What a compaction where a turn's work starts (`from`) would summarize: the turns carried there
- * but the newest `keep` of them, and never the turn being answered (`current`). Undefined when that
- * leaves none.
+ * but the newest `keep` of them, and never the turn being answered (`current`); after `compacted`,
+ * a summary already written for that turn, where it has one. Undefined when that leaves none.
  */
-export function compactionAt(log: SessionLog, from: string | null, current: TurnEntry | undefined, keep: number): Compaction | undefined {
+export function compactionAt(log: SessionLog, from: string | null, current: TurnEntry | undefined, keep: number, compacted?: CompactedEntry): Compaction | undefined {
   const path = log.path(from);
-  const earlier = unsummarized(turnsOn(log, path), path, newestSummary(path)).filter((turn) => turn.entry.turn !== current?.turn);
+  const earlier = unsummarized(log, turnsOn(log, path), path, compacted ?? newestSummary(log, path)).filter((turn) => turn.entry.turn !== current?.turn);
   const cut = Math.max(0, earlier.length - keep);
   if (cut === 0) return undefined;
   const kept = earlier[cut]?.entry.id ?? current?.id;
   return { turns: earlier.slice(0, cut), keptTurns: earlier.length - cut, ...(kept !== undefined ? { kept } : {}) };
 }
 
-/** The carried part's fields for what a compaction summarizes: the summary it starts from, and the turns it is to stand for, as the mode carries them. */
-export async function compactionFields(input: CarriedInput, turns: readonly PathTurn[]): Promise<Fields | undefined> {
-  const path = input.tree.path(input.from);
-  const summary = newestSummary(path)?.summary ?? path.findLast((entry) => entry.type === "opened")?.summary;
-  return fieldsOf(input.carry, summary, input.carry === "continuing" ? continuing(turns) : input.carry === "records" ? await records(input, turns) : []);
+/** What a compaction summarizes: the summary it starts from (the newest of the session's earlier turns; never the one it opened with, which is carried beside it), and the turns it is to stand for, as the mode carries them (the carried part's `turns`). */
+export interface Material {
+  summary: string | undefined;
+  turns: JsonObject[];
+}
+
+export async function compactionMaterial(input: CarriedInput, turns: readonly PathTurn[]): Promise<Material> {
+  const summary = (input.compacted ?? newestSummary(input.tree, input.tree.path(input.from)))?.summary;
+  return { summary, turns: input.carry === "continuing" ? continuing(turns) : input.carry === "records" ? await records(input, turns) : [] };
+}
+
+/** The carried part's fields for one piece of a compaction's material: the summary its turns follow, and the turns, marked as the summary call's (`compacting`) so the part can word them for it apart from the lead's block. */
+export function materialFields(carry: Carry, summary: string | undefined, turns: readonly JsonObject[]): Fields | undefined {
+  const fields = fieldsOf(carry, undefined, summary, turns);
+  return fields === undefined ? undefined : { ...fields, compacting: true };
+}
+
+/**
+ * The next piece of a compaction's material: the oldest of the turns left that fit in `room` tokens,
+ * by `weigh`, which gives what a summary call on those turns would be sent (its instructions, and
+ * the turns with the summary they follow). A turn weighs what it adds to an empty piece. The first
+ * turn left, when it fits in no piece whole, is cut between its items (the continuing mode's); what
+ * fits in no piece even alone goes alone, so every piece takes something and the pieces end.
+ */
+export function nextPiece(turns: readonly JsonObject[], room: number, weigh: (turns: readonly JsonObject[]) => number): { piece: JsonObject[]; rest: JsonObject[] } {
+  const empty = weigh([]);
+  let used = empty;
+  for (const [at, turn] of turns.entries()) {
+    const adds = weigh([turn]) - empty;
+    if (used + adds <= room) {
+      used += adds;
+      continue;
+    }
+    if (at > 0) return { piece: turns.slice(0, at), rest: turns.slice(at) };
+    const items = Array.isArray(turn["items"]) ? turn["items"] : [];
+    const head = weigh([{ ...turn, items: [] }]);
+    let spent = head;
+    let taken = 0;
+    for (const item of items) {
+      const more = weigh([{ ...turn, items: [item] }]) - head;
+      if (taken > 0 && spent + more > room) break;
+      spent += more;
+      taken += 1;
+    }
+    if (taken === 0 || taken === items.length) return { piece: [turn], rest: turns.slice(1) };
+    return { piece: [{ ...turn, items: items.slice(0, taken) }], rest: [{ ...turn, items: items.slice(taken) }, ...turns.slice(1)] };
+  }
+  return { piece: [...turns], rest: [] };
 }
 
 function continuing(turns: readonly PathTurn[]): JsonObject[] {

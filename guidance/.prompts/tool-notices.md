@@ -39,5 +39,6 @@ todo: {{open}} open, {{done}} done.
 no_writer: There is no agent definition named {{writer}} to write the reply.
 no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
+not_now: {{tool}} was not run: this call comes before the turn's own work, and the reply goes out from that work.
 released: The reply went out.
 not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached one of its limits{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.

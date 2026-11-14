@@ -72,3 +72,29 @@ test("a continue goes on from the turn it continues: that turn's work stays carr
   const third = entries.filter((entry) => entry.turn === "t3");
   for (const [i, entry] of third.entries()) if (i > 0) expect(entry.parent).toBe(third[i - 1]!.id);
 });
+
+test("a continue that compacts carries the summary, the turns kept, and what its turn did already; the turn after it carries the summary and the continued turn whole", async () => {
+  const s = (open = await stage({
+    config: "compaction:\n  keepTurns: 1\n",
+    answers: [
+      said("<intent>Intent one.</intent><reply>Reply one.</reply>"),
+      said("<intent>Intent two.</intent><reply>Reply two.</reply>"),
+      said("<intent>Intent three.</intent><reply>Reply three.</reply>"),
+      said("Fixture summary: the bell was rung."),
+      said("<intent>Intent three, continued.</intent><reply>More of reply three.</reply>"),
+      said("<intent>Intent four.</intent><reply>Reply four.</reply>"),
+    ],
+  }));
+  for (const req of [turn("t1"), turn("t2", { parent: "t1" }), turn("t3", { parent: "t2" })]) expect((await s.turn(req)).outcome.status).toBe("released");
+  await s.harness.sessions!.compact(S1);
+  expect((await s.turn(turn("t3", { kind: "continue", parent: "t2" }))).outcome.status).toBe("released");
+  expect((await s.turn(turn("t4", { parent: "t3" }))).outcome.status).toBe("released");
+
+  const [, , , summary, continued, fourth] = s.model.requests;
+  const sent = summary!.messages.map((message) => textOf(message)).join("\n");
+  expect(sent).toContain("Intent one.");
+  expect(sent).not.toContain("Intent three.");
+  expect(inOrder(carried(continued!), ["Fixture summary: the bell was rung.", "Intent two.", "Intent three."])).toBe(true);
+  expect(inOrder(carried(fourth!), ["Fixture summary: the bell was rung.", "Intent two.", "Intent three.", "Intent three, continued."])).toBe(true);
+  for (const req of [continued!, fourth!]) expect(carried(req)).not.toContain("Intent one.");
+});

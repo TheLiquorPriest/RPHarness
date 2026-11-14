@@ -5,7 +5,7 @@
 import type { FilesPort, Scope, SessionsApi, SessionView } from "../contract";
 import type { SessionBook, SessionFile } from "./book";
 import { compactionAt, pathTurns } from "./carry";
-import type { ClosedEntry } from "./file";
+import type { ClosedEntry, SessionEntry } from "./file";
 
 /**
  * A session as it stands at its leaf. A closing is judged by its turn, wherever it sits in the file:
@@ -38,6 +38,8 @@ export interface SessionsDeps {
   now(): number;
   /** How many of a session's newest turns a summary never stands for, as the user's settings for its chat say. */
   keepTurns(scope: Scope): Promise<number>;
+  /** The host closed the session: what the harness keeps of it beside its file is let go. */
+  closed(scope: Scope): void;
 }
 
 export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
@@ -58,6 +60,7 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         const tip = scope.turn === undefined ? undefined : file.log.tip(scope.turn);
         file.add({ type: "closed", parent: tip ?? file.log.leaf, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) });
         await file.settled();
+        d.closed(scope);
         return view(file);
       }),
 
@@ -67,17 +70,23 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         if (tip === undefined) throw new Error(`The session ${from.session} has no turn ${from.turn} to branch from.`);
         return book.with(to, async (target) => {
           if (target.header !== undefined || target.log.entries.length > 0) throw new Error(`The session ${to.session} has begun already; a branch begins a session of its own.`);
-          // The path to that turn, each turn marked with where it was played; then, again, the marks of the turns before it that are off the path.
+          // The path to that turn as it stands (an attempt shown again in place of another followed by what followed that one), each entry after the one before it there, and each turn marked with where it was played.
           const path = source.log.path(tip);
-          target.copy(
-            path.map((entry) => (entry.type === "turn" && entry.played === undefined ? { ...entry, played: { chat: from.chat, session: from.session } } : entry)),
-            { chat: from.chat, session: from.session, turn: from.turn },
-          );
+          const entries = path.map((entry): SessionEntry => {
+            const played = entry.type === "turn" && entry.played === undefined ? { ...entry, played: { chat: from.chat, session: from.session } } : entry;
+            const parent = source.log.parentOf(entry);
+            return parent === entry.parent ? played : { ...played, parent };
+          });
+          // Then the host's word that put each turn before it off the path, before every summary written after it in the source file and after every one written before it: a summary stands in the branch as it stands there.
           for (const entry of path) {
-            if (entry.type !== "turn" || entry.turn === from.turn || !source.log.left(entry.turn)) continue;
+            if (entry.type !== "turn" || entry.turn === from.turn) continue;
+            const mark = source.log.leftBy(entry.turn);
             const last = path.findLast((step) => step.type !== "opened" && step.turn === entry.turn);
-            if (last !== undefined) target.add({ type: "left", parent: last.id, turn: entry.turn });
+            if (mark === undefined || last === undefined) continue;
+            const before = entries.findIndex((step) => step.type === "compacted" && source.log.place(step.id) > source.log.place(mark.id));
+            entries.splice(before < 0 ? entries.length : before, 0, { ...mark, parent: last.id });
           }
+          target.copy(entries, { chat: from.chat, session: from.session, turn: from.turn });
           await target.settled();
           return view(target);
         });

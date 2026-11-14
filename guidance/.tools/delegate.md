@@ -3,7 +3,7 @@ description: delegate as the model is told it - what the tool does, and what eac
 arguments:
   agent: The name of the agent definition to start.
   brief: Its task, in full. It sees nothing of your conversation, only this and what you give it.
-  attach: What to give it in full beside the task, each by name - file:<path> for a file (from the chat's folder, or from this turn's folder); chat:history[scene], chat:history[-30:] or chat:history[#120..#179] for a stretch of the chat; lore:<id> for a lore entry; or the name of a view of the story the system offers.
+  attach: What to give it in full beside the task, each by name - file:<path> for a file (from the chat's folder, or from this turn's folder); chat:history[scene], chat:history[-30:] or chat:history[#120..#179] for a stretch of the chat; lore:<id> for a lore entry; prompt:<name> for a part of the prompt by the name the prompt tool gives it (prompt:persona, prompt:kind(style), prompt:history[-10:]); or the name of a view of the story the system offers.
   plays: The character it plays, when it plays one.
   returns: What to send back, when you want it in a particular form.
 ---

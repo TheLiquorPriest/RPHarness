@@ -85,7 +85,7 @@ export interface SessionsApi {
   /** A branch (§10.10): `to` starts as `from` stood at `from.turn`. */
   fork(from: Scope & { turn: string }, to: Scope): Promise<SessionView>;
   /** Compacts it at the start of its next turn, on the user's word (§11). */
-  compact(scope: Scope, signal?: AbortSignal): Promise<SessionView>;
+  compact(scope: Scope): Promise<SessionView>;
   get(scope: Scope): Promise<SessionView | undefined>;
   list(user: string, chat: string): Promise<SessionView[]>;
 }
@@ -247,6 +247,13 @@ export interface Harness {
   answer(req: TurnRequest, sink: ReplySink, signal: AbortSignal): Promise<TurnOutcome>;
   /** The host: this turn is off the path (swiped away, deleted). Its work is cancelled, its jobs too, and a session it closed is open again (§11, §13.5). */
   turnLeft(scope: Scope): Promise<void>;
+  /**
+   * The host: this turn, an earlier attempt, is shown again (a swipe flipped back, on an earlier
+   * reply too). It is on the path again in the place of the other attempts at its place, which are
+   * off it, and the turns that followed them follow it: later turns carry it where they carried the
+   * attempt it replaces (§6.3, §11).
+   */
+  turnShown(scope: Scope): Promise<void>;
   /**
    * The user talks with an agent (the assistant, or one kept alive past the reply, §13.4); its answer goes to `sink`.
    * `talk`, `jobs` and `sessions` are absent until the harness has them: a host asks whether each is

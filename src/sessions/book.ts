@@ -2,9 +2,11 @@
 // and held in memory only while something does: once its lines are written and nothing holds it,
 // it is let go, and the next to ask reads it again, so the file on disk is what counts. It is
 // written through the host's files port as the writer "harness", into the session's folder: one
-// whole line per entry, in the order the entries are made. A write that fails is logged; the turn
-// it records goes on.
-import type { FileRead, FilesPort, Log, Scope } from "../contract";
+// whole line per entry, in the order the entries are made. A write that fails is logged and its
+// lines are not lost: they go out again, before anything newer, with the next append, and the file
+// is kept in memory until they are on disk. So no entry on disk ever names a parent the file
+// lacks, and the turns after a failed write still find the session whole. The turn it records goes on.
+import type { FileRead, FilesPort, JsonValue, Log, Scope } from "../contract";
 import { lineOf, parseSession, type SessionEntry, type SessionHeader, SessionLog } from "./file";
 
 type Unsaved<E> = E extends SessionEntry ? Omit<E, "id" | "at"> : never;
@@ -33,9 +35,9 @@ export class SessionFile {
   #begun: boolean;
   /** Whether what is on disk may end part-way through a line (a write cut off, a file that could not be read): the next line then starts a line of its own. */
   #cut: boolean;
-  /** Lines given while an append is under way: written together, in the order given, by the next. */
+  /** Lines not on disk yet: given while an append is under way, or of an append that failed. The next append writes them together, in the order given. */
   #queued = "";
-  /** The appends under way, until the queue is empty. */
+  /** The appends under way, until the queue is empty or one fails. */
   #writing: Promise<void> | undefined;
 
   constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean) {
@@ -76,27 +78,44 @@ export class SessionFile {
     await this.#writing;
   }
 
+  /** Whether lines given are still not on disk: an append is under way, or one failed and its lines wait for the next. */
+  get unwritten(): boolean {
+    return this.#queued !== "" || this.#writing !== undefined;
+  }
+
+  /** Tries again what an append could not write, and resolves as `settled` does. */
+  async flush(): Promise<void> {
+    if (this.#queued !== "") this.#writing ??= this.#drain();
+    await this.#writing;
+  }
+
   #write(text: string): void {
     this.#queued += text;
     this.#writing ??= this.#drain();
   }
 
-  /** Appends what is queued, one append at a time, until nothing is. */
+  /** Appends what is queued, one append at a time, until nothing is, or until one fails: its lines then wait, first in the queue, for the next. */
   async #drain(): Promise<void> {
     const { files, log } = this.#d;
     try {
       while (this.#queued !== "") {
-        // After a line cut off part-way, a new line first: the cut one is passed over when the file is read, and these stay whole.
-        const text = this.#cut ? `\n${this.#queued}` : this.#queued;
+        const lines = this.#queued;
         this.#queued = "";
+        // After a line cut off part-way, a new line first: the cut one is passed over when the file is read, and these stay whole.
+        const text = this.#cut ? `\n${lines}` : lines;
+        let failed: Record<string, JsonValue> | undefined;
         try {
           const done = await files.write(this.scope, this.path, { op: "append", text }, "harness");
-          this.#cut = done.status !== "written";
-          if (done.status !== "written") log.error("The session file could not be written.", { session: this.scope.session, path: this.path, status: done.status, reason: done.reason });
+          if (done.status !== "written") failed = { status: done.status, reason: done.reason };
         } catch (error) {
-          this.#cut = true;
-          log.error("The session file could not be written.", { session: this.scope.session, path: this.path, error: error instanceof Error ? error.message : String(error) });
+          failed = { error: error instanceof Error ? error.message : String(error) };
         }
+        this.#cut = failed !== undefined;
+        if (failed === undefined) continue;
+        // Some of them may be on disk already, cut off or whole: a line read twice is the same entry, and the reader keeps it once.
+        this.#queued = lines + this.#queued;
+        log.error("The session file could not be written; its lines are kept, and go out again with the next.", { session: this.scope.session, path: this.path, ...failed });
+        return;
       }
     } finally {
       this.#writing = undefined;
@@ -163,20 +182,27 @@ export class SessionBook {
     }
   }
 
-  /** One holder fewer: with none left, the file is let go once its lines are written, unless something holds it again by then. */
+  /**
+   * One holder fewer: with none left, the file is let go once its lines are written, unless
+   * something holds it again by then. A file whose lines an append could not write is kept, so the
+   * next to hold it finds its tree whole, and those lines go out first with the next it writes.
+   */
   #let(key: string, kept: Kept): void {
     kept.holds -= 1;
     if (kept.holds > 0) return;
     const drop = (): void => {
       if (kept.holds === 0 && this.#files.get(key) === kept) this.#files.delete(key);
     };
-    void kept.file.then((file) => file.settled()).then(drop, drop);
+    void kept.file.then(async (file) => {
+      await file.settled();
+      if (!file.unwritten) drop();
+    }, drop);
   }
 
-  /** Resolves once every line given so far, to every file, is written. */
+  /** Resolves once every line given so far, to every file, is written, or its failure logged: lines an append could not write are tried once more. */
   async settled(): Promise<void> {
     const files = await Promise.allSettled([...this.#files.values()].map((kept) => kept.file));
-    await Promise.all(files.map((file) => (file.status === "fulfilled" ? file.value.settled() : undefined)));
+    await Promise.all(files.map((file) => (file.status === "fulfilled" ? file.value.flush() : undefined)));
   }
 
   async #read(scope: Scope): Promise<SessionFile> {

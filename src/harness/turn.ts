@@ -15,8 +15,9 @@
 // Blocks 2 to 4 are placed when the lead's definition is given them (`prompt:*`, `session:carry`,
 // `briefing`).
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team, type TeamWork } from "../agents";
-import type { AgentRef, Environment, JsonValue, ModelsApi, Places, PromptNotice, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
+import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
@@ -25,11 +26,12 @@ import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
-import { type CarriedInput, carriedFields, compactionAt, compactionFields, pathTurns, recordsTokens } from "../sessions/carry";
+import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
 import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, REPLY_FAMILY, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
+import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, writeViews } from "../prompt";
 import { TurnGate } from "./gate";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
@@ -37,12 +39,12 @@ import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { HeldSink, IntentWait } from "./intents";
 import { requestPath, sentMessages } from "./requests";
-import { memoryAt, type Opening, type Sessions, turnAt, unsaid } from "./sessions";
+import { keepOnly, memoryAt, type Opening, type Sessions, turnAt, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search and `job_start` among them. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START] as const;
+/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search, `job_start` and the prompt map's among them. */
+const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...PROMPT_TOOLS] as const;
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
@@ -85,6 +87,16 @@ interface Compacting {
 
 function errorWords(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * Whether a run ended on its first call, which the provider refused as longer than its model takes:
+ * pi-ai's reading of each provider's words for that, on the error the call ended with.
+ */
+function refusedAsTooLong(outcome: AgentOutcome, model: Model<Api>): boolean {
+  if (outcome.status !== "failed" || outcome.failure !== "model" || outcome.usage.calls !== 1 || outcome.error === undefined) return false;
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+  return isContextOverflow({ role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id, usage, stopReason: "error", errorMessage: outcome.error, timestamp: 0 });
 }
 
 /** Texts placed one after another in a message: each without the line break its file ends on, the empty ones left out. */
@@ -148,6 +160,8 @@ export class Turn {
   #team: Team | undefined;
   #places: Places | undefined;
   #opening: Opening | undefined;
+  /** The turn's prompt, its parts named (§4.8): what `prompt`, a `prompt:` name and the views read. */
+  #prompt: TurnPrompt | undefined;
   /** The session's file, once the turn has its entry in it. */
   #file: SessionFile | undefined;
   /** The session's file, held for the turn: let go once the turn's lines are written. */
@@ -165,7 +179,11 @@ export class Turn {
   #intentWritten = false;
   #notices = 0;
   #stopped = false;
+  /** The call the moment before compaction gives the lead is under way: the reply goes out from the turn's own work, never from it. */
+  #saving = false;
   #timer: unknown;
+  /** The turn's own time ran out, at this limit: nothing of the turn starts after it (§10.11). */
+  #timeUp: LimitHit | undefined;
   #startedAt = 0;
 
   constructor(core: TurnCore, req: TurnRequest, sink: ReplySink) {
@@ -215,6 +233,11 @@ export class Turn {
   stop(): void {
     this.#stopped = true;
     for (const { work } of this.#working) work.stop();
+  }
+
+  /** Whether the turn was stopped, or its own time ran out: nothing more of it starts. */
+  #ended(): boolean {
+    return this.#stopped || this.#timeUp !== undefined;
   }
 
   async #play(): Promise<RunOutcome> {
@@ -299,6 +322,8 @@ export class Turn {
       gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
       progress: (name, fields) => this.#say(name, fields),
       keep: (agent) => this.#keeper(agent).keep,
+      // A `prompt:` name, given by `delegate` or a definition's `given:`, read as the prompt tool reads it.
+      slice: promptSlice(async () => this.#prompt, guidance),
     });
     this.#team = team;
     const registry = new Registry(this.#ownTools(ownTexts, team, guidance), await env.tools.all(scope));
@@ -360,9 +385,12 @@ export class Turn {
 
     const due = await rules.turnStart(this.#lead);
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
-    const promptNotices = await this.#promptNotices();
+    const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, keep: settings.promptKept });
+    this.#prompt = prompt;
+    const promptNotices = located.notices;
     this.#notices = promptNotices.length;
     if (promptNotices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: promptNotices });
+    if (places.turn !== undefined) await writeViews(env.files, scope, places.turn, await promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
 
     const at = env.clock.now();
     const messages: AgentMessage[] = [];
@@ -385,12 +413,13 @@ export class Turn {
       if (text !== "") carriedAt = messages.push(systemMessage(text, at)) - 1;
     }
     if (opening.given.includes("briefing")) {
-      const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), promptNotices, lines(notices), places, session.withoutIntent.has(turnAt(file.log, begun.parent) ?? ""));
+      const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places, session.withoutIntent.has(turnAt(file.log, begun.parent) ?? ""));
       if (text !== undefined) messages.push(systemMessage(joined([text]), at));
     }
     const unplaced = opening.given.filter((ref) => !ref.startsWith("prompt:*") && ref !== "session:carry" && ref !== "briefing");
     if (unplaced.length > 0) env.log.info("Things the lead is given by name that this harness does not place; it is given none of them.", { agent: req.lead, given: unplaced });
-    if (carriedAt !== undefined && carriedNow !== undefined && layout !== undefined) await this.#compact({ file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, definition, declared, rules, settings, at });
+    const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, definition, declared, rules, settings, at } : undefined;
+    if (compacting !== undefined) await this.#compact(compacting, false);
 
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
@@ -418,51 +447,64 @@ export class Turn {
             onBegin: () => this.#say("writing"),
             onReleased: (text) => this.#release(text, "message", this.#lead),
           });
-    const runner = new AgentRunner({
-      agent: this.#lead,
-      trace: this.#trace,
-      model: model.model,
-      streamFn: model.streamFn,
-      connection: connection.label,
-      session: scope.session,
-      thinkingLevel: model.thinkingLevel,
-      instructions: opening.text,
-      tools: declared,
-      texts: this.#texts,
-      settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
-      limits: definition.limits,
-      turn: this.#budget,
-      stream: streamRules,
-      runEnd: rules.runEnd,
-      questions: judges,
-      gate: this.#gate(this.#lead, undefined),
-      channel,
-      ...this.#keeper(this.#lead),
-    });
+    const leadRunner = (): AgentRunner =>
+      new AgentRunner({
+        agent: this.#lead,
+        trace: this.#trace,
+        model: model.model,
+        streamFn: model.streamFn,
+        connection: connection.label,
+        session: scope.session,
+        thinkingLevel: model.thinkingLevel,
+        instructions: opening.text,
+        tools: declared,
+        texts: this.#texts,
+        settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
+        limits: definition.limits,
+        turn: this.#budget,
+        stream: streamRules,
+        runEnd: rules.runEnd,
+        questions: judges,
+        gate: this.#gate(this.#lead, undefined),
+        channel,
+        ...this.#keeper(this.#lead),
+      });
+    const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {
+      if (this.#ended()) return undefined;
+      const work = runner.start({ messages }, { given: opening.given });
+      const entry = { runner, work };
+      this.#working.add(entry);
+      const done = await work.done;
+      this.#working.delete(entry);
+      return done;
+    };
+    const runner = leadRunner();
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
-    if (this.#stopped) return this.#outcome({ status: "stopped" });
-    const work = runner.start({ messages }, { given: opening.given });
-    const entry = { runner, work };
-    this.#working.add(entry);
-    const outcome = await work.done;
-    this.#working.delete(entry);
-    // What the rules remembered is kept once every judgment still running has come in.
+    let outcome = await leadWork(runner);
+    // The provider refused the first call as longer than its model takes: that call would not fit after all (§11), so the session is compacted as for one that would not, and the call is made again, once, on what it then carries.
+    if (outcome !== undefined && compacting !== undefined && refusedAsTooLong(outcome, model.model) && (await this.#compact(compacting, true))) outcome = await leadWork(leadRunner());
+    // Nothing more started: the turn was stopped, or its own time ran out on the way (during a compaction, say), and it ends at that limit.
+    if (outcome === undefined) return this.#timeUp !== undefined ? this.#outcome({ status: "limit", limit: this.#timeUp }) : this.#outcome({ status: "stopped" });
+    // What the rules remembered is kept once every judgment still running has come in, and only for the turns a later turn can still follow.
     await judges.settled();
     session.memories.set(scope.turn, rules.memory());
+    keepOnly(session, new Set(pathTurns(file.log, file.log.tip(scope.turn) ?? null).map((turn) => turn.entry.turn)));
     return this.#outcomeOf(outcome);
   }
 
   /**
    * Compacts the session where this run's work starts, before the lead's first call (§11): when that
-   * call would not fit its model's window less the reserve, when the records the records mode
-   * carries pass their set size (the fold), or when the host asked. The moment before compaction
-   * comes first: its rules give the lead a stretch of work with their text, on its context as it
-   * stands, so it can save what it wants kept. Then one call on the lead's model, written from the
-   * compaction part, summarizes the turns the session carries but the newest it keeps. The summary
-   * is an entry of the session file, as this turn's work; the turns it stands for stay there. The
-   * carried block becomes the summary and the turns after it.
+   * call would not fit its model's window less the reserve, or its provider refused it as too long
+   * (`refused`), when the records the records mode carries pass their set size (the fold), or when
+   * the host asked. The moment before compaction comes first, when a summary can follow: its rules
+   * give the lead a call with their text, on its context as it stands, so it can save what it wants
+   * kept. Then a call on the lead's model, written from the compaction part, summarizes the turns the
+   * session carries but the newest it keeps: one call, or one a piece where they are more than the
+   * model takes. The summary is an entry of the session file, as this turn's work; the turns it
+   * stands for stay there. The carried block becomes the summary and the turns after it. Whether a
+   * summary was written.
    */
-  async #compact(c: Compacting): Promise<void> {
+  async #compact(c: Compacting, refused: boolean): Promise<boolean> {
     const { env } = this.#c;
     const { file, carry, messages, model, opening, declared, settings } = c;
     const window = model.limits.contextWindow?.tokens ?? 0;
@@ -470,15 +512,25 @@ export class Turn {
     const sent = (): number => tokensOf(opening.text, DEFAULT_CHARS_PER_TOKEN) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), DEFAULT_CHARS_PER_TOKEN) + promptTokens(messages, DEFAULT_CHARS_PER_TOKEN);
     const before = sent();
     const asked = file.log.asked !== undefined;
-    const tight = window > 0 && before > window - settings.compaction.reserve;
+    const tight = refused || (window > 0 && before > window - settings.compaction.reserve);
     const folding = recordsTokens(c.carried, DEFAULT_CHARS_PER_TOKEN) > settings.compaction.records;
-    if (this.#stopped || (!asked && !tight && !folding)) return;
+    if (this.#ended() || (!asked && !tight && !folding)) return false;
     const current = file.log.turn(this.scope.turn);
     // The mode "nothing" carries only what the session opened with, which no summary makes smaller.
-    const plan = current === undefined || carry.carry === "nothing" ? undefined : compactionAt(file.log, carry.from, current, settings.compaction.keepTurns);
+    const plan = current === undefined || carry.carry === "nothing" ? undefined : compactionAt(file.log, carry.from, current, settings.compaction.keepTurns, carry.compacted);
     if (current === undefined || plan === undefined) {
-      if (tight) env.log.warn("The lead's first call would not fit its model's window less the reserve, and its session has no earlier turn left to summarize; the call goes out as it is.", { turn: this.run, tokens: before, window, reserve: settings.compaction.reserve });
-      return;
+      if (refused) env.log.warn("The provider refused the lead's first call as too long, and its session has no earlier turn left to summarize.", { turn: this.run, tokens: before, window });
+      else if (tight) env.log.warn("The lead's first call would not fit its model's window less the reserve, and its session has no earlier turn left to summarize; the call goes out as it is.", { turn: this.run, tokens: before, window, reserve: settings.compaction.reserve });
+      return false;
+    }
+
+    // What the summary is written from, first: with no instructions or nothing to summarize, no summary can follow, and the moment before compaction does not come.
+    const part = template(await this.#guidance?.part("compaction"));
+    const instructions = joined([part?.render().text ?? ""]);
+    const material = await compactionMaterial(carry, plan.turns);
+    if (instructions === "" || material.turns.length === 0) {
+      env.log.warn("The session's earlier turns cannot be summarized: the compaction part, or what it would summarize, is empty. They are carried as they were.", { turn: this.run });
+      return false;
     }
 
     const due = await c.rules.beforeCompaction(this.#lead);
@@ -496,27 +548,58 @@ export class Turn {
         tools: declared,
         texts: this.#texts,
         settings: () => (settings.leadSampling === "preset" && this.#req.presetSampling !== undefined ? { sampling: this.#req.presetSampling } : undefined),
-        limits: c.definition.limits,
+        // The call the rule gives (§11), bounded by the user's setting, and by the definition's own where that is less: its last call's tools run, and nothing after them.
+        limits: { ...c.definition.limits, calls: Math.min(settings.compaction.saveCalls, c.definition.limits?.calls ?? settings.compaction.saveCalls) },
         turn: this.#budget,
         stream: c.rules.stream(this.#lead),
         gate: this.#gate(this.#lead, undefined),
       });
-      const work = saver.start({ messages: [...messages, userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
-      const entry = { runner: saver, work };
-      this.#working.add(entry);
-      await work.done;
-      this.#working.delete(entry);
-      if (this.#stopped) return;
+      if (this.#ended()) return false;
+      this.#saving = true;
+      try {
+        const work = saver.start({ messages: [...messages, userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
+        const entry = { runner: saver, work };
+        this.#working.add(entry);
+        await work.done;
+        this.#working.delete(entry);
+      } finally {
+        this.#saving = false;
+      }
+      if (this.#ended()) return false;
     }
 
-    const part = template(await this.#guidance?.part("compaction"));
-    const instructions = joined([part?.render().text ?? ""]);
-    const fields = await compactionFields(carry, plan.turns);
-    const material = fields === undefined ? "" : joined([c.layout.render(fields).text]);
-    if (instructions === "" || material === "") {
-      env.log.warn("The session's earlier turns cannot be summarized: the compaction part, or what it would summarize, is empty. They are carried as they were.", { turn: this.run });
-      return;
+    // Each summary call is sent no more than the model's window less the room for its answer: what is
+    // more than that goes in pieces, oldest first, each piece's summary handed to the next as the
+    // summary its turns follow.
+    const room = window > settings.compaction.reserve ? window - settings.compaction.reserve : Number.POSITIVE_INFINITY;
+    const laid = (summary: string | undefined, turns: readonly JsonObject[]): string => {
+      const fields = materialFields(carry.carry, summary, turns);
+      return fields === undefined ? "" : joined([c.layout.render(fields).text]);
+    };
+    let summary = material.summary;
+    let left = material.turns;
+    while (left.length > 0) {
+      const { piece, rest } = nextPiece(left, room, (turns) => tokensOf(instructions, DEFAULT_CHARS_PER_TOKEN) + tokensOf(laid(summary, turns), DEFAULT_CHARS_PER_TOKEN));
+      const written = await this.#summarize(c, instructions, laid(summary, piece));
+      if (written === undefined) return false;
+      summary = written;
+      left = rest;
     }
+    if (summary === undefined) return false;
+    const compacted = file.add({ type: "compacted", parent: file.log.tip(this.scope.turn) ?? current.id, turn: this.scope.turn, summary, kept: plan.kept ?? current.id });
+    // What the turn carries from here: a second compaction in the turn starts after this one.
+    c.carry = { ...carry, compacted };
+    const after = await carriedFields(c.carry);
+    c.carried = after ?? {};
+    messages[c.carriedAt] = systemMessage(joined([after === undefined ? "" : c.layout.render(after).text]), c.at);
+    this.#trace.event(this.#lead, undefined, { kind: "compacted", session: this.scope.session, before, after: sent(), keptTurns: plan.keptTurns });
+    return true;
+  }
+
+  /** One summary call (§11): the compaction part's instructions, and one piece of what is summarized. Its summary, or undefined when the turn stopped or the call gave none, which the log is told. */
+  async #summarize(c: Compacting, instructions: string, material: string): Promise<string | undefined> {
+    if (this.#ended()) return undefined;
+    const { model } = c;
     const summarizer = new AgentRunner({
       agent: { id: this.#c.ids(), definition: this.#req.lead },
       trace: this.#trace,
@@ -534,16 +617,11 @@ export class Turn {
     this.#working.add(entry);
     const outcome = await work.done;
     this.#working.delete(entry);
-    if (this.#stopped) return;
+    if (this.#ended()) return undefined;
     const summary = outcome.status === "done" ? outcome.text.trim() : "";
-    if (summary === "") {
-      env.log.warn("The session's earlier turns could not be summarized; they are carried as they were.", { turn: this.run, status: outcome.status, ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
-      return;
-    }
-    const compacted = file.add({ type: "compacted", parent: file.log.tip(this.scope.turn) ?? current.id, turn: this.scope.turn, summary, kept: plan.kept ?? current.id });
-    const after = await carriedFields({ ...carry, compacted });
-    messages[c.carriedAt] = systemMessage(joined([after === undefined ? "" : c.layout.render(after).text]), c.at);
-    this.#trace.event(this.#lead, undefined, { kind: "compacted", session: this.scope.session, before, after: sent(), keptTurns: plan.keptTurns });
+    if (summary !== "") return summary;
+    this.#c.env.log.warn("The session's earlier turns could not be summarized; they are carried as they were.", { turn: this.run, status: outcome.status, ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
+    return undefined;
   }
 
   /** Opens the session for its lead: the opening block, which holds still for the session (§5.2, §10.2), or why it cannot be made. */
@@ -600,7 +678,7 @@ export class Turn {
   }
 
   /** The briefing (§10.2 block 4), laid out by its template, or undefined when it holds nothing. */
-  async #briefing(guidance: Guidance, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], promptNotices: PromptNotice[], noticeLines: LinesPart | undefined, places: Places, lastWithoutIntent: boolean): Promise<string | undefined> {
+  async #briefing(guidance: Guidance, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], places: Places, lastWithoutIntent: boolean): Promise<string | undefined> {
     if (layout === undefined) return undefined;
     const req = this.#req;
     const situations = [...new Set([req.kind, ...req.since.map((item) => item.kind)])];
@@ -608,10 +686,7 @@ export class Turn {
     const added = joined(now.entries.flatMap((entry) => (entry.where === "briefing" && entry.left === undefined && entry.text !== undefined ? [entry.text] : [])));
     const changed = changesText(changes(opening.snapshot, now), notices).trimEnd();
     const rulesDue = joined(due);
-    const noticesText = promptNotices.flatMap((notice) => {
-      const line = notice.kind === "unmapped" ? noticeLines?.line("prompt_unmapped") : undefined;
-      return line === undefined ? [] : [line];
-    });
+    const noticesText = this.#prompt === undefined ? [] : noticeLines(this.#prompt, await promptWords(guidance));
     // The host's parts by name, and by the same name with "-" as "_", as a template names a field.
     const hostParts: Record<string, string> = {};
     for (const part of req.briefing) {
@@ -641,23 +716,6 @@ export class Turn {
     return text.trim() === "" ? undefined : text;
   }
 
-  /** What changed in the prompt's shape that this harness can tell: no map for its preset, or text that could not be told apart (§4.8). */
-  async #promptNotices(): Promise<PromptNotice[]> {
-    const { env } = this.#c;
-    const notices: PromptNotice[] = [];
-    try {
-      if ((await env.prompt.map(this.scope)) === undefined) notices.push({ kind: "unmapped" });
-    } catch (error) {
-      env.log.warn("The host could not give the prompt map.", { turn: this.run, error: errorWords(error) });
-    }
-    try {
-      if (!(await env.prompt.layout(this.scope)).complete) notices.push({ kind: "incomplete" });
-    } catch (error) {
-      env.log.warn("The host could not give the prompt's layout.", { turn: this.run, error: errorWords(error) });
-    }
-    return notices;
-  }
-
   /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
   #connection(definition: AgentDefinition): Promise<Connection> {
     return connectionOf(this.#c.connections, this.#settings, definition, this.#c.env.log);
@@ -680,6 +738,8 @@ export class Turn {
       agentDrop(team, texts.get("agent_drop")),
       jobStart(this.#c.jobs, texts.get(JOB_START)),
       ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
+      promptTool({ prompt: async () => this.#prompt, guidance, texts, env }),
+      promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env }),
       ...searchTools({
         reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
         ...(env.switches !== undefined ? { switches: env.switches } : {}),
@@ -833,6 +893,7 @@ export class Turn {
     const { env } = this.#c;
     const req = this.#req;
     const words = this.#words;
+    if (this.#saving) return answer(words("not_now", { tool: "write_reply" }), true);
     if (this.#desk.taken) return answer(words("second_reply"), true);
     const writer = this.#writer;
     const guidance = this.#guidance;
@@ -936,6 +997,7 @@ export class Turn {
   /** `reply_release`: the last draft, or a file's text, sent whole (§10.7). */
   async #releaseReply(path: string | undefined, ctx: ToolCtx): Promise<LoopToolResult> {
     const words = this.#words;
+    if (this.#saving) return answer(words("not_now", { tool: "reply_release" }), true);
     if (this.#desk.taken) return answer(words("second_reply"), true);
     if (path !== undefined) {
       const read = await this.#c.env.files.read(this.scope, path);
@@ -966,6 +1028,7 @@ export class Turn {
   /** The turn's own time ran out: every agent ends where it stands, at that limit. */
   #outOfTime(max: number): void {
     const hit = { limit: "time" as const, per: "turn" as const, max, value: this.#c.env.clock.now() - this.#startedAt };
+    this.#timeUp = hit;
     for (const { runner } of this.#working) runner.limit(hit);
   }
 

@@ -5,8 +5,8 @@
 // The summary is an entry of the session file and the turns it stands for stay there; what is
 // carried is the newest summary on the path and the turns after it.
 import { afterEach, expect, test } from "bun:test";
-import type { Scope, TurnRequest } from "../../src/contract";
-import { CHAT, PROMPT, type RecordedRequest, request, type Stage, stage, textOf, USER } from "../harness/support";
+import { type Stage, stage, textOf } from "../harness/support";
+import { carried, entries, inOrder, play, played, S1, SAVE, SAVE_RULE, SAVE_TEXT, said, turn } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -14,54 +14,9 @@ afterEach(async () => {
   open = undefined;
 });
 
-const S1: Scope = { user: USER, chat: CHAT, session: "s1" };
-const LAST_PROMPT = String(PROMPT.at(-1)!.content);
-const SAVE_RULE = ".rules/fixture-save.md";
-const SAVE_TEXT = "Fixture save rule: record what should last, then say you are done.";
-const SAVE = `---\ndescription: Fixture - the lead's call before a compaction.\nagents: [lead]\nat: before-compaction\nrepeat: always\n---\n${SAVE_TEXT}\n`;
 /** A reserve as large as the scripted model's window (64,000 tokens) less one: every first call is past it. */
 const TIGHT = "compaction:\n  reserve: 63999\n  keepTurns: 2\n";
 const COMPACTION_WORDS = "Write what the lead must still have after the detail is gone";
-
-const said = (text: string) => ({ pieces: [{ text }] });
-const played = (n: number) => said(`<intent>Intent ${n}.</intent><reply>Reply ${n}.</reply>`);
-
-function turn(id: string, extra: Partial<TurnRequest> = {}): TurnRequest {
-  return request(id, { lead: "lead", carry: "continuing", ...extra });
-}
-
-/** Plays the turns t1, t2, … in order, each after the one before. */
-async function play(s: Stage, ids: readonly string[], first?: string): Promise<void> {
-  let parent = first;
-  for (const id of ids) {
-    expect((await s.turn(turn(id, parent !== undefined ? { parent } : {}))).outcome.status).toBe("released");
-    parent = id;
-  }
-}
-
-/** What a turn's first request carried: the message between the assembled prompt and the briefing (`end` messages from its end). */
-function carried(req: RecordedRequest, end = 1): string {
-  const texts = req.messages.map((message) => textOf(message));
-  const between = texts.slice(texts.lastIndexOf(LAST_PROMPT) + 1, -end);
-  expect(between.length).toBe(1);
-  return between[0]!;
-}
-
-/** Whether every part is in the text, in the order given. */
-function inOrder(text: string, parts: readonly string[]): boolean {
-  const at = parts.map((part) => text.indexOf(part));
-  return at.every((place) => place >= 0) && at.every((place, i) => i === 0 || place > at[i - 1]!);
-}
-
-async function entries(s: Stage): Promise<{ type: string; turn?: string; summary?: string; kept?: string; id: string }[]> {
-  const read = await s.env.files.read(S1, "sessions/s1/s1.jsonl");
-  if (read.status !== "read") throw new Error(`The session file is not there: ${read.status}`);
-  return read.text
-    .split("\n")
-    .filter((line) => line !== "")
-    .slice(1)
-    .map((line) => JSON.parse(line));
-}
 
 test("a first call that would not fit: the lead's call under the rule first, then one summary call written from the compaction part; the summary takes the older turns' place, the newest stay as they were, and the file keeps them all", async () => {
   const s = (open = await stage({

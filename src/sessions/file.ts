@@ -97,6 +97,16 @@ export interface LeftEntry extends EntryBase {
 }
 
 /**
+ * The host said an earlier attempt is shown again (a swipe flipped back, on an earlier reply too):
+ * it is on the path again, in the place of the other attempts at its place, which are off it, and
+ * what followed them follows it. A mark: no entry follows it.
+ */
+export interface ShownEntry extends EntryBase {
+  type: "shown";
+  turn: string;
+}
+
+/**
  * The session's earlier turns were summarized (§11), as the work of `turn`, at its start: the summary
  * stands for every turn on the path before `kept`, the turn entry of the first turn kept as it was.
  * The turns it stands for stay in the file, and a path that does not pass through it has them all.
@@ -115,7 +125,7 @@ export interface CompactEntry extends EntryBase {
   turn?: undefined;
 }
 
-export type SessionEntry = OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | CompactedEntry | CompactEntry;
+export type SessionEntry = OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -151,6 +161,8 @@ function isEntry(v: Record<string, unknown>): boolean {
     case "closed":
       return optional(v["turn"], str);
     case "left":
+      return str(v["turn"]);
+    case "shown":
       return str(v["turn"]);
     case "compacted":
       return str(v["turn"]) && str(v["summary"]) && str(v["kept"]);
@@ -203,8 +215,15 @@ export function parseSession(text: string): ParsedSession {
  * - a turn the host said left the path is off it, its entries with it, wherever it stands on a
  *   path, until a later turn names it as the turn it follows (a swipe shown again); when the leaf
  *   is in that turn, the leaf goes back to where the turn began;
+ * - an earlier attempt the host said is shown again is on the path in the place of the other
+ *   attempts at its place, which are off it: what followed them follows it (`parentOf`), and a leaf
+ *   in one of them goes to it;
  * - a compaction the host asked for is waiting from its mark until a compaction is written after it,
- *   in the order of the file, wherever either stands.
+ *   in the order of the file, wherever either stands; the mark is never the leaf, so a turn at work
+ *   when it was given goes on where the session stands.
+ *
+ * Each entry keeps its place in the file, so what the host said can be told apart from what was
+ * written before it (a summary written before a turn it stands for left the path).
  */
 export class SessionLog {
   readonly entries: SessionEntry[] = [];
@@ -212,8 +231,12 @@ export class SessionLog {
   readonly #turns = new Map<string, TurnEntry>();
   /** Each turn's newest entry: where a turn that follows it hangs. */
   readonly #tips = new Map<string, string>();
-  /** The turns off the path now. */
-  readonly #left = new Set<string>();
+  /** The turns off the path now, each with the host's word that put it off. */
+  readonly #left = new Map<string, LeftEntry | ShownEntry>();
+  /** The attempts an earlier one was shown again in place of, each with the attempt shown. */
+  readonly #replaced = new Map<string, string>();
+  /** Each entry's place in the file, from 0. */
+  readonly #places = new Map<string, number>();
   #leaf: string | null = null;
   /** The entry the host opened the session with. */
   #opened: OpenedEntry | undefined;
@@ -226,6 +249,7 @@ export class SessionLog {
 
   add(entry: SessionEntry): void {
     if (this.#byId.has(entry.id)) return;
+    this.#places.set(entry.id, this.entries.length);
     this.entries.push(entry);
     this.#byId.set(entry.id, entry);
     switch (entry.type) {
@@ -236,18 +260,39 @@ export class SessionLog {
       case "turn":
         this.#turns.set(entry.turn, entry);
         this.#tips.set(entry.turn, entry.id);
-        if (entry.follows !== undefined) this.#left.delete(entry.follows);
+        if (entry.follows !== undefined) {
+          this.#left.delete(entry.follows);
+          this.#replaced.delete(entry.follows);
+        }
         this.#leaf = entry.id;
         return;
       case "left": {
-        this.#left.add(entry.turn);
+        // Its first word holds while it is off the path: saying it again changes nothing.
+        if (!this.#left.has(entry.turn)) this.#left.set(entry.turn, entry);
         const at = this.#leaf === null ? undefined : this.#byId.get(this.#leaf);
         const begun = this.#turns.get(entry.turn);
         if (at !== undefined && at.type !== "opened" && at.turn === entry.turn && begun !== undefined) this.#leaf = this.#back(begun.parent);
         return;
       }
+      case "shown": {
+        const shown = this.#turns.get(entry.turn);
+        if (shown === undefined) return;
+        this.#left.delete(entry.turn);
+        this.#replaced.delete(entry.turn);
+        const place = this.#placeOf(shown);
+        const at = this.#leaf === null ? undefined : this.#byId.get(this.#leaf);
+        for (const other of this.#turns.values()) {
+          if (other.turn === entry.turn || this.#placeOf(other) !== place) continue;
+          if (!this.#left.has(other.turn)) this.#left.set(other.turn, entry);
+          this.#replaced.set(other.turn, entry.turn);
+          if (at !== undefined && at.type !== "opened" && at.turn === other.turn) this.#leaf = this.#tips.get(entry.turn) ?? shown.id;
+        }
+        return;
+      }
+      case "compact":
+        this.#asked = entry;
+        return;
       default: {
-        if (entry.type === "compact") this.#asked = entry;
         if (entry.type === "compacted") this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
         if (this.#leaf === entry.parent) this.#leaf = entry.id;
@@ -289,6 +334,22 @@ export class SessionLog {
     return this.#left.has(turn);
   }
 
+  /** The host's word that put a turn off the path, while it is off it. */
+  leftBy(turn: string): LeftEntry | ShownEntry | undefined {
+    return this.#left.get(turn);
+  }
+
+  /** Whether a turn is off the path by the host's word given after the entry `id` was written. */
+  leftAfter(turn: string, id: string): boolean {
+    const mark = this.#left.get(turn);
+    return mark !== undefined && this.place(mark.id) > this.place(id);
+  }
+
+  /** An entry's place in the file, from 0; -1 for one the file does not hold. */
+  place(id: string): number {
+    return this.#places.get(id) ?? -1;
+  }
+
   /**
    * Where a turn hangs that follows `follows`, as the request names it (`TurnRequest.parent`): left
    * out, the session's latest turn, where its path ends now; a turn of this session, that turn's
@@ -301,15 +362,44 @@ export class SessionLog {
     return tip ?? this.#opened?.id ?? null;
   }
 
-  /** The entries from the first down to `to`, in that order. */
-  path(to: string | null): SessionEntry[] {
+  /**
+   * The entries from the first down to `to`, in that order. What followed an attempt another was
+   * shown again in place of follows the attempt shown (`parentOf`); `raw`, each entry's own parent
+   * alone, as the file was written.
+   */
+  path(to: string | null, raw = false): SessionEntry[] {
     const out: SessionEntry[] = [];
     let at = to === null ? undefined : this.#byId.get(to);
     while (at !== undefined) {
       out.push(at);
-      at = at.parent === null ? undefined : this.#byId.get(at.parent);
+      const parent = raw ? at.parent : this.parentOf(at);
+      at = parent === null ? undefined : this.#byId.get(parent);
     }
     return out.reverse();
+  }
+
+  /** The entry an entry follows on a path: its own parent, but where that is an attempt an earlier one was shown again in place of, and the entry is not that attempt's own, the newest entry of the attempt shown. */
+  parentOf(entry: SessionEntry): string | null {
+    if (entry.parent === null || this.#replaced.size === 0) return entry.parent;
+    const parent = this.#byId.get(entry.parent);
+    const turn = parent === undefined || parent.type === "opened" ? undefined : parent.turn;
+    if (turn === undefined || (entry.type !== "opened" && entry.turn === turn)) return entry.parent;
+    const shown = this.#replaced.get(turn);
+    return shown === undefined ? entry.parent : (this.#tips.get(shown) ?? entry.parent);
+  }
+
+  /** The entry that stands on a path in place of `id`: the first entry of the attempt shown again in place of the turn `id` begins, or `id` itself. */
+  inPlaceOf(id: string): string {
+    const entry = this.#byId.get(id);
+    const shown = entry?.type === "turn" ? this.#replaced.get(entry.turn) : undefined;
+    return shown === undefined ? id : (this.#turns.get(shown)?.id ?? id);
+  }
+
+  /** Where a turn began, by the turn it followed (the attempts at one place begin after the same turn, wherever that turn had got to), or the entry it hangs from outside any turn. */
+  #placeOf(begun: TurnEntry): string | null {
+    const parent = begun.parent === null ? undefined : this.#byId.get(begun.parent);
+    if (parent === undefined) return begun.parent;
+    return parent.type === "opened" || parent.turn === undefined ? `entry ${parent.id}` : `turn ${parent.turn}`;
   }
 
   /** Where the leaf goes back to from a turn that left: the newest entry of the turn it hung from, or the entry itself outside any turn. */

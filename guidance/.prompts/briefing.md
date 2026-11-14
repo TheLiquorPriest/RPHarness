@@ -60,4 +60,8 @@ This turn's files are in {{turn_files}}
 ## How the reply is marked
 
 {{reply_contract}}
+{{#turn_files}}
+
+This turn's folder: `{{turn_files}}`
+{{/turn_files}}
 {{/reply_contract}}

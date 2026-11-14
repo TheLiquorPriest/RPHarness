@@ -77,6 +77,47 @@ describe("the stack", () => {
   });
 });
 
+describe("a layered instruction file", () => {
+  test("is read at every level that has one, farther first, each its own part; `off:` takes all of them; a name not listed is nearest-wins", async () => {
+    const tree = await bench({
+      global: { "config.yml": "layered: [AGENTS]\n", ".agents/lead.md": "---\ndescription: Leads.\nreads: [AGENTS, WORLD]\n---\nLead.\n" },
+      character: { "AGENTS.md": "Wren never lies outright.\n", "WORLD.md": "# World\n\nThe character's world.\n" },
+      chat: { "AGENTS.md": "In this chat, the lamp is failing.\n", "WORLD.md": "# World\n\nThe chat's world.\n" },
+    });
+    b = tree;
+    const read = async () => (await loadGuidance(tree.host.files, scope).stack("lead")).entries.map((e) => [e.part, e.level, e.left ?? e.text]);
+    const stack = await loadGuidance(tree.host.files, scope).stack("lead");
+    expect(stack.entries.map((e) => [e.part, e.level, e.text, e.layered, e.replaces.length])).toEqual([
+      ["agents/lead", "global", "Lead.\n", undefined, 0],
+      ["AGENTS", "character", "Wren never lies outright.\n", true, 0],
+      ["AGENTS", "chat", "In this chat, the lamp is failing.\n", true, 0],
+      ["WORLD", "chat", "# World\n\nThe chat's world.\n", undefined, 1],
+    ]);
+
+    // A change at one level is that level's part alone.
+    const opened = snapshot(stack);
+    await tree.put("chat", "AGENTS.md", "In this chat, the lamp is out.\n");
+    expect(changes(opened, await loadGuidance(tree.host.files, scope).stack("lead"))).toEqual([{ part: "AGENTS", change: "changed", path: "AGENTS.md", level: "chat", text: "In this chat, the lamp is out.\n" }]);
+
+    await tree.put("chat", "config.yml", "off: [AGENTS.md]\n");
+    expect(await read()).toEqual([
+      ["agents/lead", "global", "Lead.\n"],
+      ["AGENTS", "character", "off"],
+      ["AGENTS", "chat", "off"],
+      ["WORLD", "chat", "# World\n\nThe chat's world.\n"],
+    ]);
+
+    await tree.drop("chat", "config.yml");
+    await tree.drop("character", "AGENTS.md");
+    expect((await read()).filter(([part]) => part === "AGENTS")).toEqual([["AGENTS", "chat", "In this chat, the lamp is out.\n"]]);
+
+    // With no `layered:` in any level's config, nothing is layered.
+    await tree.put("character", "AGENTS.md", "Wren never lies outright.\n");
+    await tree.put("global", "config.yml", "off: []\n");
+    expect((await read()).filter(([part]) => part === "AGENTS")).toEqual([["AGENTS", "chat", "In this chat, the lamp is out.\n"]]);
+  });
+});
+
 describe("a file changed in the middle of a session", () => {
   test("reaches the next briefing as its whole current text, or as switched off, in the notices' words", async () => {
     b = await bench({ shipped: await drafted() });

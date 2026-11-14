@@ -3,6 +3,7 @@
 // the middle of a session reaches the agent in the next briefing, as its whole current text or as
 // switched off, in the words of the `notices` part.
 
+import type { LayerLevel } from "../contract/index";
 import type { ChangesText, FileChange, FindChanges, TakeSnapshot } from "./api";
 import { normalized } from "./header";
 
@@ -24,22 +25,29 @@ export function holdsNothing(text: string): boolean {
 
 export const snapshot: TakeSnapshot = (stack) => ({
   agent: stack.agent,
-  parts: stack.entries.flatMap((e) => (e.where === "opening" && e.left === undefined && e.hash !== undefined ? [{ part: e.part, path: e.path, level: e.level, hash: e.hash }] : [])),
+  parts: stack.entries.flatMap((e) =>
+    e.where === "opening" && e.left === undefined && e.hash !== undefined ? [{ part: e.part, path: e.path, level: e.level, hash: e.hash, ...(e.layered === true ? { layered: true as const } : {}) }] : [],
+  ),
 });
+
+/** Which part of a stack this is, across a session: its name, and for one level's file of a layered name, its level too. */
+function partOf(p: { part: string; level: LayerLevel; layered?: true }): string {
+  return p.layered === true ? `${p.level}\n${p.part}` : p.part;
+}
 
 export const changes: FindChanges = (opened, now) => {
   const given = now.entries.filter((e) => e.where === "opening" && e.left === undefined && e.hash !== undefined);
-  const before = new Map(opened.parts.map((p) => [p.part, p] as const));
+  const before = new Map(opened.parts.map((p) => [partOf(p), p] as const));
   const out: FileChange[] = [];
   for (const e of given) {
-    const was = before.get(e.part);
+    const was = before.get(partOf(e));
     if (was !== undefined && was.hash === e.hash && was.path === e.path) continue;
     out.push({ part: e.part, change: was === undefined ? "added" : "changed", path: e.path, level: e.level, text: e.text ?? "" });
   }
-  const still = new Set(given.map((e) => e.part));
+  const still = new Set(given.map(partOf));
   for (const was of opened.parts) {
-    if (still.has(was.part)) continue;
-    const entry = now.entries.find((e) => e.part === was.part && e.where === "opening");
+    if (still.has(partOf(was))) continue;
+    const entry = now.entries.find((e) => partOf(e) === partOf(was) && e.where === "opening");
     out.push({ part: was.part, change: "off", path: was.path, level: was.level, why: entry?.left ?? "missing" });
   }
   return out;

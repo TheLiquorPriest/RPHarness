@@ -23,12 +23,14 @@
 //   listed and never in force.
 // - Prompt parts, `<prompts>/<name>.md`, and tool descriptions, `<tools>/<name>.md`: an optional
 //   header (any fields; `description` and `format` are read) and a body that is a template.
-// - Config, the file each level names (`Layer.config`): `off:` and `added:` are read (CONFIG_KEYS).
+// - Config, the file each level names (`Layer.config`): `off:`, `layered:` and `added:` are read (CONFIG_KEYS).
 //
 // Levels. Files are read through the host's `FilesPort`: shipped, then global, then character, then
-// chat. A file of the same name at a nearer level replaces the farther one, of every kind. A name
-// listed in any level's `off:` is off at every level. A file that does not parse is reported by path
-// and line, is not used, and the farther file of its name is not used in its place.
+// chat. A file of the same name at a nearer level replaces the farther one, of every kind, but for an
+// instruction file named in any level's `layered:`, which is read at every level that has one,
+// farther first, each its own entry of the stack. A name listed in any level's `off:` is off at
+// every level. A file that does not parse is reported by path and line, is not used, and the farther
+// file of its name is not used in its place.
 //
 // Rules (§5.4). `description:`; `agents:`, `all` or a list of definitions (it must be there: code
 // holds no default about whom a rule is for); `needs:`, names the rule is in force only while each
@@ -211,6 +213,8 @@ export interface StackEntry extends StackPart {
   replaces: Replaced[];
   /** Its whole text as given: an instruction file or a rule as written, the definition's body as written. Absent when left out. */
   text?: string;
+  /** For an instruction file named in `layered:`: this is one level's file of several; its part is told apart from the others' by its level. */
+  layered?: true;
   /** For a part handed over for the briefing: the situations that add it (`swipe`). */
   situations?: string[];
 }
@@ -218,9 +222,10 @@ export interface StackEntry extends StackPart {
 /**
  * An agent's stack: its definition first, then each file its `reads` names in that order (`rules`:
  * the always-on rules it is named in, the shipped level's first, then global, character, chat, by
- * name within a level), then what the briefing is handed, when its definition is given `briefing`:
- * the files the config's `added:` table names for the situations at hand, and the always-on rules
- * whose `turns:` name one of them. Every entry its definition names is here, given or left out.
+ * name within a level; a `layered:` instruction file: one entry per level that has it, farther
+ * first), then what the briefing is handed, when its definition is given `briefing`: the files the
+ * config's `added:` table names for the situations at hand, and the always-on rules whose `turns:`
+ * name one of them. Every entry its definition names is here, given or left out.
  */
 export interface Stack {
   agent: string;
@@ -231,7 +236,7 @@ export interface Stack {
 /** What the opening block held when a session opened, kept with the session (JSON). */
 export interface StackSnapshot {
   agent: string;
-  parts: { part: string; path: string; level: LayerLevel; hash: string }[];
+  parts: { part: string; path: string; level: LayerLevel; hash: string; layered?: true }[];
 }
 
 /**
@@ -379,6 +384,8 @@ export interface RuleRun {
 export const CONFIG_KEYS = {
   /** Names switched off: `rules/perceptions-owed`, `TURN` (with or without `.md`, with a level's own folder name or a mount in front, as the Files page writes them). */
   off: "off",
+  /** Instruction files read at every level that has one, farther first, instead of the nearest alone: `layered: [AGENTS]`. None when no level's config names any. */
+  layered: "layered",
   /** Which situation adds which instruction files to the briefing: `swipe: [SWIPE]`. A nearer level's entry for a situation replaces a farther one's. */
   added: "added",
 } as const;

@@ -41,6 +41,12 @@ interface Instruction extends Found<string> {
   left?: StackLeft;
 }
 
+/** An instruction file with why it is left out: its name switched off, the file unreadable, or nothing in it but headings and comments. */
+function withLeft(found: Found<string>): Instruction {
+  const left: StackLeft | undefined = found.off ? "off" : found.file === undefined ? "broken" : holdsNothing(found.file.text) ? "empty" : undefined;
+  return { ...found, ...(left !== undefined ? { left } : {}) };
+}
+
 interface RuleState {
   found: Found<ReadRule>;
   inForce: boolean;
@@ -118,19 +124,33 @@ class TreeGuidance implements Guidance {
     });
   }
 
-  async #instruction(name: string): Promise<Instruction | undefined> {
-    const found = await this.#found("instructions", name, (file) => ({ item: file.text, problems: [] }));
-    if (found === undefined) return undefined;
-    const left: StackLeft | undefined = found.off ? "off" : found.file === undefined ? "broken" : holdsNothing(found.file.text) ? "empty" : undefined;
-    return { ...found, ...(left !== undefined ? { left } : {}) };
+  /**
+   * The instruction files in force by a name: the nearest; or, for a name in `layered:`, the file of
+   * every level that has one, farther first, none replacing another. Each says why it is left out,
+   * if it is. None when no level has the name.
+   */
+  async #instructions(name: string): Promise<Instruction[]> {
+    const config = await this.#tree.config();
+    if (!config.layered.has(name)) {
+      const found = await this.#found("instructions", name, (file) => ({ item: file.text, problems: [] }));
+      return found === undefined ? [] : [withLeft(found)];
+    }
+    const off = config.off.has(itemKey("instructions", name));
+    const refs = (await this.#tree.found("instructions")).get(name) ?? [];
+    return Promise.all(
+      refs.map(async (ref) => {
+        const file = await this.#tree.read(ref.path);
+        return withLeft({ ref, replaces: [], off, ...(file !== undefined ? { file, item: file.text } : {}) });
+      }),
+    );
   }
 
-  /** Whether an item a `needs:` names that is not a rule is in force: an instruction file, or `<kind>/<name>` (as `writtenKey` gives it). Undefined: nothing has that name. */
+  /** Whether an item a `needs:` names that is not a rule is in force: an instruction file (any of a layered one's levels), or `<kind>/<name>` (as `writtenKey` gives it). Undefined: nothing has that name. */
   async #otherInForce(key: string): Promise<boolean | undefined> {
     const slash = key.indexOf("/");
     if (slash === -1) {
-      const instruction = await this.#instruction(key);
-      return instruction === undefined ? undefined : instruction.left === undefined;
+      const files = await this.#instructions(key);
+      return files.length === 0 ? undefined : files.some((f) => f.left === undefined);
     }
     const kind = key.slice(0, slash);
     const name = key.slice(slash + 1);
@@ -194,7 +214,7 @@ class TreeGuidance implements Guidance {
     const loads: Promise<unknown>[] = [this.#ruleStates(), this.#tree.config()];
     for (const [listing, names] of lists) {
       for (const name of names) {
-        if (listing === "instructions") loads.push(this.#instruction(name));
+        if (listing === "instructions") loads.push(this.#instructions(name));
         else if (listing === "agents") loads.push(this.#definition(name));
         else if (listing === "skills") loads.push(this.#skill(name));
         else if (listing === "examples") loads.push(this.#rule("examples", name));
@@ -243,22 +263,24 @@ class TreeGuidance implements Guidance {
     return { path: `${name}.md`, level: "chat" };
   }
 
-  async #instructionEntry(name: string, where: StackEntry["where"]): Promise<StackEntry> {
-    const instruction = await this.#instruction(name);
-    if (instruction === undefined) {
+  async #instructionEntries(name: string, where: StackEntry["where"]): Promise<StackEntry[]> {
+    const files = await this.#instructions(name);
+    if (files.length === 0) {
       const chat = (await this.layers()).find((l) => l.level === "chat");
-      return { part: name, kind: "instruction", where, path: `${chat?.mount ?? ""}${name}.md`, level: "chat", replaces: [], left: "missing" };
+      return [{ part: name, kind: "instruction", where, path: `${chat?.mount ?? ""}${name}.md`, level: "chat", replaces: [], left: "missing" }];
     }
-    return {
+    const layered = (await this.#tree.config()).layered.has(name);
+    return files.map((f) => ({
       part: name,
       kind: "instruction",
       where,
-      path: instruction.ref.path,
-      level: instruction.ref.level,
-      ...(instruction.file !== undefined ? { hash: instruction.file.hash } : {}),
-      replaces: instruction.replaces,
-      ...(instruction.left !== undefined ? { left: instruction.left } : { text: instruction.item ?? "" }),
-    };
+      path: f.ref.path,
+      level: f.ref.level,
+      ...(f.file !== undefined ? { hash: f.file.hash } : {}),
+      replaces: f.replaces,
+      ...(layered ? { layered: true as const } : {}),
+      ...(f.left !== undefined ? { left: f.left } : { text: f.item ?? "" }),
+    }));
   }
 
   /** The always-on rules naming `agent`, in force or not: those for every turn in the opening block, or those whose `turns:` name the situations at hand for the briefing. Shipped first, then global, character, chat; by name within a level. */
@@ -299,7 +321,7 @@ class TreeGuidance implements Guidance {
       entries.push({ part: itemKey("agents", agent), kind: "definition", where: "opening", path: def.source.path, level: def.source.level, hash: def.source.hash, replaces: def.replaces, text: def.instructions.text });
       for (const read of def.reads) {
         if (read === RULES) entries.push(...(await this.#ruleEntries(agent, "opening")));
-        else entries.push(await this.#instructionEntry(read.replace(/\.md$/, ""), "opening"));
+        else entries.push(...(await this.#instructionEntries(read.replace(/\.md$/, ""), "opening")));
       }
       if (def.given.includes(BRIEFING)) {
         const wanted = options.situations;
@@ -308,7 +330,7 @@ class TreeGuidance implements Guidance {
           if (wanted !== undefined && !wanted.includes(situation)) continue;
           for (const name of names) added.set(name, [...(added.get(name) ?? []), situation]);
         }
-        for (const [name, situations] of added) entries.push({ ...(await this.#instructionEntry(name, "briefing")), situations });
+        for (const [name, situations] of added) entries.push(...(await this.#instructionEntries(name, "briefing")).map((e) => ({ ...e, situations })));
         entries.push(...(await this.#ruleEntries(agent, "briefing", wanted)));
       }
     }

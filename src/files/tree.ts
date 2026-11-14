@@ -21,6 +21,8 @@ export interface FileRef {
 export interface Config {
   /** Names switched off, as `itemKey` gives them. */
   off: Set<string>;
+  /** Instruction files read at every level that has one, farther first, as any level's config names them. */
+  layered: Set<string>;
   /** For each situation, the instruction files the nearest config that names it adds to the briefing. */
   added: Map<string, string[]>;
 }
@@ -167,7 +169,7 @@ export class Tree {
 
   async #readConfig(): Promise<Config> {
     const layers = await this.layers();
-    const config: Config = { off: new Set(), added: new Map() };
+    const config: Config = { off: new Set(), layered: new Set(), added: new Map() };
     const files = await Promise.all(layers.map((layer) => (layer.config === undefined ? undefined : this.read(`${layer.mount}${layer.config}`))));
     for (const file of files) {
       if (file === undefined) continue;
@@ -187,6 +189,10 @@ export class Tree {
       const offNames = nameList(off);
       if (offNames === undefined) this.problems.push(problemAt(at, fieldLine(lines, CONFIG_KEYS.off, 1), "`off:` is a list of the files switched off: `off: [rules/perceptions-owed, WORLD]`."));
       else for (const name of offNames) config.off.add(writtenKey(name, layers));
+
+      const layered = nameList(parsed.value[CONFIG_KEYS.layered]);
+      if (layered === undefined) this.problems.push(problemAt(at, fieldLine(lines, CONFIG_KEYS.layered, 1), "`layered:` is a list of instruction files read at every level that has one, farther first: `layered: [AGENTS]`."));
+      else for (const name of layered) config.layered.add(writtenKey(name, layers));
 
       const added = parsed.value[CONFIG_KEYS.added];
       if (added === undefined || added === null) continue;

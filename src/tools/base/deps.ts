@@ -10,6 +10,9 @@ import { answer, type ToolText, type Words } from "../kit";
 /** The prompt part that holds every line these tools answer with (`.prompts/base-tools.md`). */
 export const BASE_PART = "base-tools";
 
+/** The tool answers every tool shares (`.prompts/tool-notices.md`): among them, why a path an agent names is refused. */
+const NOTICES_PART = "tool-notices";
+
 /** What the base tools are made with. */
 export interface BaseToolsDeps {
   /** The host's ports they work over. */
@@ -24,13 +27,29 @@ export interface BaseToolsDeps {
   web?: WebSearchPort;
   /** The hits `gap_check` takes from each place when the agent names no limit; `GAP_HITS` when absent. */
   gapHits?: number;
+  /**
+   * The most one call takes (the user's `tools.perCall`): the messages `chat_read` gives, the
+   * entries `lore_read` reads, and the hits a search asks each place for and keeps. A limit the
+   * agent names is held to it before the host is asked, and what comes back past it is not kept.
+   */
+  perCall: number;
+}
+
+/** A lines part's lines as the guidance has them; a line the file does not have is no words. */
+async function linesOf(guidance: Pick<Guidance, "part">, name: string): Promise<Words> {
+  const part = await guidance.part(name);
+  const lines = part?.format === "lines" ? part : undefined;
+  return (line, fields) => lines?.line(line, fields);
 }
 
 /** The answers' lines as the guidance has them; a line the file does not have is no words. */
-export async function wordsOf(guidance: Pick<Guidance, "part">): Promise<Words> {
-  const part = await guidance.part(BASE_PART);
-  const lines = part?.format === "lines" ? part : undefined;
-  return (name, fields) => lines?.line(name, fields);
+export function wordsOf(guidance: Pick<Guidance, "part">): Promise<Words> {
+  return linesOf(guidance, BASE_PART);
+}
+
+/** The tool answers' lines every tool shares, as the guidance has them. */
+export function noticesOf(guidance: Pick<Guidance, "part">): Promise<Words> {
+  return linesOf(guidance, NOTICES_PART);
 }
 
 /** Lines in order, those the file does not have (or that came out empty) left out. */
@@ -42,6 +61,11 @@ export function shown(lines: readonly (string | undefined)[]): string[] {
 export function linesAnswer(lines: readonly (string | undefined)[], between: string, error = false): LoopToolResult {
   const kept = shown(lines);
   return answer(kept.length === 0 ? undefined : kept.join(between), error);
+}
+
+/** A limit the agent named, held to the most one call takes. None named stays none, so the host's own cap holds. */
+export function heldLimit(named: number | undefined, most: number): number | undefined {
+  return named === undefined ? undefined : Math.min(named, most);
 }
 
 /** The texts of a list argument; anything else is none. */

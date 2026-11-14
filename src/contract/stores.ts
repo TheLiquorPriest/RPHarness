@@ -2,7 +2,7 @@
 // summaries), the searchers `gap_check` runs besides chat and lore (§10.5: state and the story
 // record, for RPE), and the web searcher (§6.8 `web_search`).
 
-import type { Scope, SearchHit } from "./common";
+import type { AgentRef, Scope, SearchHit } from "./common";
 
 /** One of the host's other stores, as `archive_search` lists it. */
 export interface StoreInfo {
@@ -50,6 +50,11 @@ export interface GapQuery {
   terms: string[];
   /** At most this many hits from this searcher. */
   limit: number;
+  /**
+   * The agent the check is for. A searcher gives what that agent may know, as the lore does (§9.4):
+   * an agent that plays a character (`plays`) is given only what its character may know.
+   */
+  reader: AgentRef;
 }
 
 /** One more place `gap_check` searches, as the host has it (for RPE: the state, the story record). */

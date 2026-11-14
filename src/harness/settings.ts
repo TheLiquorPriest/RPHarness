@@ -28,6 +28,10 @@
 //     clip: 12000                      characters of a tool's result the model reads; the rest is kept in a file
 //   tools:
 //     search: 8                        tools one tool_search gives when the agent names no limit
+//     gapCheck: 20                     hits gap_check takes from each place when the agent names no limit
+//     perCall: 100                     the most one tool call takes: messages chat_read gives, entries
+//                                      lore_read reads, hits a search asks each place for and keeps,
+//                                      and messages a stretch of the chat an agent is given holds
 //   rules:
 //     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
 //                                      written, and stretches of a tool's arguments or result
@@ -42,6 +46,7 @@
 import type { Effort, FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
 import { REPLY_DEFAULTS } from "../reply/defaults";
+import { GAP_HITS } from "../tools/base";
 import { SEARCH_HITS } from "../tools/search";
 
 export type ReplyFormSetting = "tags" | "two-step";
@@ -79,6 +84,10 @@ export interface Settings {
   clipChars: number;
   /** Tools one `tool_search` gives when the agent names no limit. */
   searchHits: number;
+  /** Hits `gap_check` takes from each place when the agent names no limit. */
+  gapHits: number;
+  /** The most one tool call takes: messages, entries, or hits from each place searched; a stretch of the chat an agent is given too. */
+  perCall: number;
   /** Characters a rule's pattern looks at at a time. */
   ruleWindow: number;
   /** The effort agents on a connection think at, by the connection's name or id, over their definitions'. */
@@ -111,6 +120,12 @@ export const DEFAULT_SETTINGS: Settings = {
   clipChars: 12_000,
   // Tool search's own (`SEARCH_HITS`): a handful an agent reads at a glance.
   searchHits: SEARCH_HITS,
+  // The gap check's own (`GAP_HITS`): about the characters of a result the model reads whole, over three places.
+  gapHits: GAP_HITS,
+  // The longest stretch the history window holds under Appendix D.1's settings (40 messages, a step
+  // of 20, and 40 more held for the story's record), and five times the hits a gap check takes from
+  // a place by default.
+  perCall: 100,
   // Wide enough for any phrase a rule looks for, with room to spare; narrow enough that a pattern of
   // the kinds the rules let in takes at most some tens of milliseconds on it.
   ruleWindow: 500,
@@ -263,6 +278,8 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     silenceMs: silence !== undefined ? silence * 1000 : DEFAULT_SETTINGS.silenceMs,
     clipChars: count("results.clip", results["clip"]) ?? DEFAULT_SETTINGS.clipChars,
     searchHits: count("tools.search", tools["search"]) ?? DEFAULT_SETTINGS.searchHits,
+    gapHits: count("tools.gapCheck", tools["gapCheck"]) ?? DEFAULT_SETTINGS.gapHits,
+    perCall: count("tools.perCall", tools["perCall"]) ?? DEFAULT_SETTINGS.perCall,
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
     efforts,
     requests: oneOf<RequestsSetting>("trace.requests", trace["requests"], ["first", "all", "none"]) ?? DEFAULT_SETTINGS.requests,

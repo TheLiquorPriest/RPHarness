@@ -1,10 +1,10 @@
 // `skill_load` and `suggest` (§6.8, §5.1). `skill_load` gives a skill's text by its name, through the
 // guidance loader, from whichever level has it in force. `suggest` hands the user a proposed change
 // to one of their files or to lore, with its reason; the host keeps it for the user to accept, edit
-// or dismiss, and nothing is changed by it.
+// or dismiss, and nothing is changed by it. A file is named as the agents' view has it.
 import type { Suggestion } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text } from "../kit";
-import { type BaseToolsDeps, wordsOf } from "./deps";
+import { type BaseToolsDeps, noticesOf, wordsOf } from "./deps";
 
 export function skillLoad(deps: BaseToolsDeps): OwnTool {
   const own = deps.texts.get("skill_load");
@@ -41,7 +41,14 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
       if (target === undefined || targets.length > 1) return answer(words("suggest_target"), true);
       // An entry the agent may not read is one it cannot have a change for.
       if (lore !== undefined && (await deps.env.lore.read(ctx.scope, [lore], ctx.agent)).length === 0) return answer(words("no_entry", { id: lore }), true);
-      await deps.env.events.suggestion(ctx.scope, ctx.agent, { target, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "" });
+      let handed = target;
+      if (file !== undefined) {
+        // A path that leaves the view, or passes through a link, is no file of the user's that anyone could change (§5.1).
+        const read = await deps.env.files.read(ctx.scope, file, { start: 1, end: 1 });
+        if (read.status === "refused") return answer((await noticesOf(deps.guidance))(`refused_${read.reason}`, { path: read.path, writable: read.writable }), true);
+        handed = { file: read.path };
+      }
+      await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "" });
       return answer(words("suggested"));
     },
   };

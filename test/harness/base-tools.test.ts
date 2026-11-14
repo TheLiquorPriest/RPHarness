@@ -67,6 +67,35 @@ test("RPH's own lead reads a stretch of the chat and runs a gap check: the check
   expect(told[0]?.saved).toBe(kept?.path);
 });
 
+test("the player's bound on one call holds RPH's lead's read of the chat, and the answer says which stretch it gave", async () => {
+  const s = (open = await stage({
+    config: "tools:\n  perCall: 2\n",
+    chat: CHAT_PATH,
+    answers: [{ pieces: [{ call: "chat_read", args: {} }] }, { pieces: [{ text: "<reply>The stairs, and Wren at the brass.</reply>" }] }],
+  }));
+
+  const { outcome } = await s.turn(request("t1", { lead: "lead" }));
+
+  expect(outcome.status).toBe("released");
+  const read = answerTo(s, "call_1_1");
+  expect(read).toContain("Messages #0 to #1 of 4. One read gives at most 2.");
+  expect(read).toContain("polishing the brass");
+  expect(read).not.toContain("I ask Wren whether the supply boat came.");
+});
+
+test("the hits a gap check takes from each place when the agent names no limit are the player's setting", async () => {
+  const s = (open = await stage({
+    config: "tools:\n  gapCheck: 1\n",
+    chat: CHAT_PATH,
+    answers: [{ pieces: [{ call: "gap_check", args: { topic: "Wren" } }] }, { pieces: [{ text: "<reply>Wren is there.</reply>" }] }],
+  }));
+
+  await s.turn(request("t1", { lead: "lead" }));
+
+  const [kept] = await evidence(s, "t1");
+  expect(kept?.check.searched.find((place) => place.where === "chat")?.hits).toHaveLength(1);
+});
+
 test("a host with no web searcher and no other stores offers neither search; one with both offers both, and a search of the web goes through the host's searcher", async () => {
   const bare = (open = await stage({ answers: [{ pieces: [{ text: "<reply>Nothing to look up.</reply>" }] }] }));
   await bare.turn(request("t1", { lead: "lead" }));

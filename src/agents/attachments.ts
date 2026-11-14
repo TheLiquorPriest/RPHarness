@@ -4,11 +4,14 @@
 //   chat:history[scene]         a stretch of the chat the host names
 //   chat:history[-30:]          the last thirty messages
 //   chat:history[#120..#179]    messages 120 to 179, both included, counted from 0
-//   lore:<id>                   a lore entry, as the agent may read it
+//   lore:<id>                   a lore entry, as the agent may read it, marked with who may know it
 //   prompt:<name>               a slice of the prompt, through the prompt map
-// Every other name is a view the host offers, and so is a `lore:` name that no entry has: the host
-// gives its text. The whole list goes to the host, which keeps it with the turn (§10.5: "the list is
-// saved with the turn"). A name nobody could give is handed back, for the delegate call's result.
+// Every other name is a view the host offers: the host gives its text. A `lore:` name the lore does
+// not give the agent stays RPH's own, with no text: the lore leaves out what a character may not
+// know as if there were no such entry (§9.4), so no other place is asked for it. The whole list goes
+// to the host, which keeps it with the turn (§10.5: "the list is saved with the turn"). A name nobody
+// could give is handed back, for the delegate call's result.
+// A stretch of the chat holds at most the user's `tools.perCall` messages, as one `chat_read` does.
 // Messages and entries are laid out by lines of a file; nothing here adds a word.
 import type { AgentRef, AttachmentRef, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
 import type { LinesPart } from "../files/api";
@@ -32,6 +35,8 @@ export interface AttachDeps {
   lines: LinesPart | undefined;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map; none: such a name is not found. */
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
+  /** The most messages a stretch of the chat holds (the user's `tools.perCall`): the last few are the newest of them, and any other stretch stops that many from its start. */
+  most: number;
 }
 
 /** A stretch of the chat as a name gives it. */
@@ -101,10 +106,10 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
       range = Object.hasOwn(ranges, stretch.named) ? ranges[stretch.named] : undefined;
     } else if ("last" in stretch) {
       const { length } = await env.chat.info(scope);
-      range = { from: Math.max(0, length - stretch.last), to: length };
+      range = { from: Math.max(0, length - Math.min(stretch.last, deps.most)), to: length };
     } else range = { from: stretch.from, to: stretch.to + 1 };
     if (range === undefined || range.to <= range.from) return undefined;
-    const messages = await env.chat.read(scope, { from: range.from, to: range.to });
+    const messages = await env.chat.read(scope, { from: range.from, to: Math.min(range.to, range.from + deps.most) });
     if (messages.length === 0) return undefined;
     // Each message as the `chat_message` line lays it out; nothing when the file has no such line.
     const laid = messages.map(
@@ -122,11 +127,14 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
     return joined(laid);
   };
 
-  const loreText = async (id: string): Promise<Own> => {
+  const loreText = async (id: string): Promise<string | undefined> => {
     const [entry] = await env.lore.read(scope, [id], reader);
-    if (entry === undefined) return { own: false };
+    if (entry === undefined) return undefined;
     const head = lines?.line("lore_entry", { id: entry.id, title: entry.title, source: entry.source, keys: entry.keys }) ?? "";
-    return { own: true, text: joined([head, entry.text]) };
+    // Who may know it, as `lore_read` marks it (§9.4: every entry "marked with who may know it").
+    const { knowing } = entry;
+    const known = knowing?.by === "characters" ? lines?.line("lore_known_by", { names: knowing.names }) : knowing?.by === "gate" ? lines?.line("lore_gate", { gate: knowing.gate, ...(knowing.open ? { open: true } : {}) }) : undefined;
+    return joined([head, known ?? "", entry.text]);
   };
 
   const own = async (ref: string): Promise<Own> => {
@@ -138,7 +146,7 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
         case "chat":
           return { own: true, text: await chatText(kind.stretch) };
         case "lore":
-          return await loreText(kind.id);
+          return { own: true, text: await loreText(kind.id) };
         case "prompt":
           return { own: true, text: await deps.slice?.(ref, reader) };
         case "host":

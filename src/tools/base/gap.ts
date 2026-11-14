@@ -2,7 +2,8 @@
 // lore, and each searcher the host offers: for RPE, the state and the story record) by the names
 // and words given, and by meaning where the host has that set up. What was searched and what came
 // back is saved with the turn, in its `queries/` folder, and the host is told; the answer says
-// where. Code proves nothing about meaning: it shows what was searched and what came back.
+// where. Each place is asked for, and keeps, at most the user's `tools.perCall` hits. Code proves
+// nothing about meaning: it shows what was searched and what came back.
 import type { GapCheck, GapSearch, SearchHit } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole } from "../kit";
 import { type BaseToolsDeps, linesAnswer, textsOf, wordsOf } from "./deps";
@@ -34,13 +35,13 @@ export function gapCheck(deps: BaseToolsDeps): OwnTool {
       // A check of nothing would come back empty everywhere, which reads as a gap proven.
       if (topic === "") return answer(words("gap_no_topic"), true);
       const terms = [...new Set(textsOf(given["terms"]).map((term) => term.trim()))].filter((term) => term !== "" && term !== topic);
-      const limit = whole(given, "limit") ?? deps.gapHits ?? GAP_HITS;
+      const limit = Math.min(whole(given, "limit") ?? deps.gapHits ?? GAP_HITS, deps.perCall);
       const looked = [topic, ...terms].join(" ");
       const searches: { where: string; search(): Promise<SearchHit[]> }[] = [
         { where: "chat", search: async () => (await env.chat.search(scope, { text: looked, limit })).map((hit) => ({ ref: hit.id, title: hit.name, snippet: hit.snippet, how: hit.how })) },
         // The lore as the agent may read it: a character's agent checks only what its character may know (§9.4).
         { where: "lore", search: async () => (await env.lore.search(scope, { text: looked, limit }, ctx.agent)).map((hit) => ({ ref: hit.id, title: hit.title, snippet: hit.snippet, how: hit.how })) },
-        ...env.searchers.map((searcher) => ({ where: searcher.name, search: () => searcher.search(scope, { topic, terms, limit }) })),
+        ...env.searchers.map((searcher) => ({ where: searcher.name, search: () => searcher.search(scope, { topic, terms, limit, reader: ctx.agent }) })),
       ];
       const settled = await Promise.allSettled(searches.map(async (one) => one.search()));
       const searched: GapSearch[] = [];
@@ -49,7 +50,7 @@ export function gapCheck(deps: BaseToolsDeps): OwnTool {
         const where = searches[at]?.where ?? "";
         // A place that could not be searched is not evidence of anything, so it is left out of what was searched.
         if (outcome.status === "rejected") failed.push({ where, error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) });
-        else searched.push({ where, hits: outcome.value });
+        else searched.push({ where, hits: outcome.value.slice(0, limit) });
       }
       const check: GapCheck = { id: deps.ids(), by: ctx.agent, topic, terms, searched };
 

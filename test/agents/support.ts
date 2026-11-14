@@ -252,6 +252,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
       rules: () => rules,
       budget: () => budget,
       settings: () => settings.subAgents,
+      perCall: () => settings.perCall,
       track: (entry) => {
         working.add(entry);
         return () => working.delete(entry);

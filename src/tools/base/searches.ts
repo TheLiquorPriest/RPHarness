@@ -1,10 +1,11 @@
 // `archive_search` and `web_search` (§6.8): searches of what the host keeps besides the chat and the
 // lore (databanks, the chat application's memory, summaries), and of the web. Each is made only
 // when the host offers a searcher for it, so an agent never holds a tool that has nothing behind it.
+// One call takes at most the user's `tools.perCall` hits.
 import type { SearchHit, StoresPort, WebSearchPort } from "../../contract";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
-import { type BaseToolsDeps, linesAnswer, shown, textsOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, heldLimit, linesAnswer, shown, textsOf, wordsOf } from "./deps";
 
 /** Hits, one line each by `line`, or the line for none. */
 function hitsAnswer(words: Words, line: string, hits: readonly SearchHit[]): LoopToolResult {
@@ -41,8 +42,9 @@ export function archiveSearch(deps: BaseToolsDeps, stores: StoresPort): OwnTool 
         const unknown = named.find((name) => !kept.includes(name));
         if (unknown !== undefined) return answer(words("no_store", { name: unknown, stores: kept.join(", ") }), true);
       }
-      const limit = whole(given, "limit");
-      return hitsAnswer(words, "archive_hit", await stores.search(scope, { text: query, ...(named.length > 0 ? { stores: named } : {}), ...(limit !== undefined ? { limit } : {}) }));
+      const limit = heldLimit(whole(given, "limit"), deps.perCall);
+      const found = await stores.search(scope, { text: query, ...(named.length > 0 ? { stores: named } : {}), ...(limit !== undefined ? { limit } : {}) });
+      return hitsAnswer(words, "archive_hit", found.slice(0, limit ?? deps.perCall));
     },
   };
 }
@@ -57,9 +59,9 @@ export function webSearch(deps: BaseToolsDeps, web: WebSearchPort): OwnTool {
     parameters: argumentsOf({ query: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["query"], own),
     async run(args, ctx) {
       const given = fieldsOf(args);
-      const limit = whole(given, "limit");
-      const [words, hits] = await Promise.all([wordsOf(deps.guidance), web.search(ctx.scope, { text: text(given, "query") ?? "", ...(limit !== undefined ? { limit } : {}) })]);
-      return hitsAnswer(words, "web_hit", hits);
+      const limit = heldLimit(whole(given, "limit"), deps.perCall);
+      const [words, found] = await Promise.all([wordsOf(deps.guidance), web.search(ctx.scope, { text: text(given, "query") ?? "", ...(limit !== undefined ? { limit } : {}) })]);
+      return hitsAnswer(words, "web_hit", found.slice(0, limit ?? deps.perCall));
     },
   };
 }

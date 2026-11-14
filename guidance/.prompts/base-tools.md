@@ -1,9 +1,9 @@
 ---
-description: The words RPH's base tools answer with - chat_read, chat_search, lore_read, lore_search, gap_check, skill_load, suggest, archive_search and web_search - and how a message of the chat, a lore entry, a thing kept in another store and a search hit are laid out in their answers. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words.
+description: The words RPH's base tools answer with - chat_read, chat_search, lore_read, lore_search, gap_check, skill_load, suggest, archive_search and web_search - and how a message of the chat, a lore entry, a thing kept in another store and a search hit are laid out in their answers. A gap check names the places it searched chat, lore, and each other place by the system's own name for it, which is how its saved evidence names them too. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)".
 format: lines
 ---
 none_found: Nothing found.
-chat_range: Messages #{{from}} to #{{to}} of {{length}}.
+chat_range: Messages #{{from}} to #{{to}} of {{length}}.{{#most}} One read gives at most {{most}}.{{/most}}
 chat_message: #{{index}} ({{id}}) {{name}}{{#hidden}} (hidden){{/hidden}}{{#summarized}} (summarized){{/summarized}}: {{text}}
 chat_withheld: #{{index}} ({{id}}) {{name}} (hidden): the chat's setting keeps its text from agents.
 chat_hit: #{{index}} ({{id}}) {{name}}: {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
@@ -15,6 +15,7 @@ lore_known_by: Known only to {{names}}.
 lore_gate: Known only to whoever passes its gate, {{gate}}, which {{#open}}holds{{/open}}{{^open}}does not hold{{/open}} now.
 lore_hit: [{{id}}] {{title}} ({{source}}): {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
 no_entry: There is no lore entry {{id}}.
+lore_unread: Not read, since one read gives at most {{most}} entries: {{ids}}.
 gap_head: Gap check {{id}}: {{topic}}{{#terms}}, with {{.}}{{/terms}}.
 gap_place: {{where}}: {{count}} found.
 gap_place_none: {{where}}: nothing found.

@@ -35,7 +35,7 @@ export class Registry {
         this.shadowed.push(tool.name);
         continue;
       }
-      this.#tools.set(tool.name, { name: tool.name, description: tool.description, parameters: tool.parameters, run: (args, ctx) => tool.run(args, ctx), family: tool.family, tier: tool.tier, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), from: "host" });
+      this.#tools.set(tool.name, { name: tool.name, description: tool.description, parameters: tool.parameters, run: (args, ctx) => tool.run(args, ctx), family: tool.family, tier: tool.tier, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), ...(tool.switchable !== undefined ? { switchable: tool.switchable } : {}), from: "host" });
     }
   }
 

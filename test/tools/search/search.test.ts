@@ -82,4 +82,15 @@ describe("tool_search", () => {
     const empty = await search({ words: "  " });
     expect([textOf(empty), empty.error]).toEqual([(await lines()).line("no_words") ?? "", true]);
   });
+
+  test("what a tool takes is written with the file's word for a value of any kind: changed in the player's own file, the answer follows", async () => {
+    const changed = await bench({ ".prompts/tool-search.md": "---\ndescription: Fixture - tool search's words, changed.\nformat: lines\n---\nfound: {{name}} takes {{takes}}\nuntyped: whatever\n" });
+    try {
+      const omen = { name: "omen_read", family: "omens", description: "Reads an omen in the sky.", parameters: { type: "object", properties: { sign: {}, hour: { type: "integer" } }, required: ["sign"] }, run: async () => ({ content: [] }) };
+      const result = await toolSearch(changed.deps(standIn([omen]))).run({ words: "omen" }, ctxOf());
+      expect(textOf(result)).toBe("omen_read takes {sign: whatever, hour?: integer}");
+    } finally {
+      await changed.close();
+    }
+  });
 });

@@ -47,15 +47,12 @@ const TEXT = { type: "string" };
 export const DICE_SERVER: Switchable = { kind: "mcp-server", name: "dice-tower", target: "dice-tower --stdio" };
 export const PAGE_ADDRESS: Switchable = { kind: "http-tool", name: "page_fetch", target: "https://pages.example.invalid/fetch" };
 
-/** A host's tool, with what it runs or calls when it calls out. */
-export type Fixture = HostTool & { switchable?: Switchable };
-
 /** Every call a fixture tool ran, as `name args`. */
 export type Ran = string[];
 
 /** Tools of the kind an engine adds, and three that call out. Each records its runs in `ran`. */
-export function fixtureTools(ran: Ran): Fixture[] {
-  const tool = (name: string, family: string, description: string, parameters: Record<string, JsonValue>, required: string[], result: (args: JsonValue) => ToolResult, extra: Partial<Fixture> = {}): Fixture => ({
+export function fixtureTools(ran: Ran): HostTool[] {
+  const tool = (name: string, family: string, description: string, parameters: Record<string, JsonValue>, required: string[], result: (args: JsonValue) => ToolResult, extra: Partial<HostTool> = {}): HostTool => ({
     name,
     family,
     tier: "read",

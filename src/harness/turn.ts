@@ -239,9 +239,13 @@ export class Turn {
     this.#settings = settings;
     this.#places = places;
     // The turn's first entry in the session file: after the session's latest turn when the request names no parent, after no turn when it names none (null), and a swipe after the entry before the turn it replaces (§11).
+    // A continue is the same turn, extended (§10.10): a turn the file holds already is not begun again, and its work goes on from the turn's newest entry.
     this.#file = file;
-    const begun = file.add({ type: "turn", parent: file.log.anchor(req.parent), turn: scope.turn, kind: req.kind, lead: req.lead, ...(typeof req.parent === "string" ? { follows: req.parent } : {}) });
-    this.#sessionTurns = pathTurns(file.log, begun.id).length;
+    const continued = req.kind === "continue" ? file.log.turn(scope.turn) : undefined;
+    const begun = continued ?? file.add({ type: "turn", parent: file.log.anchor(req.parent), turn: scope.turn, kind: req.kind, lead: req.lead, ...(typeof req.parent === "string" ? { follows: req.parent } : {}) });
+    // Where this run's work starts on the path: before the turn, or after what a continued turn did already. What the session carries and what the rules remembered are read there.
+    const from = continued === undefined ? begun.parent : (file.log.tip(scope.turn) ?? continued.id);
+    this.#sessionTurns = pathTurns(file.log, file.log.tip(scope.turn) ?? begun.id).length;
     this.#progress = lines(progress);
     const answers = lines(toolNotices);
     this.#words = (name, fields) => answers?.line(name, fields);
@@ -255,8 +259,8 @@ export class Turn {
 
     const session = this.#c.sessions.of(scope);
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
-    // The rules go on from what they remembered where this turn hangs in the session file, so a swipe starts where the attempt it replaces did.
-    const memory = memoryAt(session, file.log, begun.parent);
+    // The rules go on from what they remembered where this run starts in the session file, so a swipe starts where the attempt it replaces did, and a continue where its turn left off.
+    const memory = memoryAt(session, file.log, from);
     const rules = await guidance.ruleRun({ facts, window: settings.ruleWindow, ...(memory !== undefined ? { memory } : {}) });
     this.#rules = rules;
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
@@ -284,6 +288,7 @@ export class Turn {
       rules: () => this.#rulesRun(),
       budget: () => this.#budget,
       settings: () => this.#settings.subAgents,
+      perCall: () => this.#settings.perCall,
       track: (entry) => {
         this.#working.add(entry);
         return () => this.#working.delete(entry);
@@ -350,7 +355,7 @@ export class Turn {
     const layout = template(carried);
     if (opening.given.includes("session:carry") && layout !== undefined) {
       const record = layout.header["record"];
-      const fields = await carriedFields({ carry: req.carry, tree: file.log, from: begun.parent, scope, files: env.files, log: env.log, ...(typeof record === "string" ? { record } : {}) });
+      const fields = await carriedFields({ carry: req.carry, tree: file.log, from, scope, files: env.files, log: env.log, ...(typeof record === "string" ? { record } : {}) });
       const text = fields === undefined ? "" : joined([layout.render(fields).text]);
       if (text !== "") messages.push(systemMessage(text, at));
     }
@@ -564,7 +569,7 @@ export class Turn {
       askAuthor(team, texts.get("ask_author")),
       agentMessage(team, texts.get("agent_message")),
       agentDrop(team, texts.get("agent_drop")),
-      ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), ...(env.web !== undefined ? { web: env.web } : {}) }),
+      ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
       ...searchTools({
         reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
         ...(env.switches !== undefined ? { switches: env.switches } : {}),
@@ -611,6 +616,7 @@ export class Turn {
       clock: env.clock,
       files: env.files,
       ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
+      ...(env.switches !== undefined ? { switches: env.switches } : {}),
       places: this.#places ?? { notes: "", session: "", writable: [] },
       rules: this.#rulesRun(),
       words: (name, fields) => this.#words(name, fields),

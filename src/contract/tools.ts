@@ -4,6 +4,7 @@
 
 import type { AgentRef, Scope } from "./common";
 import type { JsonSchema, JsonValue } from "./json";
+import type { Switchable } from "./switches";
 
 /**
  * What a tool may touch, which is what the user's permissions are decided by (§16): `read` changes
@@ -74,6 +75,12 @@ export interface HostTool {
   description: string;
   /** Its arguments, as an object schema. */
   parameters: JsonSchema;
+  /**
+   * For a tool that runs a command or calls out (an MCP server's tool, a command tool, an HTTP
+   * tool): what it runs or calls. It is found, and run, only while the host's switches say that
+   * thing is on (§16); RPH asks before every call, so a tool pinned in a definition's list waits too.
+   */
+  switchable?: Switchable;
   /** Runs it. A thrown error reaches the model as a failed call with the error's message. */
   run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult>;
 }

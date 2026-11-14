@@ -8,7 +8,7 @@
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, StoresPort, ToolResult, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
+import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, StoresPort, Switchable, SwitchesPort, ToolResult, ToolsPort, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { createHarness, SHIPPED_GUIDANCE } from "../../src/index";
@@ -104,6 +104,8 @@ export interface HostToolFixture {
   family?: string;
   description: string;
   parameters?: Record<string, JsonValue>;
+  /** What it runs or calls, for a tool that calls out: it runs only while the stage's switches say so. */
+  switchable?: Switchable;
   run: ToolHandler;
 }
 
@@ -140,6 +142,8 @@ export interface StageOptions {
   stores?: StoresPort;
   /** The host's web searcher; it offers none when absent. */
   web?: WebSearchPort;
+  /** The host's registry of what is switched on; without it, everything that calls out is off. */
+  switches?: SwitchesPort;
 }
 
 export interface Stage {
@@ -231,14 +235,25 @@ export async function stage(options: StageOptions): Promise<Stage> {
   };
   const events = recorded(options.events !== undefined ? options.events(host.events) : host.events);
   const trace = new WatchedTrace();
+  // The folder host's manifest says nothing of switches: the stage gives each tool what it calls out to, as a host whose tools call out would.
+  const calls = new Map(Object.entries(options.tools ?? {}).flatMap(([name, tool]) => (tool.switchable !== undefined ? [[name, tool.switchable] as const] : [])));
+  const tools: ToolsPort = {
+    all: async (scope) =>
+      (await host.tools.all(scope)).map((tool) => {
+        const switchable = calls.get(tool.name);
+        return switchable === undefined ? tool : { ...tool, switchable };
+      }),
+  };
   const env: Environment = {
     ...host,
     files: options.filesPort?.(host.files) ?? host.files,
+    tools,
     events,
     trace,
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
     ...(options.stores !== undefined ? { stores: options.stores } : {}),
     ...(options.web !== undefined ? { web: options.web } : {}),
+    ...(options.switches !== undefined ? { switches: options.switches } : {}),
   };
   const model = scriptedModel(options.answers, { clock, contextWindow: 64_000, maxTokens: 4_000 });
   let next = 0;

@@ -81,4 +81,17 @@ describe("suggest", () => {
     expect([none.error, two.error]).toEqual([true, true]);
     expect(handed).toEqual([]);
   });
+
+  test("a file is named as the agents' view has it; a path that leaves the view is said, in the tool answers' words, and not handed on", async () => {
+    const { extra, handed } = host();
+    const notices = await b.guidance.part("tool-notices");
+
+    const tidied = await b.call("suggest", { file: "notes/../WORLD.md", text: "The harbor freezes.", reason: "Winter." }, { extra });
+    const outside = await b.call("suggest", { file: "../other-chat/WORLD.md", text: "The harbor freezes.", reason: "Winter." }, { extra });
+
+    expect(tidied.error).toBeUndefined();
+    expect(outside.error).toBe(true);
+    expect(textOf(outside)).toBe(notices?.format === "lines" ? (notices.line("refused_outside", { path: "../other-chat/WORLD.md" }) ?? "") : "no tool answers' file");
+    expect(handed.map((h) => h.suggestion.target)).toEqual([{ file: "WORLD.md" }]);
+  });
 });

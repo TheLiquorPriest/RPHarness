@@ -52,7 +52,7 @@ describe("gap_check", () => {
     expect(told[0]!.saved!.startsWith(`sessions/${SCOPE.session}/turns/${SCOPE.turn}/queries/`)).toBe(true);
   });
 
-  test("each searcher the host offers is searched too, with the topic and terms, and is named in the evidence", async () => {
+  test("each searcher the host offers is searched too, with the topic, the terms and the agent the check is for, and is named in the evidence", async () => {
     const asked: GapQuery[] = [];
     const story: Searcher = {
       name: "story",
@@ -62,9 +62,11 @@ describe("gap_check", () => {
       },
     };
     const { extra } = host([story]);
-    const answer = textOf(await b.call("gap_check", { topic: "drowned bell", terms: ["bronze bell"], limit: 5 }, { extra }));
+    // An agent that plays a character: the host's searcher, as its lore does, gives only what the character may know (§9.4).
+    const wren = { id: "character-1", definition: "character", parent: "lead", plays: "Wren" };
+    const answer = textOf(await b.call("gap_check", { topic: "drowned bell", terms: ["bronze bell"], limit: 5 }, { extra, agent: wren }));
 
-    expect(asked).toEqual([{ topic: "drowned bell", terms: ["bronze bell"], limit: 5 }]);
+    expect(asked).toEqual([{ topic: "drowned bell", terms: ["bronze bell"], limit: 5, reader: wren }]);
     const saved = await evidence(answer);
     expect(saved.searched.map((s) => s.where)).toEqual(["chat", "lore", "story"]);
     expect(saved.searched[2]!.hits).toEqual([{ ref: "thread/bell", title: "The bell's silence", snippet: "The bell has not rung in forty years.", how: "words" }]);

@@ -86,8 +86,10 @@ export function toolSearch(deps: ToolSearchDeps): OwnTool {
         entry.tools.push(tool.name);
         waiting.set(key, entry);
       }
+      // A value whose schema gives no type is written in the file's word for it.
+      const untyped = words("untyped") ?? "";
       const lines = [
-        ...shown.map((tool) => words("found", { name: tool.name, family: tool.family, line: tool.description.split("\n").map((line) => line.trim()).find((line) => line !== "") ?? "", takes: takes(tool.parameters) })),
+        ...shown.map((tool) => words("found", { name: tool.name, family: tool.family, line: tool.description.split("\n").map((line) => line.trim()).find((line) => line !== "") ?? "", takes: takes(tool.parameters, untyped) })),
         ...(found.length > shown.length ? [words("more", { count: found.length - shown.length })] : []),
         ...[...waiting.values()].map((thing) => words("waiting", thing)),
       ].filter((line): line is string => line !== undefined && line !== "");

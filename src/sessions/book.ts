@@ -29,15 +29,18 @@ export class SessionFile {
   readonly #d: BookDeps;
   /** Whether the file has its first line on disk, or holds something that is not to be written over. */
   #begun: boolean;
+  /** Whether what is on disk may end part-way through a line (a write cut off, a file that could not be read): the next line then starts a line of its own. */
+  #cut: boolean;
   #writing: Promise<void> = Promise.resolve();
 
-  constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean) {
+  constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean) {
     this.#d = d;
     this.scope = scope;
     this.path = path;
     this.header = header;
     this.log = new SessionLog(entries);
     this.#begun = begun;
+    this.#cut = cut;
   }
 
   /** Adds an entry: in the tree at once, on disk after every entry before it. The file is begun with its first line if it has none yet. */
@@ -70,10 +73,14 @@ export class SessionFile {
   #write(text: string): void {
     const { files, log } = this.#d;
     this.#writing = this.#writing.then(async () => {
+      // After a line cut off part-way, a new line first: the cut one is passed over when the file is read, and this one stays whole.
+      const line = this.#cut ? `\n${text}` : text;
       try {
-        const done = await files.write(this.scope, this.path, { op: "append", text }, "harness");
+        const done = await files.write(this.scope, this.path, { op: "append", text: line }, "harness");
+        this.#cut = done.status !== "written";
         if (done.status !== "written") log.error("The session file could not be written.", { session: this.scope.session, path: this.path, status: done.status, reason: done.reason });
       } catch (error) {
+        this.#cut = true;
         log.error("The session file could not be written.", { session: this.scope.session, path: this.path, error: error instanceof Error ? error.message : String(error) });
       }
     });
@@ -118,17 +125,17 @@ export class SessionBook {
     try {
       read = await files.read(scope, path);
     } catch (error) {
-      // Nothing of it can be known: the session goes on from nothing, and what is added is put after whatever the file holds.
+      // Nothing of it can be known: the session goes on from nothing, and what is added is put after whatever the file holds, on a line of its own.
       log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, error: error instanceof Error ? error.message : String(error) });
-      return new SessionFile(this.#d, scope, path, undefined, [], true);
+      return new SessionFile(this.#d, scope, path, undefined, [], true, true);
     }
-    if (read.status === "missing") return new SessionFile(this.#d, scope, path, undefined, [], false);
+    if (read.status === "missing") return new SessionFile(this.#d, scope, path, undefined, [], false, false);
     if (read.status === "refused") {
       log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, reason: read.reason });
-      return new SessionFile(this.#d, scope, path, undefined, [], true);
+      return new SessionFile(this.#d, scope, path, undefined, [], true, true);
     }
     const parsed = parseSession(read.text);
     if (parsed.unread.length > 0) log.warn("Lines of the session file could not be read and are passed over.", { session: scope.session, path, lines: parsed.unread });
-    return new SessionFile(this.#d, scope, path, parsed.header, parsed.entries, true);
+    return new SessionFile(this.#d, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"));
   }
 }

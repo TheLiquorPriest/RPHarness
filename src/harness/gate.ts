@@ -1,9 +1,10 @@
-// What runs around each of an agent's tool calls (§13.3): before the call, the user's permission
-// for what it writes (Auto, Confirm or Never per lane, and the external tier's own setting, §6.8),
-// and the user's rules on its arguments; after it, the rules on its result, and a long result
-// clipped to what the model reads, with the whole kept in the turn's folder (`cache/`). Every word
-// the model is told comes from the tool answers' file.
-import type { AgentRef, ApprovalsPort, Clock, FilesPort, Places, Scope, ToolContent } from "../contract";
+// What runs around each of an agent's tool calls (§13.3): before the call, the host's switches for
+// a tool that runs a command or calls out (§16), the user's permission for what it writes (Auto,
+// Confirm or Never per lane, and the external tier's own setting, §6.8), and the user's rules on its
+// arguments; after it, the rules on its result, and a long result clipped to what the model reads,
+// with the whole kept in the turn's folder (`cache/`). Every word the model is told comes from the
+// tool answers' file.
+import type { AgentRef, ApprovalsPort, Clock, FilesPort, Places, Scope, SwitchesPort, ToolContent } from "../contract";
 import type { RuleRun } from "../files/api";
 import type { ParentCall, RunTrace } from "../loop/trace";
 import type { GateAfter, GateBefore, GateCall, LoopToolResult, ToolGate } from "../loop/types";
@@ -21,6 +22,8 @@ export interface GateDeps {
   clock: Clock;
   files: FilesPort;
   approvals?: ApprovalsPort;
+  /** The host's registry of what is switched on; without it, every tool that runs a command or calls out is off. */
+  switches?: SwitchesPort;
   places: Places;
   rules: RuleRun;
   words: Words;
@@ -43,6 +46,12 @@ export class TurnGate implements ToolGate {
     const d = this.#d;
     await d.ready();
     const tool = d.tools.get(call.tool);
+    // A tool that runs a command or calls out does nothing until the host's switches have its thing on, pinned or found (§16).
+    const thing = tool?.switchable;
+    if (thing !== undefined) {
+      const state = d.switches === undefined ? "off" : await d.switches.state(thing);
+      if (state !== "on") return { refuse: answer(d.words("not_switched_on", { tool: call.tool, name: thing.name, kind: thing.kind, ...(state === "waiting" ? { waiting: true } : {}) }), true), remind: [] };
+    }
     // A tool of the external tier is under the user's `external` setting whatever lane it names; a write, under its lane's.
     const lane = tool?.tier === "external" ? "external" : tool?.tier === "write" ? tool.lane : undefined;
     if (lane !== undefined && d.approvals !== undefined) {

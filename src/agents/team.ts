@@ -57,6 +57,8 @@ export interface TeamDeps {
   budget(): Budget;
   /** The user's limits on how deep sub-agents may stand and how many one turn may start: the turn's settings. */
   settings(): AgentSettings;
+  /** The most one call takes (the user's `tools.perCall`), which a stretch of the chat an agent is given is held to. */
+  perCall(): number;
   /** A sub-agent's work began: the turn stops it with the rest, and its time reaches it. The answer forgets the work once it ends. */
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A sub-agent's model's room, for its window gauge. */
@@ -227,7 +229,7 @@ export class Team implements TeamWork {
     const instructions = await instructionsOf(d.guidance, definition, held.tools, (name) => d.hold([name]).tools.length > 0, fields, d.env.log);
     const wanted: Wanted[] = [...definition.given.map((name) => ({ ref: name, from: "definition" as const })), ...call.attach.map((name) => ({ ref: name, from: "delegate" as const }))];
     const slice = d.slice?.bind(d);
-    const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
+    const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
     const attachments = given.blocks.map((block) => ({ name: block.name, text: block.text }));
     // Without the frame, the brief and what it is given go as they are, one after another.
     const brief = loaded.brief?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
@@ -382,8 +384,11 @@ export class Team implements TeamWork {
       }
       case "stopped":
         return said(words("stopped", fields) ?? "", { error: true, ...extra });
-      case "failed":
-        return said(words("failed", fields) ?? "", { error: true, ...extra });
+      case "failed": {
+        // Which failed, its model or RPH's own work under it, by name, for the line to say.
+        const failure = outcome.failure ?? "harness";
+        return said(words("failed", { ...fields, failure, [failure]: true }) ?? "", { error: true, ...extra });
+      }
     }
   }
 

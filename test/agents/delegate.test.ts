@@ -120,7 +120,7 @@ describe("delegate", () => {
     expect(told?.kind === "attachments" ? told.refs : []).toEqual([
       { ref: "world:scene", from: "definition", own: false },
       { ref: "chat:history[scene]", from: "delegate", own: true },
-      { ref: "lore:e-999", from: "delegate", own: false },
+      { ref: "lore:e-999", from: "delegate", own: true },
       { ref: "file:scratch/plan.md", from: "delegate", own: true },
       { ref: "file:persistent-workspace/none.md", from: "delegate", own: true },
     ]);
@@ -169,5 +169,83 @@ describe("delegate", () => {
     expect(outcome.status).toBe("done");
     expect(s.models["keeper-model"]!.requests).toHaveLength(2);
     expect(toolResults(s.models["lead-model"]!.requests[1]!.messages).sort()).toEqual(["keeper was not started: this turn has started 2 agents, and the player allows 2.", "keeper-1 answered:\n\nNoted.", "keeper-2 answered:\n\nNoted."]);
+  });
+
+  test("a stretch of the chat an agent is given holds no more messages than the player lets one call take", async () => {
+    const gm = definition("gm", { model: "gm-model", tools: [] }, "Fixture GM.");
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/gm.md": gm, "config.yml": "tools:\n  perCall: 2\n" },
+      messages: [
+        { role: "user", name: "Mara", text: "Fixture line zero." },
+        { role: "assistant", name: "Wren Hale", text: "Fixture line one." },
+        { role: "user", name: "Mara", text: "Fixture line two." },
+        { role: "assistant", name: "Wren Hale", text: "Fixture line three." },
+        { role: "user", name: "Mara", text: "Fixture line four." },
+      ],
+      ranges: { scene: { from: 1, to: 5 } },
+      models: {
+        "lead-model": [{ pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule.", attach: ["chat:history[-30:]", "chat:history[#0..#4]", "chat:history[scene]"] }, id: "d-1" }] }, { pieces: [{ text: "Settled." }] }],
+        "gm-model": [{ pieces: [{ text: "Ruled." }] }],
+      },
+    }));
+
+    await (await s.play(PLAYER)).done;
+
+    const brief = textOf(s.models["gm-model"]!.requests[0]!.messages[1] ?? { content: "" });
+    // The last few are the newest; any other stretch stops at the bound from its start.
+    expect(brief).toContain("### chat:history[-30:]\n\n#3 Wren Hale: Fixture line three.\n\n#4 Mara: Fixture line four.\n\n### chat:history[#0..#4]\n\n#0 Mara: Fixture line zero.\n\n#1 Wren Hale: Fixture line one.\n\n### chat:history[scene]\n\n#1 Wren Hale: Fixture line one.\n\n#2 Mara: Fixture line two.");
+    expect(brief).not.toContain("Fixture line two.\n\n#3");
+  });
+
+  test("a sub-agent that could not go on is said to have had its model fail only when its model did", async () => {
+    const gm = definition("gm", { model: "gm-model", tools: [] }, "Fixture GM.");
+    const files = { ".agents/lead.md": LEAD, ".agents/gm.md": gm };
+    const lead = { "lead-model": [{ pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule." }, id: "d-1" }] }, { pieces: [{ text: "Settled." }] }] };
+
+    const model = (open = await stage({ files, models: { ...lead, "gm-model": [{ pieces: [{ text: "Half a ru" }], end: { error: "Fixture provider error: overloaded." } }] } }));
+    await (await model.play(PLAYER)).done;
+    expect(toolResults(model.models["lead-model"]!.requests[1]!.messages)).toEqual(["gm-1 could not go on: a call to its model failed."]);
+    await model.close();
+
+    // RPH's own work broke under the sub-agent: the trace it writes through would not take its calls.
+    const harness = (open = await stage({ files, models: { ...lead, "gm-model": [{ pieces: [{ text: "Ruled." }] }] } }));
+    const record = harness.trace.event.bind(harness.trace);
+    harness.trace.event = (one) => {
+      if (one.agent.id === "gm-1" && (one.event.kind === "call_started" || one.event.kind === "call_ended")) throw new Error("Fixture: the trace takes no more.");
+      record(one);
+    };
+    await (await harness.play(PLAYER)).done;
+    expect(toolResults(harness.models["lead-model"]!.requests[1]!.messages)).toEqual(["gm-1 could not go on: the system that runs it failed."]);
+  });
+
+  test("a lore entry an agent is given is marked with who may know it; one the agent may not know is not given, and the host is not asked for it", async () => {
+    const gm = definition("gm", { model: "gm-model", tools: [] }, "Fixture GM.");
+    const character = definition("character", { model: "character-model", tools: [] }, "Fixture character.");
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/gm.md": gm, ".agents/character.md": character },
+      lore: [{ id: "w-31", source: "Fixture world", title: "The keeper's fall", keys: ["keeper"], text: "The old keeper was pushed.", knowing: { by: "characters", names: ["Wren Hale"] } }],
+      // A host that would give a text for the name, were it asked.
+      views: { "lore:w-31": "Fixture view: the old keeper was pushed." },
+      models: {
+        "lead-model": [
+          {
+            pieces: [
+              { call: "delegate", args: { agent: "gm", brief: "Rule.", attach: ["lore:w-31"] }, id: "d-1" },
+              { call: "delegate", args: { agent: "character", brief: "Speak.", attach: ["lore:w-31"], plays: "Mara" }, id: "d-2" },
+            ],
+          },
+          { pieces: [{ text: "Settled." }] },
+        ],
+        "gm-model": [{ pieces: [{ text: "Ruled." }] }],
+        "character-model": [{ pieces: [{ text: "Spoken." }] }],
+      },
+    }));
+
+    await (await s.play(PLAYER)).done;
+
+    expect(textOf(s.models["gm-model"]!.requests[0]!.messages[1] ?? { content: "" })).toContain("### lore:w-31\n\nThe keeper's fall (Fixture world)\n\nKnown only to Wren Hale.\n\nThe old keeper was pushed.");
+    expect(textOf(s.models["character-model"]!.requests[0]!.messages[1] ?? { content: "" })).not.toContain("pushed");
+    const told = s.told.flatMap((item) => (item.kind === "attachments" && item.agent.plays === "Mara" ? item.refs : []));
+    expect(told).toEqual([{ ref: "lore:w-31", from: "delegate", own: true }]);
   });
 });

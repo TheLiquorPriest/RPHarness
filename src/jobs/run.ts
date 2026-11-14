@@ -158,6 +158,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     },
     gauge: (agent, limits) => core.usage.gauge(scope, ask.id, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
     keep: (agent) => keep(agent),
+    job: ask.id,
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {

@@ -71,6 +71,8 @@ export interface TeamDeps {
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
   /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); none keeps nothing. */
   keep?(agent: AgentRef): KeepRequest | undefined;
+  /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
+  job?: string;
 }
 
 interface Member {
@@ -256,7 +258,7 @@ export class Team implements TeamWork {
     }
     const number = (this.#numbers.get(definition.name) ?? 0) + 1;
     this.#numbers.set(definition.name, number);
-    const ref: AgentRef = { id: `${definition.name}-${number}`, definition: definition.name, ...(origin.agent !== undefined ? { parent: origin.agent } : {}), ...(call.plays !== undefined ? { plays: call.plays } : {}) };
+    const ref: AgentRef = { id: `${definition.name}-${number}`, definition: definition.name, ...(origin.agent !== undefined ? { parent: origin.agent } : {}), ...(d.job !== undefined ? { job: d.job } : {}), ...(call.plays !== undefined ? { plays: call.plays } : {}) };
     const fields = fieldsOf(ref);
     const held = d.hold(definition.tools);
     if (held.missing.length > 0) d.unregistered(definition.name, held.missing);

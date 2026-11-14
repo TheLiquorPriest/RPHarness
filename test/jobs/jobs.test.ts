@@ -1,14 +1,15 @@
 // Jobs (§13.5), through the harness on the folder host and the scripted rig: background work an
 // agent starts with `job_start`, a run of its own that outlives the turn's reply; the user's limits
 // on jobs at once, in a day and per connection, and on what one job's run may spend; the host told
-// of every change, so the next briefing can say a job ended; a stop of the turn that leaves a job
-// running, and the host's word that cuts it off; and a restart that finds a job interrupted.
+// of every change, so the next briefing can say a job ended; every agent of a job's run named as the
+// job's, so the host keeps their writes as the job's; a stop of the turn that leaves a job running,
+// and the host's word that cuts it off; and a restart that finds a job interrupted.
 // Everything here is invented.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRef, JobView, JsonValue, TraceRecord } from "../../src/contract";
 import { createHarness } from "../../src/index";
 import { type Answer, type Reply, scriptedModel } from "../../src/testing/rig";
-import { gate, request, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
+import { gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -121,6 +122,44 @@ describe("a job an agent starts", () => {
     await jobEnded(s, "done");
 
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
+  });
+});
+
+describe("who works in a job", () => {
+  test("every agent of a job's run carries the job's id, its own agent and the sub-agent it starts; the turn's own agents carry none", async () => {
+    const clerkBrief = "Note the bell count.";
+    const writers: { definition: string; job?: string }[] = [];
+    const note = {
+      tier: "write" as const,
+      description: "Fixture: notes what it is told.",
+      run: async (_args: JsonValue, ctx: { agent: AgentRef }) => {
+        writers.push({ definition: ctx.agent.definition, ...(ctx.agent.job !== undefined ? { job: ctx.agent.job } : {}) });
+        return said("Noted.");
+      },
+    };
+    const lead = "---\nname: lead\ndescription: Fixture lead.\nmodel: default\ntools: [job_start, note]\ngiven:\n  - briefing\n---\nFixture lead: you run the turn.\n";
+    const keeper = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [note, delegate]\n---\nFixture keeper: you count what you are asked to count.\n";
+    const clerk = "---\nname: clerk\ndescription: Fixture clerk.\nmodel: default\ntools: [note]\n---\nFixture clerk: you note what you are asked to note.\n";
+    // Each call answered from its own agent's list, by the brief in what it was sent.
+    const answers: Record<"lead" | "keeper" | "clerk", Reply[]> = {
+      lead: [{ pieces: [{ call: "note" }, { call: "job_start", args: { agent: "keeper", brief: BRIEF } }] }, reply("The tower is quiet.")],
+      keeper: [{ pieces: [{ call: "note" }, { call: "delegate", args: { agent: "clerk", brief: clerkBrief } }] }, { pieces: [{ text: "Counted and noted." }] }],
+      clerk: [{ pieces: [{ call: "note" }] }, { pieces: [{ text: "Noted the count." }] }],
+    };
+    const route: Answer = (req) => {
+      const sent = req.messages.filter((message) => message.role === "user").map((message) => textOf(message));
+      const own = sent.some((text) => text.includes(clerkBrief)) ? answers.clerk : sent.some((text) => text.includes(BRIEF)) ? answers.keeper : answers.lead;
+      const next = own.shift();
+      if (next === undefined) throw new Error("The fixture has no answer left for this call.");
+      return next;
+    };
+    const s = (open = await stage({ files: { ".agents/lead.md": lead, ".agents/keeper.md": keeper, ".agents/clerk.md": clerk }, tools: { note }, answers: Array.from({ length: 6 }, () => route) }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+
+    const id = toldJobs(s).at(-1)!.id;
+    expect(writers.sort((a, b) => a.definition.localeCompare(b.definition))).toEqual([{ definition: "clerk", job: id }, { definition: "keeper", job: id }, { definition: "lead" }]);
   });
 });
 

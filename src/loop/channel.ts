@@ -18,4 +18,10 @@ export interface TextChannel {
   readonly reply: string;
   /** The end of what has been shown, for the line an agent goes on under after a rule stopped it. */
   tail(): string;
+  /**
+   * Once a message has ended: what the agent is to be told about it, each a text from a file (a
+   * second reply that was not shown, §10.7). Each is given once. It goes in with the agent's next
+   * call, which it gets for it if its work would otherwise have ended.
+   */
+  answers?(): string[];
 }

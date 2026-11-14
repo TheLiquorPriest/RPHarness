@@ -1,5 +1,6 @@
 // What the agent runner takes and gives, beyond the contract's own types.
 import type { AgentRef, AgentStatus, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolCtx, ToolResult, Usage } from "../contract";
+import type { Fired } from "./rules";
 
 /** What the loop needs of the host's clock: the time, and timers. */
 export type LoopClock = Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
@@ -26,6 +27,41 @@ export interface LoopToolResult extends ToolResult {
    * host's tool never sets it: a host cannot end a run.
    */
   ask?: JsonValue;
+}
+
+/** A tool call as the gate sees it: who made it, the model's id for it, the tool, and its arguments without `closing`. */
+export interface GateCall {
+  agent: AgentRef;
+  callId: string;
+  tool: string;
+  args: JsonValue;
+}
+
+/**
+ * Before a call runs. `refuse`: it does not run, and this is its answer (the user's permission said
+ * no, in a file's words). `hold`: a rule on its arguments holds it, and the rule's text is its answer.
+ * `remind`: rules on its arguments whose texts come back with its result.
+ */
+export interface GateBefore {
+  refuse?: LoopToolResult;
+  hold?: Fired;
+  remind: Fired[];
+}
+
+/** After a call ran: its result as the model reads it (a long one clipped), and the rules on that result. */
+export interface GateAfter {
+  result: LoopToolResult;
+  remind: Fired[];
+}
+
+/**
+ * What runs around every tool call besides the tool (§13.3): before it, the user's permissions and
+ * the rules on its arguments; after it, long results clipped and the rules on its result. It says
+ * what is so; the runner traces the firings and puts their texts in front of the agent.
+ */
+export interface ToolGate {
+  before(call: GateCall, signal: AbortSignal): Promise<GateBefore>;
+  after(call: GateCall, result: LoopToolResult, signal: AbortSignal): Promise<GateAfter>;
 }
 
 /** What one model call is sent with besides its messages, decided per request. */
@@ -60,6 +96,8 @@ export interface AgentOutcome {
   limit?: LimitHit;
   /** For `failed`: the model's or the runner's words. */
   error?: string;
+  /** For `failed`: whether the model's provider failed, or RPH's own work around it. */
+  failure?: "model" | "harness";
   /** The text of its last message: a sub-agent's answer. Empty when it stopped first. */
   text: string;
   /** For `asked`: the question, as its tool gave it. */

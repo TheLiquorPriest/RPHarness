@@ -1,23 +1,28 @@
 // The agent runner: one agent on pi's `Agent` (§13.2, §13.3), with what RPH adds around pi's loop.
 // Per request: the call's sampling and longest answer, and the user's limits. Per tool: the
-// `closing` argument, the call's context, and a stop that does not wait on a tool. Per message: the
-// text to the reply as it streams, rules on what is written (stop the call, drop what was not
-// shown, go on), and at the moment the work would end, the rules due then as follow-ups. Every
-// event goes to the run's trace with the agent and the run it belongs to; after a stop, nothing
-// but the agent's end.
+// `closing` argument, the call's context, the gate around it (permissions, rules, clipping), and a
+// stop that does not wait on a tool. Per message: the text to the reply as it streams, rules on what
+// is written (stop the call, drop what was not shown, go on), and at the moment the work would end,
+// the rules due then as follow-ups. Every event goes to the run's trace with the agent and the run it
+// belongs to; after a stop, nothing but the agent's end.
+//
+// No text reaches a model that did not come from a file or from the request: where pi would answer a
+// call in its own words (a tool it does not know, arguments that do not fit, arguments cut short by
+// the length limit, a tool that threw), the call is answered with the runner's texts instead, which
+// the harness reads from files. A text the file does not have leaves the answer empty.
 import { Agent, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
-import type { AgentRef, JsonObject, JsonSchema, JsonValue, LimitHit, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
+import type { AgentRef, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import { addUsage, Budget, emptyUsage } from "./budget";
 import type { TextChannel } from "./channel";
 import type { Fired, RunEndRules, StreamFired, StreamRules } from "./rules";
 import type { ParentCall, RunTrace } from "./trace";
-import type { AgentLimits, AgentOutcome, CallRequest, CallSettings, LoopClock, LoopTool, LoopToolResult } from "./types";
+import type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateCall, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
 
 /** The argument RPH adds to every tool (§10.7, Appendix A): the agent marks a call that needs no answer. */
 export const CLOSING = "closing";
 
-/** Texts the runner sends a model. Each comes from a file. */
+/** Texts the runner sends a model. Each comes from a file; one that gives undefined leaves its answer empty. */
 export interface RunnerTexts {
   /**
    * `.prompts/continue-after-rule.md`, filled with what the player was shown: the line an agent
@@ -26,6 +31,14 @@ export interface RunnerTexts {
   continueAfterRule(fields: { shown: string }): string;
   /** How the `closing` argument is described to the model, from the tool guides; absent leaves it undescribed. */
   closing?: string;
+  /** The answer to a call of a tool the agent does not hold. */
+  notFound?(fields: { tool: string }): string | undefined;
+  /** The answer to a call whose arguments do not fit what its tool takes: what was sent, and the tool's parameters, both as JSON. */
+  invalid?(fields: { tool: string; arguments: string; parameters: string }): string | undefined;
+  /** The answer to a call in a message that hit its length limit, whose arguments may be cut short. */
+  cutShort?(fields: { tool: string }): string | undefined;
+  /** The answer to a call whose tool threw: the error's own words. */
+  failed?(fields: { tool: string; error: string }): string | undefined;
 }
 
 export interface RunnerOptions {
@@ -54,6 +67,8 @@ export interface RunnerOptions {
   turn?: Budget;
   stream?: StreamRules;
   runEnd?: RunEndRules;
+  /** What runs around each of its tool calls: permissions, rules, clipping. None: each call simply runs. */
+  gate?: ToolGate;
   /** Where its text goes as it streams, when it writes the reply. */
   channel?: TextChannel;
 }
@@ -93,8 +108,16 @@ interface Stint {
   callText: string;
   callThinking: string;
   callStartedAt: number;
+  /**
+   * A call this runner started is open. pi also ends every message it is given to start from (an
+   * earlier reply in the prompt, a prefilled start), with the same event as a model's answer; only
+   * the answer to an open call is a call's end.
+   */
+  calling: boolean;
   /** Each tool call's own answer, by call id. */
   readonly results: Map<string, LoopToolResult>;
+  /** Calls a rule added its text to, or answered instead of the tool: never clean. */
+  readonly ruled: Set<string>;
   /** Calls whose result ended their batch. */
   readonly ended: Set<string>;
   /** Calls that finished before any stop. */
@@ -112,6 +135,8 @@ export class AgentRunner {
   readonly #pi: Agent;
   readonly #clock: LoopClock;
   readonly #budget: Budget;
+  /** Its tools by name, as the model was told them. */
+  readonly #tools = new Map<string, AgentTool<JsonSchema, JsonValue | undefined>>();
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -122,12 +147,13 @@ export class AgentRunner {
     this.#o = options;
     this.#clock = options.trace.clock;
     this.#budget = new Budget("agent", options.limits ?? {});
+    for (const tool of options.tools ?? []) this.#tools.set(tool.name, this.#piTool(tool));
     this.#pi = new Agent({
       initialState: {
         ...(options.instructions !== undefined ? { systemPrompt: options.instructions } : {}),
         model: options.model,
         ...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
-        tools: (options.tools ?? []).map((tool) => this.#piTool(tool)),
+        tools: [...this.#tools.values()],
         messages: options.messages ?? [],
       },
       streamFn: (model, context, streamOptions) => this.#call(model, context, streamOptions),
@@ -136,6 +162,8 @@ export class AgentRunner {
       // Every rule due at one moment goes in with the same call.
       followUpMode: "all",
       steeringMode: "all",
+      // pi's loop names itself to providers by default (OpenRouter's attribution headers); RPH's calls go out as the user's own.
+      identity: { attribution: null },
     });
     this.#pi.subscribe((event) => this.#onEvent(event));
   }
@@ -187,7 +215,9 @@ export class AgentRunner {
       callText: "",
       callThinking: "",
       callStartedAt: 0,
+      calling: false,
       results: new Map(),
+      ruled: new Set(),
       ended: new Set(),
       finished: new Set(),
       reminders: [],
@@ -203,6 +233,12 @@ export class AgentRunner {
     }
     void this.#drive(stint, first);
     return { done: promise, stop: () => this.#halt(stint, { status: "stopped" }) };
+  }
+
+  /** Ends the work in flight at a limit that is not its own (the turn's time): as a stop, with that limit. */
+  limit(hit: LimitHit): void {
+    const stint = this.#stint;
+    if (stint !== undefined) this.#halt(stint, { status: "limit", hit });
   }
 
   async #drive(stint: Stint, first: () => Promise<void>): Promise<void> {
@@ -223,7 +259,8 @@ export class AgentRunner {
         stint.cut = undefined;
         this.#dropAborted();
         const shown = this.#o.channel?.tail() ?? "";
-        const content = [cut.text, this.#o.texts.continueAfterRule({ shown })];
+        const goOn = this.#o.texts.continueAfterRule({ shown });
+        const content = goOn === "" ? [cut.text] : [cut.text, goOn];
         next = () => this.#pi.prompt(userMessage(content));
       }
     }
@@ -239,7 +276,7 @@ export class AgentRunner {
     let outcome: AgentOutcome;
     if (stint.halt?.status === "limit") outcome = { ...base, status: "limit", limit: stint.halt.hit };
     else if (stint.halt !== undefined) outcome = { ...base, status: "stopped" };
-    else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "" };
+    else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "", failure: failure !== undefined ? "harness" : "model" };
     else if (stint.asked !== undefined) {
       outcome = { ...base, status: "asked", question: stint.asked.question };
       this.#asked = stint.asked.call;
@@ -279,6 +316,7 @@ export class AgentRunner {
     stint.callText = "";
     stint.callThinking = "";
     stint.callStartedAt = this.#clock.now();
+    stint.calling = true;
     this.#o.channel?.begin();
     this.#emit(stint, {
       kind: "call_started",
@@ -313,7 +351,8 @@ export class AgentRunner {
       }
       case "message_end": {
         const message = event.message;
-        if (message.role !== "assistant") return;
+        if (message.role !== "assistant" || !stint.calling) return;
+        stint.calling = false;
         const used = usageOf(message);
         addUsage(stint.usage, used);
         this.#budget.count(used);
@@ -350,13 +389,36 @@ export class AgentRunner {
         const own = stint.results.get(event.toolCallId);
         // A result pi made itself (an unknown tool, arguments that did not validate) is pi's AgentToolResult; pi types the event's field loosely.
         const made: AgentToolResult = event.result;
+        if (own === undefined) this.#reword(stint, event.toolCallId, event.toolName, made);
         const result: ToolResult = own !== undefined ? withoutAsk(own) : { content: made.content, ...(event.isError ? { error: true as const } : {}) };
-        this.#emit(stint, { kind: "tool_ended", callId: event.toolCallId, tool: event.toolName, result, clean: !event.isError && isClean(result), endedRun: stint.ended.has(event.toolCallId), ms: event.durationMs ?? 0 });
+        const clean = !event.isError && isClean(result) && !stint.ruled.has(event.toolCallId);
+        this.#emit(stint, { kind: "tool_ended", callId: event.toolCallId, tool: event.toolName, result, clean, endedRun: stint.ended.has(event.toolCallId), ms: event.durationMs ?? 0 });
         return;
       }
       default:
         return;
     }
+  }
+
+  /**
+   * A call pi answered itself, before any tool ran: a tool the agent does not hold, arguments cut
+   * short by the length limit, or arguments that do not fit. Its answer is given the runner's text
+   * for it in place of pi's words. The answer's content is the very list pi turns into the call's
+   * result message right after this event, so changing it here is what the model reads.
+   */
+  #reword(stint: Stint, callId: string, toolName: string, made: AgentToolResult): void {
+    const texts = this.#o.texts;
+    const tool = this.#tools.get(toolName);
+    let line: string | undefined;
+    if (tool === undefined) line = texts.notFound?.({ tool: toolName });
+    else if (stint.last?.stopReason === "length") line = texts.cutShort?.({ tool: toolName });
+    else {
+      const call = stint.last?.content.find((part) => part.type === "toolCall" && part.id === callId);
+      const sent = call?.type === "toolCall" ? withoutClosing(call.arguments as JsonValue) : {};
+      line = texts.invalid?.({ tool: toolName, arguments: JSON.stringify(sent), parameters: JSON.stringify(tool.parameters) });
+    }
+    const content: TextContent[] = line === undefined ? [] : [{ type: "text", text: line }];
+    made.content.splice(0, made.content.length, ...content);
   }
 
   #onText(stint: Stint, piece: string): void {
@@ -405,7 +467,7 @@ export class AgentRunner {
     // A closing call that comes back clean needs no further call (§10.7). Whether something is due
     // at the run's end is asked once the whole batch is in (`#finishTurn`): pi still takes a
     // follow-up after a batch that ended this way.
-    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result)) {
+    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result) && !stint.ruled.has(id)) {
       stint.ended.add(id);
       return { terminate: true };
     }
@@ -419,9 +481,11 @@ export class AgentRunner {
     if (message.stopReason === "error" || message.stopReason === "aborted") return undefined;
     if (stint.halt !== undefined || stint.asked !== undefined) return { action: "end" };
     const reminders = stint.reminders.splice(0);
+    const answers = this.#o.channel?.answers?.() ?? [];
     if (!turn.toolResults.every((result) => stint.ended.has(result.toolCallId))) {
-      // The work goes on anyway: a reminder goes in with the next call.
+      // The work goes on anyway: a reminder, and what the reply's form has to say, go in with the next call.
       for (const fired of reminders) this.#add(stint, fired, "remind", "steer");
+      for (const text of answers) this.#pi.steer(userMessage([text]));
       return undefined;
     }
     // The work would end here. What is due at a run's end goes in as a follow-up, and the agent
@@ -429,6 +493,7 @@ export class AgentRunner {
     const due = (await this.#o.runEnd?.due({ agent: this.agent, call: this.#calls })) ?? [];
     if (stint.halt !== undefined) return { action: "end" };
     for (const fired of reminders) this.#add(stint, fired, "remind", "follow-up");
+    for (const text of answers) this.#pi.followUp(userMessage([text]));
     for (const fired of due) this.#add(stint, fired, "follow-up", "follow-up");
     return undefined;
   }
@@ -481,8 +546,10 @@ export class AgentRunner {
       ...(tool.sequential === true ? { executionMode: "sequential" as const } : {}),
       execute: async (callId, params, signal) => {
         const stint = this.#stint;
-        if (stint === undefined) throw new Error(`Tool ${tool.name} was called while agent ${this.agent.id} was not working.`);
+        // Only a call of the work in flight runs; pi makes no other.
+        if (stint === undefined) return { content: [], details: undefined };
         let answered = false;
+        const call: GateCall = { agent: this.agent, callId, tool: tool.name, args: withoutClosing(params as JsonValue) };
         const ctx: ToolCtx = {
           scope: this.#o.trace.scope,
           agent: this.agent,
@@ -494,16 +561,58 @@ export class AgentRunner {
             this.#emit(stint, { kind: "tool_update", callId, tool: tool.name, partial });
           },
         };
-        // pi waits on a tool until it settles; a stop does not.
-        const result = await untilAborted(tool.run(withoutClosing(params as JsonValue), ctx), signal);
+        // pi waits on a tool until it settles; a stop does not. What fails around the tool (a permission
+        // or a rule that could not be asked) is answered like a tool that failed, never in pi's words.
+        const result = await untilAborted(
+          this.#gated(stint, tool, call, ctx).catch((error: unknown) => ({ answer: this.#failed(tool, error), texts: [] })),
+          signal,
+        );
         answered = true;
         if (result === undefined) return { content: [], details: undefined };
-        stint.results.set(callId, result);
-        // A report is shown to the model after the call's content, one line each.
-        const reports = (result.reports ?? []).map((line) => ({ type: "text" as const, text: line }));
-        return { content: [...result.content, ...reports], details: result.details, ...(result.error === true ? { isError: true } : {}) };
+        stint.results.set(callId, result.answer);
+        if (result.texts.length > 0) stint.ruled.add(callId);
+        // A report is shown to the model after the call's content, one line each; then the texts of the rules on the call.
+        const after = [...(result.answer.reports ?? []), ...result.texts].map((line) => ({ type: "text" as const, text: line }));
+        return { content: [...result.answer.content, ...after], details: result.answer.details, ...(result.answer.error === true ? { isError: true } : {}) };
       },
     };
+  }
+
+  /** One call through the gate: refused or held there, or run; then the rules on its result. Gives the answer and the rules' texts that go after it. */
+  async #gated(stint: Stint, tool: LoopTool, call: GateCall, ctx: ToolCtx): Promise<{ answer: LoopToolResult; texts: string[] }> {
+    const gate = this.#o.gate;
+    if (gate === undefined) return { answer: await this.#run(tool, call, ctx), texts: [] };
+    const before = await gate.before(call, ctx.signal);
+    if (before.refuse !== undefined) return { answer: before.refuse, texts: [] };
+    if (before.hold !== undefined) {
+      this.#ruled(stint, call, before.hold, "hold");
+      return { answer: { content: [{ type: "text", text: before.hold.text.trimEnd() }] }, texts: [] };
+    }
+    const ran = await this.#run(tool, call, ctx);
+    const after = await gate.after(call, ran, ctx.signal);
+    const reminders = [...before.remind, ...after.remind];
+    for (const fired of reminders) this.#ruled(stint, call, fired, "remind");
+    return { answer: after.result, texts: reminders.map((fired) => fired.text.trimEnd()) };
+  }
+
+  /** Runs the tool. One that throws is answered with the runner's text for it, the error's own words in it. */
+  async #run(tool: LoopTool, call: GateCall, ctx: ToolCtx): Promise<LoopToolResult> {
+    try {
+      return await tool.run(call.args, ctx);
+    } catch (error) {
+      return this.#failed(tool, error);
+    }
+  }
+
+  #failed(tool: LoopTool, error: unknown): LoopToolResult {
+    const words = error instanceof Error ? error.message : String(error);
+    const line = this.#o.texts.failed?.({ tool: tool.name, error: words });
+    return { content: line === undefined ? [] : [{ type: "text", text: line }], error: true, details: { error: words } };
+  }
+
+  #ruled(stint: Stint, call: GateCall, fired: Fired, action: RuleAction): void {
+    if (stint.halt !== undefined) return;
+    this.#emit(stint, { kind: "rule_fired", firing: { callId: call.callId, tool: call.tool, ...fired.firing, agent: this.agent, action } });
   }
 
   #emit(stint: Stint, event: TraceEvent): void {
@@ -511,12 +620,13 @@ export class AgentRunner {
   }
 }
 
+/** A message to the agent of texts from files, each without the line break its file ends on. */
 function userMessage(texts: string[]): UserMessage {
-  return { role: "user", content: texts.map((text) => ({ type: "text", text })), timestamp: Date.now() };
+  return { role: "user", content: texts.map((text) => ({ type: "text", text: text.trimEnd() })), timestamp: Date.now() };
 }
 
 /** Whether the agent marked the call closing. The raw arguments may carry it as the text "true", which pi's validation turns into the boolean before the call runs; both count, so the trace and the decision agree. */
-function isClosing(args: JsonValue): boolean {
+export function isClosing(args: JsonValue): boolean {
   if (typeof args !== "object" || args === null || Array.isArray(args)) return false;
   return args[CLOSING] === true || args[CLOSING] === "true";
 }

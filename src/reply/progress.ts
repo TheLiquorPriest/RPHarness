@@ -11,8 +11,8 @@ export interface KeepAliveOptions {
   clock: LoopClock;
   /** How long nothing may be shown before a progress line is sent, in milliseconds. */
   silenceMs: number;
-  /** `.prompts/progress.md`'s `still` row, filled with how long the turn has been going (minutes and seconds). */
-  still(fields: { elapsed: string }): string;
+  /** `.prompts/progress.md`'s `still` row, filled with how long the turn has been going (minutes and seconds); undefined when the file has no such row, and then nothing is sent. */
+  still(fields: { elapsed: string }): string | undefined;
 }
 
 export class KeepAlive {
@@ -74,7 +74,8 @@ export class KeepAlive {
       if (!this.#on) return;
       const seconds = Math.floor((this.#o.clock.now() - this.#startedAt) / 1000);
       const elapsed = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
-      this.sink.progress(this.#o.still({ elapsed }));
+      const line = this.#o.still({ elapsed });
+      if (line !== undefined) this.sink.progress(line);
     }, this.#o.silenceMs);
   }
 }

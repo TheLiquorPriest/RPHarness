@@ -1,6 +1,9 @@
-// The reply: its tag form, held back by sentences while a rule that interrupts covers it, and the
-// progress lines that keep a long turn alive.
+// The reply: its forms (the tag form, the plain text of a message), one per generation, held back
+// by sentences while a rule that interrupts covers it, and the progress lines that keep a long turn
+// alive.
 export { REPLY_DEFAULTS } from "./defaults";
+export { ReplyDesk } from "./desk";
+export { MessageReply, type MessageReplyOptions } from "./message";
 export { KeepAlive, type KeepAliveOptions } from "./progress";
 export { Release } from "./release";
 export { heldSentences, TagReply, type TagReplyOptions } from "./reply";

@@ -1,6 +1,7 @@
 // The reply in the tag form (§10.7): whatever the lead writes inside the reply tag streams to the
 // chat as it is written, held back by sentences only while a rule that interrupts covers it; the
-// intent record and all other text never reach the chat. One reply per generation.
+// intent record and all other text never reach the chat. One reply per generation: a reply tag
+// opened once a reply was given is not shown, and the agent is told so, in a file's words.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ReplySink } from "../contract";
 import type { TextChannel } from "../loop/channel";
@@ -23,6 +24,12 @@ export interface TagReplyOptions {
   heldSentences: number;
   /** Of what was shown, how many of the last sentences go with the line an agent goes on under after a rule stopped it. */
   tailSentences: number;
+  /** Asked as a reply tag opens: false when the reply is another form's, or went out already; that reply is then not shown. Absent: always this form's. */
+  claim?(): boolean;
+  /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
+  second?: string;
+  /** The reply begins: its first tag opened. */
+  onBegin?(): void;
   /** An intent record, whole, each time one ends: for the live view and the turn's record, never for the chat. */
   onIntent?(text: string): void;
   /** The reply is complete and was sent on whole: once per generation. */
@@ -40,8 +47,12 @@ export class TagReply implements TextChannel {
    */
   #state: "none" | "open" | "closing" | "released" = "none";
   #intent = "";
-  /** Inside a reply tag opened after the reply was released: not shown. */
+  /** Inside a reply tag opened after the reply was released, or while another form has it: not shown. */
   #extra = false;
+  /** A reply tag was opened that could not be shown: the agent is told, once. */
+  #second = false;
+  /** This message wrote reply text: only then does its end close a reply its closing tag left open. */
+  #wrote = false;
 
   constructor(options: TagReplyOptions) {
     this.#o = options;
@@ -71,6 +82,7 @@ export class TagReply implements TextChannel {
     this.#parser.reset();
     this.#intent = "";
     this.#extra = false;
+    this.#wrote = false;
   }
 
   write(piece: string): void {
@@ -90,6 +102,7 @@ export class TagReply implements TextChannel {
     this.#parser.reset();
     this.#intent = "";
     this.#extra = false;
+    this.#wrote = false;
     if (this.#state === "closing") this.#state = "open";
     return this.#release.drop();
   }
@@ -98,16 +111,28 @@ export class TagReply implements TextChannel {
     const inIntent = this.#parser.inside === "intent";
     for (const part of this.#parser.end()) this.#take(part);
     if (inIntent) this.#endIntent();
-    // A reply still open when its message ends is complete: the closing tag was left off.
-    if (this.#state === "open") this.#state = "closing";
+    // A reply this message wrote and left open is complete: the closing tag was left off. A message
+    // that wrote none of it (tool calls after a rule stopped the reply) leaves it open for the next.
+    if (this.#state === "open" && this.#wrote) this.#state = "closing";
     this.release();
+  }
+
+  answers(): string[] {
+    const second = this.#second;
+    this.#second = false;
+    return second && this.#o.second !== undefined ? [this.#o.second] : [];
   }
 
   #take(part: TagPart): void {
     if (part.kind === "open") {
       if (part.role !== "reply") return;
-      if (this.#state === "released" || this.#state === "closing") this.#extra = true;
-      else this.#state = "open";
+      if (this.#state === "released" || this.#state === "closing" || this.#o.claim?.() === false) {
+        this.#extra = true;
+        this.#second = true;
+        return;
+      }
+      if (this.#state === "none") this.#o.onBegin?.();
+      this.#state = "open";
       return;
     }
     if (part.kind === "close") {
@@ -117,7 +142,10 @@ export class TagReply implements TextChannel {
       return;
     }
     if (part.role === "intent") this.#intent += part.text;
-    else if (part.role === "reply" && !this.#extra) this.#release.hold(part.text);
+    else if (part.role === "reply" && !this.#extra) {
+      this.#release.hold(part.text);
+      if (part.text !== "") this.#wrote = true;
+    }
     // Text outside every tag, and a second reply, are working text: the trace has them.
   }
 

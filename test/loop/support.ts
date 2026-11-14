@@ -13,6 +13,10 @@ export const scope: Scope = { user: "user-a", chat: "chat-a", session: "session-
 export const texts = {
   continueAfterRule: ({ shown }: { shown: string }) => `[Already shown]\n${shown}\n[Go on from there]`,
   closing: "Fixture: true when this call needs no answer.",
+  notFound: ({ tool }: { tool: string }) => `Fixture: no tool named ${tool}.`,
+  invalid: ({ tool, arguments: sent }: { tool: string; arguments: string; parameters: string }) => `Fixture: ${tool} does not take ${sent}.`,
+  cutShort: ({ tool }: { tool: string }) => `Fixture: ${tool} was cut short.`,
+  failed: ({ tool, error }: { tool: string; error: string }) => `Fixture: ${tool} failed: ${error}`,
 };
 
 export class TraceRecorder implements TracePort {

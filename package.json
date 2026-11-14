@@ -1,38 +1,32 @@
 {
-  "name": "lumi-ah",
+  "name": "rp-harness",
   "version": "0.0.1",
   "private": true,
   "type": "module",
-  "description": "Lumiverse Agentic Harness: a main agent with tools, sub-agents, sessions and a workspace that answers Lumiverse's main generation.",
+  "description": "RPH: a harness for roleplay and creative writing on pi's agent loop. A host hands it an environment; it runs a lead agent with tools, sub-agents, sessions, rules and one reply per generation.",
   "license": "MIT",
-  "repository": "github:TheLiquorPriest/LumiAH",
-  "bin": {
-    "lumiah": "dist/lumiah.js"
-  },
+  "repository": "github:TheLiquorPriest/RPHarness",
   "engines": {
     "bun": ">=1.4"
   },
   "exports": {
-    "./core": "./src/core/index.ts",
-    "./link": "./src/link/index.ts",
-    "./runtime": "./src/runtime/index.ts",
-    "./extension/backend": "./src/extension/backend/index.ts",
-    "./extension/frontend": "./src/extension/frontend/index.ts",
-    "./shared": "./src/shared/index.ts",
+    ".": "./src/index.ts",
+    "./contract": "./src/contract/index.ts",
+    "./hosts/folder": "./src/hosts/folder/index.ts",
+    "./testing/rig": "./src/testing/rig/index.ts",
+    "./testing/kit": "./src/testing/kit/index.ts",
     "./package.json": "./package.json"
   },
   "scripts": {
-    "build": "bun scripts/build.ts",
-    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.core.json",
+    "typecheck": "tsc --noEmit -p .",
     "test": "bun test"
   },
   "dependencies": {
-    "preact": "^11.0.1"
+    "@earendil-works/pi-agent-core": "1.5.2",
+    "@earendil-works/pi-ai": "1.5.2"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.5.2",
     "bun-types": "^1.4.2",
-    "lumiverse-spindle-types": "0.6.79",
     "typescript": "7.0.2"
   }
 }

@@ -1,6 +1,6 @@
 // The kit's cases for where the model layer's documents are kept (§13.2, `ModelsPort`): each comes
 // back whole as last saved, a save replaces the one before whole, and both survive a new instance.
-// And, for a whole host, that a key saved there is nowhere in the agents' view (§16).
+// And, for a whole host, that a key or a header's value saved there is nowhere in the agents' view (§16).
 
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -12,6 +12,8 @@ import { hitsOf } from "./context";
 
 /** A key no file of the seed holds, so finding it anywhere means it leaked. */
 const KIT_KEY = "sk-kit-7f3a9c2e5b1d4f6a8c0e";
+/** A header's value, a credential like a key, that no file of the seed holds. */
+const KIT_HEADER_VALUE = "kit-header-3e9b51c7d0a4f286";
 
 const CONNECTIONS: ConnectionsDoc = {
   v: 1,
@@ -24,7 +26,7 @@ const CONNECTIONS: ConnectionsDoc = {
       auth: "key",
       model: "kit-model",
       effort: "low",
-      headers: { "X-Kit": "one", "X-Kit-Dropped": null },
+      headers: ["X-Kit", "X-Kit-Dropped"],
       serialTools: true,
       messageThreads: true,
       retries: 3,
@@ -41,6 +43,8 @@ const SECRETS: SecretsDoc = {
   v: 1,
   keys: { "kit-conn-1": KIT_KEY },
   signins: { anthropic: { type: "oauth", access: "kit-access", refresh: "kit-refresh", expires: 1_900_000_000_000, accountId: "kit-account" } },
+  // `X-Kit-Dropped` is named in the connections with no value here, so it is not sent.
+  headers: { "kit-conn-1": { "X-Kit": KIT_HEADER_VALUE } },
   device: "kit-device",
 };
 
@@ -82,11 +86,13 @@ export function modelCases(ctx: KitContext<"models">): void {
 
 /** For a whole host only: the models port and the files port together. */
 export function secretCases(ctx: KitContext<"models" | "files">): void {
-  test("a key saved through the models port is nowhere in the agents' view", async () => {
+  test("a key or a header's value saved through the models port is nowhere in the agents' view", async () => {
     await ctx.env.models.saveSecrets(SECRETS);
     for (const layer of await ctx.env.files.layers(ctx.scope)) {
-      const found = hitsOf(await ctx.env.files.find(ctx.scope, { by: "grep", pattern: KIT_KEY, literal: true, path: layer.mount, limit: 10 }));
-      expect({ level: layer.level, found }).toEqual({ level: layer.level, found: [] });
+      for (const secret of [KIT_KEY, KIT_HEADER_VALUE]) {
+        const found = hitsOf(await ctx.env.files.find(ctx.scope, { by: "grep", pattern: secret, literal: true, path: layer.mount, limit: 10 }));
+        expect({ level: layer.level, secret, found }).toEqual({ level: layer.level, secret, found: [] });
+      }
     }
   });
 }

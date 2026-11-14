@@ -31,8 +31,13 @@ export interface StoredConnection {
   model?: string;
   /** Its own effort, for an agent that names none. */
   effort?: Effort;
-  /** Headers every call on it sends, by name; null: a value that was dropped when its provider or address changed. */
-  headers?: Record<string, string | null>;
+  /**
+   * The headers every call on it sends, by name alone. Their values are credentials, kept with the
+   * secrets (`SecretsDoc.headers`); a header with no value there is not sent. A document saved
+   * before, each value beside its name (`{ name: value | null }`), is still read, and its values
+   * move to the secrets at the layer's next save.
+   */
+  headers?: string[];
   /** It takes one tool call per answer. */
   serialTools?: true;
   /** Message threads are on. Off unless set: every request then carries everything it is about. */
@@ -61,11 +66,16 @@ export interface SignInToken {
   [field: string]: JsonValue;
 }
 
-/** The secrets document: each connection's key by connection id, each sign-in by provider, and this installation's id for the providers that ask for one. */
+/**
+ * The secrets document: each connection's key by connection id, each sign-in by provider, each
+ * connection's header values, and this installation's id for the providers that ask for one.
+ */
 export interface SecretsDoc {
   v: 1;
   keys: Record<string, string>;
   signins: Record<string, SignInToken>;
+  /** Each connection's header values: by the connection's id, then by the header's name. Absent when no connection has one. */
+  headers?: Record<string, Record<string, string>>;
   device?: string;
 }
 
@@ -73,9 +83,9 @@ export interface SecretsDoc {
  * Where the host keeps the two documents. Storage only: keep each document whole as last given and
  * give it back. RPH writes one at a time. The connections may live in the user's own config file,
  * and a hand edit there is honoured: RPH reads them through this port whenever it needs them and
- * keeps nothing of them past a turn. Keys are never in the connections document. The secrets are
- * written so a reader never meets half a file, readable by the user alone, and never in the agents'
- * file tree, a transcript or a page (§16).
+ * keeps nothing of them past a turn. Keys and header values are never in the connections document.
+ * The secrets are written so a reader never meets half a file, readable by the user alone, and
+ * never in the agents' file tree, a transcript or a page (§16).
  */
 export interface ModelsPort {
   /** The connections document as last saved or as the user edited it, as it comes (the layer checks it); null when there is none. */

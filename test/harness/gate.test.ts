@@ -138,8 +138,26 @@ describe("answers in a file's words", () => {
 
     const second = s.model.requests[1]!.messages;
     expect(answered(second, "call_1_1")).toBe("You hold no tool named fly_away.");
-    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: the arguments you sent do not fit what it takes. It takes {");
+    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: the arguments you sent do not fit what it takes. path: missing.");
     expect(answered(s.model.requests[2]!.messages, "call_2_1")).toBe("todo was not run: your message reached its length limit, so its arguments may be cut short. Call it again.");
+  });
+
+  test("a call that does not fit is told which arguments did not fit and why, as the check found them; the whole schema only for a tool whose schema is within the setting", async () => {
+    const s = (open = await stage({
+      drafted: true,
+      config: "tools:\n  schemaShown: 1500\n",
+      tools: {
+        world_query: { tier: "read", description: "Fixture: the tide on a day.", parameters: { properties: { day: { type: "integer" } }, required: ["day"] }, run: async () => said("calm") },
+        world_apply: { tier: "read", description: "Fixture: a long form.", parameters: { properties: { note: { type: "string", description: "Fixture: ".padEnd(2_000, "x") } }, required: ["note"] }, run: async () => said("noted") },
+      },
+      answers: [{ pieces: [{ call: "world_query", args: { day: "three" } }, { call: "world_apply", args: {} }] }, { pieces: [{ text: "<reply>Calm.</reply>" }] }],
+    }));
+
+    await s.turn(request("t1"));
+
+    const second = s.model.requests[1]!.messages;
+    expect(answered(second, "call_1_1")).toStartWith("world_query was not run: the arguments you sent do not fit what it takes. day: expected integer, got string. It takes {");
+    expect(answered(second, "call_1_2")).toBe("world_apply was not run: the arguments you sent do not fit what it takes. note: missing.");
   });
 
   test("a long result reaches the model clipped to the setting, and its whole is kept in the turn's folder, where the line says", async () => {
@@ -154,8 +172,61 @@ describe("answers in a file's words", () => {
     await s.turn(request("t1"));
 
     const kept = "sessions/s1/turns/t1/cache/results/call_1_1.md";
-    expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe(`${long.slice(0, 40)}[40 of 100 characters shown. The whole result is in ${kept}.]`);
+    expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe(`${long.slice(0, 40)}[40 of 100 characters shown; 60 left out. The whole answer is in ${kept}.]`);
     const read = await s.host.files.read(request("t1").scope, kept);
     expect(read.status === "read" ? read.text : "").toBe(long);
+  });
+});
+
+describe("the bound on one answer", () => {
+  /** A floor painted past its map's edge: a short answer, and a report for every square that fell off. */
+  const DONE = "Painted the cellar floor.";
+  const OFF = Array.from({ length: 2_000 }, (_, at) => `Fixture: square ${at + 1} is off the map.`);
+
+  test("a tool's reports count with its text: what the model reads, what the session file keeps and what the next turn carries stay within the setting, and the line says how much was left out and where the whole answer is", async () => {
+    const s = (open = await stage({
+      drafted: true,
+      config: "results:\n  clip: 200\n",
+      tools: { world_apply: { tier: "read", description: "Fixture: paints a floor.", run: async () => ({ content: [{ type: "text", text: DONE }], reports: OFF }) } },
+      answers: [{ pieces: [{ call: "world_apply" }] }, { pieces: [{ text: "<reply>The floor is painted.</reply>" }] }, { pieces: [{ text: "<reply>The paint dries.</reply>" }] }],
+    }));
+
+    await s.turn(request("t1", { carry: "continuing" }));
+    await s.turn(request("t2", { carry: "continuing", parent: "t1" }));
+
+    const kept = "sessions/s1/turns/t1/cache/results/call_1_1.md";
+    const length = [DONE, ...OFF].reduce((sum, text) => sum + text.length, 0);
+    // 25 characters of text and five reports of 33 make 190; ten characters of the sixth report make 200.
+    const line = `[200 of ${length} characters shown; ${length - 200} left out, among them 1995 of its 2000 reports. The whole answer is in ${kept}.]`;
+    const read = answered(s.model.requests[1]!.messages, "call_1_1");
+    expect(read).toBe(`${DONE}${OFF.slice(0, 5).join("")}${OFF[5]!.slice(0, 10)}${line}`);
+
+    const file = await s.host.files.read(request("t1").scope, "sessions/s1/s1.jsonl");
+    const entries = (file.status === "read" ? file.text : "").split("\n").flatMap((raw) => (raw.trim() === "" ? [] : [JSON.parse(raw) as { type: string; callId?: string; text?: string; reports?: string[] }]));
+    const result = entries.find((entry) => entry.type === "result" && entry.callId === "call_1_1");
+    expect(result?.text).toBe(DONE);
+    expect(result?.reports).toEqual([...OFF.slice(0, 5), OFF[5]!.slice(0, 10), line]);
+    expect(s.trace.of("tool_ended")[0]?.event.result.reports).toEqual(result?.reports);
+
+    const carried = s.model.requests[2]!.messages.map((message) => textOf(message)).join("\n");
+    expect(carried).toContain(line);
+    expect(carried).not.toContain(OFF[6]!);
+    const whole = await s.host.files.read(request("t1").scope, kept);
+    expect(whole.status === "read" ? whole.text : "").toBe([DONE, ...OFF].join("\n"));
+  });
+
+  test("an answer that reported something is not clean though the bound left out every report, and with the notices file's line taken out: a closing call on it goes on for one more call", async () => {
+    const s = (open = await stage({
+      drafted: true,
+      config: "results:\n  clip: 20\n",
+      files: { ".prompts/tool-notices.md": "---\ndescription: Fixture - the notices with no line for a clipped answer.\nformat: lines\n---\nfailed: {{tool}} failed: {{error}}\n" },
+      tools: { world_apply: { tier: "read", description: "Fixture: paints a floor.", run: async () => ({ content: [{ type: "text", text: DONE }], reports: OFF.slice(0, 1) }) } },
+      answers: [{ pieces: [{ text: "<reply>The floor is painted.</reply>" }, { call: "world_apply", args: { closing: true } }] }, { pieces: [{ text: "Noted." }] }],
+    }));
+
+    await s.turn(request("t1"));
+
+    expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe(DONE.slice(0, 20));
+    expect(s.trace.of("tool_ended").map((record) => record.event.clean)).toEqual([false]);
   });
 });

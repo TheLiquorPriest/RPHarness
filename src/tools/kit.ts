@@ -4,6 +4,7 @@
 // says anything in words of its own: an answer whose line the file does not have is given empty.
 import type { JsonObject, JsonSchema, JsonValue, ToolTier } from "../contract";
 import type { Fields } from "../files/api";
+import type { Misfit } from "../loop/fit";
 import type { LoopTool, LoopToolResult } from "../loop/types";
 
 /** One of RPH's own tools as an agent holds it: a tool for the runner, with what the user's permissions are judged by. */
@@ -52,4 +53,28 @@ export function text(args: Readonly<Record<string, JsonValue>>, name: string): s
 export function whole(args: Readonly<Record<string, JsonValue>>, name: string): number | undefined {
   const value = args[name];
   return typeof value === "number" && Number.isInteger(value) ? value : undefined;
+}
+
+/** A call that does not fit its tool, as the tool answers' `invalid` line is given it. */
+export interface InvalidCall {
+  tool: string;
+  /** What was sent, as JSON. */
+  arguments: string;
+  /** The tool's whole schema, as JSON. */
+  parameters: string;
+  misfits: readonly Misfit[];
+}
+
+/**
+ * The fields of the tool answers' `invalid` line: the tool, what was sent, each argument that did
+ * not fit and why as the check found them (`misfits`, each an `argument` and a `why`), and the
+ * tool's whole schema (`parameters`) only where it is no longer than the user's `tools.schemaShown`.
+ */
+export function invalidFields(call: InvalidCall, schemaShown: number): Fields {
+  return {
+    tool: call.tool,
+    arguments: call.arguments,
+    ...(call.misfits.length > 0 ? { misfits: call.misfits.map(({ argument, why }) => ({ argument, why })) } : {}),
+    ...(call.parameters.length <= schemaShown ? { parameters: call.parameters } : {}),
+  };
 }

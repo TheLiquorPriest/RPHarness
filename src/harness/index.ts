@@ -1,15 +1,17 @@
 // The harness a host builds over its environment (Appendix A `createHarness`): it answers turns,
-// cancels a turn's work when the turn leaves the path, keeps each session's file (§11), opens and
-// closes sessions when the host says so, and compacts one at a turn's start when the lead's first
-// call would not fit or the host asked; and it gives the pages their ways in: the live view, usage,
-// definitions, rules and models. It has no way to talk with an agent outside a turn, and no jobs.
-// What a session holds in memory besides its file (each lead's opening block, what the rules
-// remembered) is gone after a restart; the file is read again.
+// cancels a turn's work and its jobs when the turn leaves the path, keeps each session's file (§11),
+// opens and closes sessions when the host says so, and compacts one at a turn's start when the
+// lead's first call would not fit or the host asked; it runs the jobs agents and the user start
+// (§13.5); and it gives the pages their ways in: the live view, usage, definitions, rules, models
+// and jobs. It has no way to talk with an agent outside a turn. What a session holds in memory
+// besides its file (each lead's opening block, what the rules remembered) is gone after a
+// restart; the file is read again. A job a restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Template } from "../files/api";
 import { createModelLayer } from "../model";
 import type { ModelSource } from "../model/source";
+import { Jobs } from "../jobs";
 import { sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
@@ -62,7 +64,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   const hub = new LiveHub();
   const usage = new UsageBook(env.store, env.clock, env.log);
   const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now() });
-  const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book };
+  const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage });
+  const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs };
   const turns = new Map<string, Turn>();
   const answering = new Set<Promise<unknown>>();
 
@@ -87,6 +90,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
     async turnLeft(scope) {
       turns.get(turnKey(scope))?.stop();
+      await jobs.turnLeft(scope);
       // The session file keeps the turn's entries, and marks it off the path: a session it closed is open again (§11).
       const turn = scope.turn;
       if (turn === undefined) return;
@@ -109,6 +113,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
     live: hub,
     usage,
+    jobs,
 
     definitions: {
       list: (scope) => loadGuidance(env.files, scope).definitions(),
@@ -119,7 +124,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
     async close() {
       for (const turn of turns.values()) turn.stop();
-      await Promise.allSettled([...answering]);
+      await Promise.allSettled([...answering, jobs.close()]);
       await usage.settled();
       await book.settled();
       await env.trace.flush();

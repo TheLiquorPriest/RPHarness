@@ -3,10 +3,10 @@
 // which then runs as itself (`ToolReach.run`). Neither adds anything to the tools an agent's
 // requests carry, so the cached front of every prompt holds through a session. Their words are the
 // lines of `.prompts/tool-search.md`.
-import { validateToolArguments } from "@earendil-works/pi-ai";
 import type { JsonValue, Switchable, SwitchesPort } from "../../contract";
 import type { Guidance } from "../../files/api";
-import { answer, argumentsOf, fieldsOf, type OwnTool, text, type ToolText, whole, type Words } from "../kit";
+import { fit } from "../../loop/fit";
+import { answer, argumentsOf, fieldsOf, invalidFields, type OwnTool, text, type ToolText, whole, type Words } from "../kit";
 import { plainRank, type Rank } from "./rank";
 import { Reach, type ReachableTool, TOOL_SEARCH, TOOL_USE, type ToolReach } from "./reach";
 import { takes } from "./takes";
@@ -33,6 +33,8 @@ export interface ToolSearchDeps {
    * are answered with the same line as a fixed tool's (`invalid`).
    */
   notices: Words;
+  /** Characters of a tool's schema that the answer to a call that does not fit it shows whole (`tools.schemaShown`). */
+  schemaShown: number;
   /** Each tool's file, by tool name. */
   texts: ReadonlyMap<string, ToolText>;
   /** The most tools one search gives when the agent names no limit; `SEARCH_HITS` when absent. */
@@ -100,16 +102,6 @@ export function toolSearch(deps: ToolSearchDeps): OwnTool {
   };
 }
 
-/** The arguments as the tool's own schema takes them (pi's check, which a call of the fixed list passes, coercion and all); undefined when they do not fit. */
-function checked(tool: ReachableTool, args: JsonValue, callId: string): JsonValue | undefined {
-  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
-  try {
-    return validateToolArguments(tool, { type: "toolCall", id: callId, name: tool.name, arguments: args }) as JsonValue;
-  } catch {
-    return undefined;
-  }
-}
-
 export function toolUse(deps: ToolSearchDeps): OwnTool {
   const own = deps.texts.get(TOOL_USE);
   return {
@@ -126,9 +118,9 @@ export function toolUse(deps: ToolSearchDeps): OwnTool {
       if (at.at === "unreached") return answer(words("no_tool", { tool: name }), true);
       if (at.at === "waiting") return answer(words("not_switched_on", { tool: name, name: at.thing.name }), true);
       const sent = given["args"] ?? {};
-      const fit = checked(at.tool, sent, ctx.callId);
-      if (fit === undefined) return answer(deps.notices("invalid", { tool: name, arguments: JSON.stringify(sent), parameters: JSON.stringify(at.tool.parameters) }), true);
-      return deps.reach.run(at.tool, fit, ctx);
+      const checked = fit(at.tool, sent, ctx.callId);
+      if ("misfits" in checked) return answer(deps.notices("invalid", invalidFields({ tool: name, arguments: JSON.stringify(sent), parameters: JSON.stringify(at.tool.parameters), misfits: checked.misfits }, deps.schemaShown)), true);
+      return deps.reach.run(at.tool, checked.args, ctx);
     },
   };
 }

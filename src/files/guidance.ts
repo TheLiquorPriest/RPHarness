@@ -158,7 +158,7 @@ class TreeGuidance implements Guidance {
     return found === undefined ? undefined : found.item !== undefined && !found.off;
   }
 
-  /** Every rule (not the examples), in force or not, by name: off, broken, a question nobody asks, or held by a `needs:` that is not in force, followed through other rules. */
+  /** Every rule (not the examples), in force or not, by name: off, broken, or held by a `needs:` that is not in force, followed through other rules. */
   #ruleStates(): Promise<Map<string, RuleState>> {
     return this.#once("rule states", async () => {
       const names = [...(await this.#tree.found("rules")).keys()].sort();
@@ -185,11 +185,7 @@ class TreeGuidance implements Guidance {
         let state: RuleState;
         if (rule === undefined) state = { found: f, inForce: false, why: "broken" };
         else if (f.off) state = { found: f, inForce: false, why: "off" };
-        else if (rule.when.trigger === "question") {
-          // Listed as in force, a question nobody asks would never fire: the user is told instead.
-          this.#problems.push(problemAt({ path: f.ref.path, level: f.ref.level }, rule.lines.question, "No model is asked a rule's question in this harness, so this rule would never fire, and it is not in force. A pattern (`condition:`) can look for what the question asks about."));
-          state = { found: f, inForce: false };
-        } else {
+        else {
           const at = { path: f.ref.path, level: f.ref.level };
           let held = false;
           for (const need of rule.needs) {

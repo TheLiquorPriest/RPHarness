@@ -243,12 +243,22 @@ describe("a pattern's cost", () => {
 });
 
 describe("a question", () => {
-  test("is not in force, since no model is asked it, and the user is told so at its `question:` line", async () => {
-    b = await bench({ chat: { "rules/no-player-voice.md": await draftedFile(".rules/examples/no-player-voice.md") } });
+  test("is in force, and the run puts it to the judging model about what it looks at; `interrupt:` and `judge:` are read from its header", async () => {
+    const waits = "---\ndescription: Fixture - waits for its answer.\nagents: [author]\nscope: [text]\nquestion: Does it promise a reward?\ninterrupt: always\njudge: fixture-judge\n---\nFixture text.\n";
+    const wrong = "---\ndescription: Fixture - a wrong interrupt.\nagents: [author]\nscope: [text]\nquestion: Does it promise a reward?\ninterrupt: sometimes\n---\nFixture text.\n";
+    b = await bench({ chat: { "rules/no-player-voice.md": await draftedFile(".rules/examples/no-player-voice.md"), "rules/waits.md": waits, "rules/wrong.md": wrong } });
     const g = loadGuidance(b.host.files, scope);
-    expect((await g.rules()).map((r) => [r.name, r.trigger, r.inForce])).toEqual([["no-player-voice", "question", false]]);
-    expect(await g.problems()).toContainEqual(expect.objectContaining({ path: "rules/no-player-voice.md", line: 5, message: expect.stringContaining("No model is asked a rule's question") }));
-    expect((await run()).questions(author, { text: "", reply: "Wren nods, and you agree." })).toEqual([]);
+    expect((await g.rules()).map((r) => [r.name, r.trigger, r.inForce])).toEqual([
+      ["no-player-voice", "question", true],
+      ["waits", "question", true],
+      ["wrong", "question", false],
+    ]);
+    expect((await g.problems()).filter((p) => p.path !== "rules/wrong.md")).toEqual([]);
+    const asked = (await run()).questions(author, { text: "A reward awaits.", reply: "Wren nods, and you agree." });
+    expect(asked.map((q) => [q.rule, q.watched, q.interrupt, q.judge])).toEqual([
+      ["no-player-voice", "reply", false, undefined],
+      ["waits", "text", true, "fixture-judge"],
+    ]);
   });
 
   test("in the engine: asked about what the rule looks at, it fires on yes alone, and about a reply already shown goes into the next briefing", async () => {

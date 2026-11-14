@@ -34,7 +34,8 @@ const MOMENTS: readonly RuleMomentName[] = ["turn-start", "run-end", "before-com
 export type RuleWhen =
   | { trigger: "always" }
   | { trigger: "pattern"; pattern: RegExp; scope: RuleScope[]; interrupt: boolean; hold: boolean }
-  | { trigger: "question"; question: string; scope: RuleScope[] }
+  /** `interrupt`: the agent waits for the judging model's answer before its next call (`interrupt: always`); otherwise it goes on. `judge`: the connection the rule's own header names for the judging model. */
+  | { trigger: "question"; question: string; scope: RuleScope[]; interrupt: boolean; judge?: string }
   | { trigger: "moment"; at: RuleMomentName; fact?: FactTest }
   | { trigger: "interval"; every: number; fact?: FactTest };
 
@@ -259,7 +260,11 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     const scope = parseScope(h.scope, ["text", "thinking", "reply"]);
     if (typeof h.question !== "string" || h.question.trim() === "") fail("question", "`question:` is a question the judging model answers yes or no.");
     if (scope === undefined) fail(h.scope === undefined ? "question" : "scope", "`scope:` says what the question is about: text, thinking or reply.");
-    if (typeof h.question === "string" && scope !== undefined) when = { trigger: "question", question: h.question.trim(), scope };
+    const interrupt = h.interrupt === "always" ? true : h.interrupt === undefined || h.interrupt === null || h.interrupt === "never" ? false : undefined;
+    if (interrupt === undefined) fail("interrupt", "`interrupt:` is `always` to have the agent wait for the judging model's answer before its next call; left out, the agent goes on and the answer comes in when it comes.");
+    const judge = h.judge === undefined || h.judge === null ? undefined : typeof h.judge === "string" && h.judge.trim() !== "" ? h.judge.trim() : false;
+    if (judge === false) fail("judge", "`judge:` names the connection the judging model is reached through, by its name or its id.");
+    if (typeof h.question === "string" && scope !== undefined && interrupt !== undefined && judge !== false) when = { trigger: "question", question: h.question.trim(), scope, interrupt, ...(judge !== undefined ? { judge } : {}) };
   } else if (trigger === "at") {
     read.trigger = "moment";
     const moment = MOMENTS.find((m) => m === h.at);
@@ -273,7 +278,9 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
 
   if (Object.hasOwn(h, "fact") && trigger !== "at" && trigger !== "every") fail("fact", "`fact:` is tested at a moment: give the rule `at:` (turn-start, run-end or before-compaction) or `every:`.");
   if (trigger !== "condition" && trigger !== "question" && h.scope !== undefined) problem("scope", "`scope:` goes with `condition:` or `question:`, and is not read here.");
-  if (trigger !== "condition" && (h.interrupt !== undefined || h.hold !== undefined)) problem(h.interrupt !== undefined ? "interrupt" : "hold", "`interrupt:` and `hold:` go with `condition:`, and are not read here.");
+  if (trigger !== "condition" && trigger !== "question" && h.interrupt !== undefined) problem("interrupt", "`interrupt:` goes with `condition:` or `question:`, and is not read here.");
+  if (trigger !== "condition" && h.hold !== undefined) problem("hold", "`hold:` goes with `condition:`, and is not read here.");
+  if (trigger !== "question" && h.judge !== undefined) problem("judge", "`judge:` goes with `question:`, and is not read here.");
   if (trigger !== "condition" && h.case !== undefined) problem("case", "`case:` goes with `condition:`, and is not read here.");
 
   const turns = nameList(h.turns);

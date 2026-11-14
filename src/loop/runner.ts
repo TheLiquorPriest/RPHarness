@@ -16,7 +16,8 @@ import type { AgentRef, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction,
 import { DEFAULT_CHARS_PER_TOKEN, tokensOf } from "../model/tokens";
 import { addUsage, Budget, emptyUsage } from "./budget";
 import type { TextChannel } from "./channel";
-import type { Fired, RunEndRules, StreamFired, StreamRules } from "./rules";
+import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
+import { fit, type Misfit } from "./fit";
 import type { ParentCall, RunTrace } from "./trace";
 import type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
 
@@ -34,8 +35,12 @@ export interface RunnerTexts {
   closing?: string;
   /** The answer to a call of a tool the agent does not hold. */
   notFound?(fields: { tool: string }): string | undefined;
-  /** The answer to a call whose arguments do not fit what its tool takes: what was sent, and the tool's parameters, both as JSON. */
-  invalid?(fields: { tool: string; arguments: string; parameters: string }): string | undefined;
+  /**
+   * The answer to a call whose arguments do not fit what its tool takes: what was sent, and the
+   * tool's parameters, both as JSON, and each argument that did not fit and why, as pi's check found
+   * them (none where it lists none: arguments that did not parse).
+   */
+  invalid?(fields: { tool: string; arguments: string; parameters: string; misfits: Misfit[] }): string | undefined;
   /** The answer to a call in a message that hit its length limit, whose arguments may be cut short. */
   cutShort?(fields: { tool: string }): string | undefined;
   /** The answer to a call whose tool threw: the error's own words. */
@@ -70,6 +75,8 @@ export interface RunnerOptions {
   turn?: Budget;
   stream?: StreamRules;
   runEnd?: RunEndRules;
+  /** The `question:` rules, put to a judging model about each message it finishes. */
+  questions?: QuestionRules;
   /** What runs around each of its tool calls: permissions, rules, clipping. None: each call simply runs. */
   gate?: ToolGate;
   /** Where its text goes as it streams, when it writes the reply. */
@@ -123,8 +130,12 @@ interface Stint {
   calling: boolean;
   /** Each tool call's own answer, by call id. */
   readonly results: Map<string, LoopToolResult>;
-  /** Calls a rule added its text to, or answered instead of the tool: never clean. */
-  readonly ruled: Set<string>;
+  /**
+   * Calls that are never clean, whatever their answer now shows: a rule added its text to them or
+   * answered instead of the tool, or the tool reported something the bound on what the model reads
+   * left out.
+   */
+  readonly unclean: Set<string>;
   /** Calls whose result ended their batch. */
   readonly ended: Set<string>;
   /** Calls that finished before any stop. */
@@ -135,6 +146,12 @@ interface Stint {
   readonly carried: Map<string, { args: JsonValue; closing: boolean }>;
   /** The tool each carrier's call ran as itself (`runAs`), by the carrier's call id, and its answer as the gate gave it. */
   readonly ranAs: Map<string, { tool: string; result: LoopToolResult }>;
+  /** Questions put to the judging model about its messages, still unanswered. */
+  readonly judging: Set<Judgment>;
+  /** Rules a judging model's answer fired, to go in front of the agent at the end of the step under way. */
+  readonly judged: Judged[];
+  /** Settles when the work stops or reaches a limit, so nothing it waits for outlasts it. */
+  readonly halted: PromiseWithResolvers<void>;
   asked?: { call: string; question: JsonValue };
   last?: AssistantMessage;
   timer?: unknown;
@@ -242,12 +259,15 @@ export class AgentRunner {
       callFrom: 0,
       calling: false,
       results: new Map(),
-      ruled: new Set(),
+      unclean: new Set(),
       ended: new Set(),
       finished: new Set(),
       reminders: [],
       carried: new Map(),
       ranAs: new Map(),
+      judging: new Set(),
+      judged: [],
+      halted: Promise.withResolvers<void>(),
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
@@ -310,12 +330,15 @@ export class AgentRunner {
     } else outcome = { ...base, status: "done" };
     this.#stint = undefined;
     this.#emit(stint, { kind: "agent_ended", status: outcome.status, ...(outcome.limit !== undefined ? { limit: outcome.limit } : {}), usage: stint.usage });
+    // A rule a judging model's answer fired that the work ended before taking in goes back to the run.
+    for (const judged of stint.judged.splice(0)) this.#o.questions?.late(this.agent, judged);
     stint.resolve(outcome);
   }
 
   #halt(stint: Stint, halt: Halt): void {
     if (this.#stint !== stint || stint.halt !== undefined) return;
     stint.halt = halt;
+    stint.halted.resolve();
     if (halt.status === "limit") this.#emit(stint, { kind: "limit", hit: halt.hit });
     this.#o.channel?.cut();
     this.#pi.abort();
@@ -411,6 +434,7 @@ export class AgentRunner {
           ms: this.#clock.now() - stint.callStartedAt,
           ...(message.errorMessage !== undefined ? { error: message.errorMessage } : {}),
         });
+        if (stint.cut === undefined && message.stopReason !== "error" && message.stopReason !== "aborted") this.#judge(stint, message);
         return;
       }
       case "tool_execution_start": {
@@ -433,7 +457,7 @@ export class AgentRunner {
         const tool = ranAs?.tool ?? event.toolName;
         // A tool run as itself is traced with its answer as the gate gave it, as a call of the agent's own list is: its reports and the rules' texts went to the model after it.
         const result: ToolResult = ranAs !== undefined ? withoutAsk(ranAs.result) : own !== undefined ? withoutAsk(own) : { content: made.content, ...(event.isError ? { error: true as const } : {}) };
-        const clean = !event.isError && isClean(result) && !stint.ruled.has(event.toolCallId);
+        const clean = !event.isError && isClean(result) && !stint.unclean.has(event.toolCallId);
         const carried = stint.carried.get(event.toolCallId);
         if (carried !== undefined && ranAs === undefined) this.#emit(stint, { kind: "tool_started", callId: event.toolCallId, tool, args: carried.args, closing: carried.closing });
         this.#emit(stint, { kind: "tool_ended", callId: event.toolCallId, tool, result, clean, endedRun: stint.ended.has(event.toolCallId), ms: event.durationMs ?? 0 });
@@ -458,8 +482,10 @@ export class AgentRunner {
     else if (stint.last?.stopReason === "length") line = texts.cutShort?.({ tool: toolName });
     else {
       const call = stint.last?.content.find((part) => part.type === "toolCall" && part.id === callId);
-      const sent = call?.type === "toolCall" ? withoutClosing(call.arguments as JsonValue) : {};
-      line = texts.invalid?.({ tool: toolName, arguments: JSON.stringify(sent), parameters: JSON.stringify(tool.parameters) });
+      const raw = call?.type === "toolCall" ? (call.arguments as JsonValue) : {};
+      // The check pi ran, run again on what it was given, so its findings come as data a file can lay out.
+      const checked = fit(tool, raw, callId);
+      line = texts.invalid?.({ tool: toolName, arguments: JSON.stringify(withoutClosing(raw)), parameters: JSON.stringify(tool.parameters), misfits: "misfits" in checked ? checked.misfits : [] });
     }
     const content: TextContent[] = line === undefined ? [] : [{ type: "text", text: line }];
     made.content.splice(0, made.content.length, ...content);
@@ -511,7 +537,7 @@ export class AgentRunner {
     // A closing call that comes back clean needs no further call (§10.7). Whether something is due
     // at the run's end is asked once the whole batch is in (`#finishTurn`): pi still takes a
     // follow-up after a batch that ended this way.
-    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result) && !stint.ruled.has(id)) {
+    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result) && !stint.unclean.has(id)) {
       stint.ended.add(id);
       return { terminate: true };
     }
@@ -527,12 +553,19 @@ export class AgentRunner {
     if (stint.cut !== undefined) return { action: "end" };
     if (message.stopReason === "error" || message.stopReason === "aborted") return undefined;
     if (stint.halt !== undefined || stint.asked !== undefined) return { action: "end" };
+    // The answers the agent waits for (`interrupt: always`) come in before its next call; a stop does not wait on them.
+    const waited = [...stint.judging].filter((judgment) => judgment.wait);
+    if (waited.length > 0) {
+      await Promise.race([Promise.allSettled(waited.map((judgment) => judgment.answer)), stint.halted.promise]);
+      if (stint.halt !== undefined) return { action: "end" };
+    }
     const reminders = stint.reminders.splice(0);
     const answers = this.#o.channel?.answers?.() ?? [];
     if (!turn.toolResults.every((result) => stint.ended.has(result.toolCallId))) {
-      // The work goes on anyway: a reminder, and what the reply's form has to say, go in with the next call.
+      // The work goes on anyway: a reminder, what the reply's form has to say, and the rules a judging model's answer fired go in with the next call.
       for (const fired of reminders) this.#add(stint, fired, "remind", "steer");
       for (const text of answers) this.#pi.steer(userMessage([text]));
+      for (const judged of stint.judged.splice(0)) this.#judged(stint, judged, "steer");
       return undefined;
     }
     // The work would end here. What is due at a run's end goes in as a follow-up, and the agent
@@ -542,7 +575,35 @@ export class AgentRunner {
     for (const fired of reminders) this.#add(stint, fired, "remind", "follow-up");
     for (const text of answers) this.#pi.followUp(userMessage([text]));
     for (const fired of due) this.#add(stint, fired, "follow-up", "follow-up");
+    for (const judged of stint.judged.splice(0)) this.#judged(stint, judged, "follow-up");
     return undefined;
+  }
+
+  /**
+   * Puts the `question:` rules due on a message just finished to the judging model. A rule its
+   * answer fires goes in front of the agent at the end of the step under way; one that comes once
+   * the work has ended goes back to the run (`QuestionRules.late`).
+   */
+  #judge(stint: Stint, message: AssistantMessage): void {
+    const questions = this.#o.questions;
+    if (questions === undefined) return;
+    for (const judgment of questions.ask({ agent: this.agent, call: this.#calls, text: textOf(message), thinking: thinkingOf(message) })) {
+      stint.judging.add(judgment);
+      const settle = (judged: Judged | undefined): void => {
+        stint.judging.delete(judgment);
+        if (judged === undefined) return;
+        if (this.#stint === stint && stint.halt === undefined) stint.judged.push(judged);
+        else questions.late(this.agent, judged);
+      };
+      // A judgment that failed is an answer that fires nothing; the run that made it says why.
+      void judgment.answer.then(settle, () => settle(undefined));
+    }
+  }
+
+  /** A rule a judging model's answer fired: its text goes in with the next call (a reply already shown: it was held for the next briefing). */
+  #judged(stint: Stint, judged: Judged, how: "steer" | "follow-up"): void {
+    if (judged.deliver === "briefing") this.#emit(stint, { kind: "rule_fired", firing: { ...judged.fired.firing, agent: this.agent, action: "briefing" } });
+    else this.#add(stint, judged.fired, how === "steer" ? "remind" : "follow-up", how);
   }
 
   #add(stint: Stint, fired: Fired, action: "remind" | "follow-up", how: "steer" | "follow-up"): void {
@@ -629,7 +690,7 @@ export class AgentRunner {
         answered = true;
         if (result === undefined) return { content: [], details: undefined };
         stint.results.set(callId, result.answer);
-        if (result.texts.length > 0) stint.ruled.add(callId);
+        if (result.texts.length > 0) stint.unclean.add(callId);
         // A report is shown to the model after the call's content, one line each; then the texts of the rules on the call.
         const after = [...(result.answer.reports ?? []), ...result.texts].map((line) => ({ type: "text" as const, text: line }));
         return { content: [...result.answer.content, ...after], details: result.answer.details, ...(result.answer.error === true ? { isError: true } : {}) };
@@ -661,7 +722,7 @@ export class AgentRunner {
     answered = true;
     if (ran === undefined) return { content: [] };
     stint.ranAs.set(callId, { tool: tool.name, result: ran.answer });
-    if (ran.texts.length > 0) stint.ruled.add(callId);
+    if (ran.texts.length > 0) stint.unclean.add(callId);
     const after = [...(ran.answer.reports ?? []), ...ran.texts].map((line) => ({ type: "text" as const, text: line }));
     return { ...ran.answer, content: [...ran.answer.content, ...after] };
   }
@@ -680,13 +741,15 @@ export class AgentRunner {
     if (before.refuse !== undefined) return { answer: before.refuse, texts: [] };
     if (before.hold !== undefined) {
       // Answered with the rule's text instead of running: never clean, so a closing call goes on to a call that reads it (§10.7).
-      stint.ruled.add(call.callId);
+      stint.unclean.add(call.callId);
       this.#ruled(stint, call, before.hold, "hold");
       return { answer: { content: [{ type: "text", text: before.hold.text.trimEnd() }] }, texts: [] };
     }
     const ran = await this.#run(tool, call, ctx);
     if (ctx.signal.aborted) return undefined;
     const after = await gate.after(call, ran, ctx.signal);
+    // Whether an answer is clean is the tool's own: what it reported counts though the model reads none of it.
+    if (!isClean(ran)) stint.unclean.add(call.callId);
     const reminders = [...before.remind, ...after.remind];
     for (const fired of reminders) this.#ruled(stint, call, fired, "remind");
     return { answer: after.result, texts: reminders.map((fired) => fired.text.trimEnd()) };

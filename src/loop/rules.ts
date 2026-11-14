@@ -47,3 +47,33 @@ export interface RunEndRules {
   /** The rules due at this moment; their texts go in as follow-ups and the agent gets another call. */
   due(moment: RunEndMoment): Fired[] | Promise<Fired[]>;
 }
+
+/** A message an agent finished whole, for the `question:` rules: its text and its thinking. */
+export interface Finished {
+  agent: AgentRef;
+  call: number;
+  text: string;
+  thinking: string;
+}
+
+/** A `question:` rule that fired: its text goes in front of the agent (`now`), or was held for the next briefing because the reply it is about was already shown (`briefing`). */
+export interface Judged {
+  fired: Fired;
+  deliver: "now" | "briefing";
+}
+
+/** One question put to the judging model about a message. */
+export interface Judgment {
+  /** The agent waits for the answer before its next call (`interrupt: always`); otherwise it goes on. */
+  wait: boolean;
+  /** Settles with the rule that fired, or undefined when it does not. */
+  answer: Promise<Judged | undefined>;
+}
+
+/** The `question:` rules (§5.4): put to a judging model about each message an agent finishes. */
+export interface QuestionRules {
+  /** The questions due on a message just finished. */
+  ask(message: Finished): Judgment[];
+  /** A rule that fired once the agent's work had ended or stopped: its text has no way in front of the agent in this work. */
+  late(agent: AgentRef, judged: Judged): void;
+}

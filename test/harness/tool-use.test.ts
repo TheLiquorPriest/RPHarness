@@ -80,7 +80,7 @@ describe("a call through tool_use", () => {
     expect(answerTo(s, "never-1")).toBe(lines.line("never", { tool: "ledger_open", lane: "engine" }) ?? "");
     expect(answerTo(s, "hold-1")).toContain("Fixture rule: the bell stays silent at night.");
     const kept = `sessions/s1/turns/t1/cache/results/clip-1.md`;
-    expect(answerTo(s, "clip-1")).toBe(`${TIDES.slice(0, 40)}${lines.line("clipped", { shown: 40, length: TIDES.length, path: kept }) ?? ""}`);
+    expect(answerTo(s, "clip-1")).toBe(`${TIDES.slice(0, 40)}${lines.line("clipped", { shown: 40, length: TIDES.length, left: TIDES.length - 40, path: kept }) ?? ""}`);
     const whole = await s.env.files.read(request("t1").scope, kept);
     expect(whole.status === "read" ? whole.text : "").toBe(TIDES);
     // Only the clipped tool ran, with the day its own schema made a whole number.

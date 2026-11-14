@@ -190,7 +190,7 @@ export async function bench(files: Readonly<Record<string, string>> = {}): Promi
     guidance,
     texts,
     notices,
-    deps: (reach, extra = {}) => ({ reach, guidance, notices, texts, ...extra }),
+    deps: (reach, extra = {}) => ({ reach, guidance, notices, texts, schemaShown: 600, ...extra }),
     async close() {
       await host.close();
       await rm(place, { recursive: true, force: true });

@@ -5,6 +5,7 @@
 import type { AgentRef, Scope, SearchHit } from "./common";
 import type { FactValue } from "./facts";
 import type { LayerLevel } from "./files";
+import type { JobView } from "./harness";
 import type { Release, RunOutcome } from "./turn";
 
 /**
@@ -156,4 +157,12 @@ export interface TurnEvents {
   released(scope: Scope, release: Release): Promise<void>;
   /** The lead's run is over. */
   ended(scope: Scope, outcome: RunOutcome): Promise<void>;
+  /**
+   * A job's state changed (§13.5): it waits for a place, it runs, it ended (with its report), or a
+   * restart found it interrupted. `scope` is the job's: its chat, its own session, and the turn
+   * that started it. A host that runs jobs keeps what a job changed with that turn and tells the
+   * next turn of the job's end in a `job` since-item; a host without it has the trace's `job`
+   * events and `Harness.jobs`.
+   */
+  job?(scope: Scope, job: JobView): Promise<void>;
 }

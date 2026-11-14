@@ -19,8 +19,8 @@ describe("tool_use", () => {
     const ran: Ran = [];
     const tools = fixtureTools(ran);
     const result = await toolUse(b.deps(standIn(tools))).run({ name: "open_account", args: { holder: "Mira" } }, ctxOf());
-    const schema = tools.find((tool) => tool.name === "open_account")!.parameters;
-    expect([textOf(result), result.error]).toEqual([b.notices("invalid", { tool: "open_account", arguments: '{"holder":"Mira"}', parameters: JSON.stringify(schema) }) ?? "", true]);
+    expect(result.error).toBe(true);
+    expect(textOf(result)).toStartWith("open_account was not run: the arguments you sent do not fit what it takes.");
     expect(ran).toEqual([]);
   });
 

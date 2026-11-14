@@ -287,15 +287,16 @@ class Run implements RuleRun {
   questions(agent: AgentRef, message: MessageSeen): Question[] {
     const out: Question[] = [];
     for (const rule of this.#for(agent)) {
-      if (rule.when.trigger !== "question" || !this.#may(rule, agent)) continue;
-      for (const scope of rule.when.scope) {
+      const when = rule.when;
+      if (when.trigger !== "question" || !this.#may(rule, agent)) continue;
+      for (const scope of when.scope) {
         if (scope.watch !== "text" && scope.watch !== "thinking" && scope.watch !== "reply") continue;
         const text = message[scope.watch];
         if (text === undefined || text.trim() === "") continue;
         this.#questions += 1;
         const id = `${rule.name}#${this.#questions}`;
         this.#asked.set(id, rule);
-        out.push({ id, rule: rule.name, agent, question: rule.when.question, watched: scope.watch, text });
+        out.push({ id, rule: rule.name, agent, question: when.question, watched: scope.watch, text, interrupt: when.interrupt, ...(when.judge !== undefined ? { judge: when.judge } : {}) });
       }
     }
     return out;
@@ -312,6 +313,10 @@ class Run implements RuleRun {
     if (question.watched !== "reply") return { fired, deliver: "now" };
     this.#memory.held.push({ agent: question.agent.definition, firing: fired.firing, text });
     return { fired, deliver: "briefing" };
+  }
+
+  hold(agent: AgentRef, fired: Fired): void {
+    this.#memory.held.push({ agent: agent.definition, firing: fired.firing, text: fired.text });
   }
 
   memory(): RuleMemory {

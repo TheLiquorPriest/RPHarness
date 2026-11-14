@@ -8,7 +8,7 @@ import type { RuleFiring } from "./events";
 import type { LayerLevel } from "./files";
 import type { ModelsApi } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
-import type { ReplySink, TurnOutcome, TurnRequest } from "./turn";
+import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 
 // ---------------------------------------------------------------- jobs
 
@@ -35,6 +35,8 @@ export interface JobView {
   usage: Usage;
   /** What its agent last wrote, once it ended: its report, or for an interrupted job what it had done. */
   report?: string;
+  /** For a job that ended at one of the user's limits (§10.11): which. It ends with what it has. */
+  limit?: LimitHit;
 }
 
 /** A job the user starts: the definition its agent runs as, what to do, and what it is given by name. */

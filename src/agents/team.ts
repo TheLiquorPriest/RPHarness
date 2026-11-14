@@ -15,7 +15,7 @@ import type { AgentRef, ConsentGrant, Environment, JsonValue, LimitHit, Log, Mod
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
 import type { AgentSettings } from "../harness/settings";
-import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { attach, joined, type Wanted } from "./attachments";
@@ -47,12 +47,14 @@ export interface TeamDeps {
   hold(names: readonly string[]): Held;
   /** Tools a sub-agent's definition lists that nobody registered: the turn says so, once in its session. */
   unregistered(definition: string, tools: readonly string[]): void;
-  /** What runs around each of an agent's tool calls, made for that agent as the lead's is made for the lead. */
-  gate(agent: AgentRef, parent: ParentCall, tools: readonly HeldTool[]): ToolGate;
+  /** What runs around each of an agent's tool calls, made for that agent as the lead's is made for the lead; `parent` is the call its work hangs under, none for the first agent of a run the user started. */
+  gate(agent: AgentRef, parent: ParentCall | undefined, tools: readonly HeldTool[]): ToolGate;
   /** The texts the turn's runners send a model. */
   texts(): RunnerTexts;
   /** The turn's rules. */
   rules(): RuleRun;
+  /** The `question:` rules' judging model, which every agent of the run is asked about; none asks nothing. */
+  questions?(): QuestionRules | undefined;
   /** The turn's limits, shared by every agent of it. */
   budget(): Budget;
   /** The user's limits on how deep sub-agents may stand and how many one turn may start: the turn's settings. */
@@ -84,11 +86,29 @@ interface Member {
 
 /** A sub-agent made and ready to start: itself, its first message, what it was given by name, what nobody could give, and its model's room. */
 interface Made {
-  member: Member;
+  ref: AgentRef;
+  runner: AgentRunner;
   first: string;
   given: string[];
   missing: string[];
   limits: ModelLimits;
+}
+
+/** Who an agent is made for: the agent whose call starts it, and the call its work hangs under; neither for a job the user started. */
+interface Origin {
+  agent?: string;
+  parent?: ParentCall;
+}
+
+/** The first agent of a run of its own, made and ready to start (`Team.first`). */
+export interface FirstAgent {
+  ref: AgentRef;
+  runner: AgentRunner;
+  /** Its brief, laid out as a sub-agent's is. */
+  first: string;
+  /** What it was given by name, and what of it nobody could give. */
+  given: string[];
+  missing: string[];
 }
 
 /** What the team reads once a turn, the first time it is asked to do anything. */
@@ -184,17 +204,18 @@ export class Team implements TeamWork {
     // together; a call that starts nobody gives it back.
     this.#started += 1;
     let made: Made | LoopToolResult;
+    const parent: ParentCall = { agent: ctx.agent.id, run: ctx.run, call: ctx.callId };
     try {
-      made = await this.#make(call, ctx, loaded, level);
+      made = await this.#make(call, { agent: ctx.agent.id, parent }, loaded);
     } catch (error) {
       this.#started -= 1;
       throw error;
     }
-    if (!("member" in made) || ctx.signal.aborted) {
+    if (!("runner" in made) || ctx.signal.aborted) {
       this.#started -= 1;
-      return "member" in made ? said("") : made;
+      return "runner" in made ? said("") : made;
     }
-    const { member } = made;
+    const member: Member = { ref: made.ref, runner: made.runner, level, parent };
     const fields = fieldsOf(member.ref);
     this.#members.set(member.ref.id, member);
     d.gauge?.(member.ref, made.limits);
@@ -205,8 +226,22 @@ export class Team implements TeamWork {
     return this.#end(member, work, ctx, made.missing, loaded);
   }
 
-  /** A sub-agent made from its definition and ready to start, or the answer that says why none can be. */
-  async #make(call: DelegateCall, ctx: ToolCtx, loaded: Loaded, level: number): Promise<Made | LoopToolResult> {
+  /**
+   * The first agent of a run of its own (a job, §13.5), made from a definition and a brief as
+   * `delegate` makes a sub-agent. It stands where a turn's lead does: the user's limits on how deep
+   * and how many hold for the agents it starts and not for it, and it has nobody above it to ask.
+   * `by` is the agent whose call starts it and `parent` that call; neither when the user starts it.
+   * Gives it ready to start, or the answer that says why none can be made.
+   */
+  async first(call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined): Promise<FirstAgent | LoopToolResult> {
+    const made = await this.#make(call, { ...(by !== undefined ? { agent: by.id } : {}), ...(parent !== undefined ? { parent } : {}) }, await this.#load());
+    if (!("runner" in made)) return made;
+    this.#d.gauge?.(made.ref, made.limits);
+    return { ref: made.ref, runner: made.runner, first: made.first, given: made.given, missing: made.missing };
+  }
+
+  /** An agent made from its definition and ready to start, or the answer that says why none can be. */
+  async #make(call: DelegateCall, origin: Origin, loaded: Loaded): Promise<Made | LoopToolResult> {
     const d = this.#d;
     const definition = await d.guidance.definition(call.agent);
     if (definition === undefined) return answer(loaded.words("no_agent", { agent: call.agent }), true);
@@ -221,8 +256,7 @@ export class Team implements TeamWork {
     }
     const number = (this.#numbers.get(definition.name) ?? 0) + 1;
     this.#numbers.set(definition.name, number);
-    const ref: AgentRef = { id: `${definition.name}-${number}`, definition: definition.name, parent: ctx.agent.id, ...(call.plays !== undefined ? { plays: call.plays } : {}) };
-    const parent: ParentCall = { agent: ctx.agent.id, run: ctx.run, call: ctx.callId };
+    const ref: AgentRef = { id: `${definition.name}-${number}`, definition: definition.name, ...(origin.agent !== undefined ? { parent: origin.agent } : {}), ...(call.plays !== undefined ? { plays: call.plays } : {}) };
     const fields = fieldsOf(ref);
     const held = d.hold(definition.tools);
     if (held.missing.length > 0) d.unregistered(definition.name, held.missing);
@@ -235,6 +269,7 @@ export class Team implements TeamWork {
     const brief = loaded.brief?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
     const rules = d.rules();
     const keep = d.keep?.(ref);
+    const questions = d.questions?.();
     const runner = new AgentRunner({
       agent: ref,
       trace: d.trace,
@@ -250,11 +285,12 @@ export class Team implements TeamWork {
       turn: d.budget(),
       stream: rules.stream(ref),
       runEnd: rules.runEnd,
-      gate: d.gate(ref, parent, held.tools),
+      ...(questions !== undefined ? { questions } : {}),
+      gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
-    return { member: { ref, runner, level, parent }, first: joined([brief]), given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
+    return { ref, runner, first: joined([brief]), given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {

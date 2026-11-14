@@ -25,16 +25,21 @@
 //     show: all                        all the progress lines, or least: only the line that keeps a silent turn alive
 //     silence: 60                      seconds of nothing shown before that line
 //   results:
-//     clip: 12000                      characters of a tool's result the model reads; the rest is kept in a file
+//     clip: 12000                      characters of a tool's answer, its reports counted with it, that the model
+//                                      reads, the session file keeps and later requests carry; the whole is kept in a file
 //   tools:
 //     search: 8                        tools one tool_search gives when the agent names no limit
 //     gapCheck: 20                     hits gap_check takes from each place when the agent names no limit
 //     perCall: 100                     the most one tool call takes: messages chat_read gives, entries
 //                                      lore_read reads, hits a search asks each place for and keeps,
 //                                      and messages a stretch of the chat an agent is given holds
+//     schemaShown: 600                 characters of a tool's schema that the answer to a call that does not fit
+//                                      it shows whole; a longer schema is left out of that answer
 //   rules:
 //     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
 //                                      written, and stretches of a tool's arguments or result
+//     judge: <connection>              the connection a `question:` rule is judged on, by its name or id, where the
+//                                      rule's own `judge:` names none; none by default: the asking agent's own
 //   effort:
 //     connections: { <connection>: high } the effort every agent on a connection thinks at, by the connection's
 //                                      name or its id, whatever its definition says: off, minimal, low,
@@ -48,6 +53,16 @@
 //     keepTurns: 3                     the newest of a session's earlier turns that a summary never stands for
 //     records: 6000                    tokens of records the records mode carries before they are folded into
 //                                      the summary by a compaction
+//   jobs:
+//     atOnce: 2                        jobs running at once, the user's across every chat; one started past it waits
+//                                      for a place
+//     perDay: ~                        jobs that may be started in the user's day; ~ for no limit
+//     connections: { <connection>: { atOnce: 1, perDay: 20 } }
+//                                      the same for the jobs whose agent runs on one connection, by its name or id
+//     run:
+//       calls: 60                      model calls across every agent of one job's run; ~ for no limit
+//       tokensIn: 600000, tokensOut: 60000   tokens across every agent of one job's run; ~ for no limit
+//       time: 900                      seconds for one job's run; ~ for no limit
 
 import type { Effort, FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
@@ -87,6 +102,7 @@ export interface Settings {
   intentWaitMs: number;
   progress: "all" | "least";
   silenceMs: number;
+  /** Characters of a tool's answer, its text and its reports together, that the model reads. */
   clipChars: number;
   /** Tools one `tool_search` gives when the agent names no limit. */
   searchHits: number;
@@ -94,8 +110,12 @@ export interface Settings {
   gapHits: number;
   /** The most one tool call takes: messages, entries, or hits from each place searched; a stretch of the chat an agent is given too. */
   perCall: number;
+  /** Characters of a tool's schema that the answer to a call that does not fit it shows whole. */
+  schemaShown: number;
   /** Characters a rule's pattern looks at at a time. */
   ruleWindow: number;
+  /** The connection a `question:` rule is judged on, by its name or id, where the rule names none (§5.4); absent: the asking agent's own. */
+  judge?: string;
   /** The effort agents on a connection think at, by the connection's name or id, over their definitions'. */
   efforts: Readonly<Record<string, Effort>>;
   /** Which calls' requests are kept in the turn's folder. */
@@ -106,6 +126,24 @@ export interface Settings {
    * the records mode folds them into the summary.
    */
   compaction: { reserve: number; keepTurns: number; records: number };
+  jobs: JobSettings;
+}
+
+/** A day's and a moment's count of jobs, for every job or for those on one connection; each absent is no limit. */
+export interface JobCounts {
+  atOnce?: number;
+  perDay?: number;
+}
+
+/**
+ * The user's limits on jobs (§13.5, §10.11): how many run at once (one past it waits for a place)
+ * and how many may be started in the user's day; the same for the jobs on one connection, by its
+ * name or id; and what one job's run may spend across its agents (`time` in milliseconds).
+ */
+export interface JobSettings extends JobCounts {
+  atOnce: number;
+  connections: Readonly<Record<string, JobCounts>>;
+  run: { calls?: number; tokensIn?: number; tokensOut?: number; time?: number };
 }
 
 /** The defaults, where no level sets a value. */
@@ -138,6 +176,10 @@ export const DEFAULT_SETTINGS: Settings = {
   // of 20, and 40 more held for the story's record), and five times the hits a gap check takes from
   // a place by default.
   perCall: 100,
+  // About 190 tokens: the schema of a tool of two or three arguments with their descriptions, as RPH's
+  // own file tools are; a tool of many arguments, whose schema costs more to read than the call cost
+  // to write, is answered with what did not fit alone.
+  schemaShown: 600,
   // Wide enough for any phrase a rule looks for, with room to spare; narrow enough that a pattern of
   // the kinds the rules let in takes at most some tens of milliseconds on it.
   ruleWindow: 500,
@@ -148,6 +190,9 @@ export const DEFAULT_SETTINGS: Settings = {
   // Appendix D.1: the reserve pi's coding agent keeps (16,384 tokens), the newest 3 turns kept as
   // they are, and records folded once they pass 6,000 tokens.
   compaction: { reserve: 16_384, keepTurns: 3, records: 6_000 },
+  // Today's build's own (LumiAH's `jobs.atOnce` and `jobs.budget`: 60 rounds of calls, 600,000
+  // tokens in, 60,000 out, 15 minutes), kept as §10.11 says. Today's build counted no jobs a day.
+  jobs: { atOnce: 2, connections: {}, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -275,6 +320,35 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     }
   } else if (connectionsValue !== undefined) passed("effort.connections", connectionsValue);
 
+  const jobsSection = section("jobs");
+  /** A limit that `~` (null) lifts; absent, or a value it does not take, leaves `fallback`. */
+  const lifted = (key: string, value: JsonValue | undefined, fallback: number | undefined): number | undefined => (value === undefined ? fallback : value === null ? undefined : (count(key, value) ?? fallback));
+  const counts = (key: string, value: Mapping): JobCounts => {
+    const atOnce = count(`${key}.atOnce`, value["atOnce"]);
+    const perDay = lifted(`${key}.perDay`, value["perDay"], undefined);
+    return { ...(atOnce !== undefined ? { atOnce } : {}), ...(perDay !== undefined ? { perDay } : {}) };
+  };
+  const jobConnections: Record<string, JobCounts> = {};
+  const jobConnectionsValue = jobsSection["connections"];
+  if (isMapping(jobConnectionsValue)) {
+    for (const [connection, value] of Object.entries(jobConnectionsValue)) {
+      if (isMapping(value)) jobConnections[connection] = counts(`jobs.connections.${connection}`, value);
+      else passed(`jobs.connections.${connection}`, value);
+    }
+  } else if (jobConnectionsValue !== undefined) passed("jobs.connections", jobConnectionsValue);
+  const jobRunValue = jobsSection["run"];
+  const jobRun = isMapping(jobRunValue) ? jobRunValue : {};
+  if (jobRunValue !== undefined && !isMapping(jobRunValue)) passed("jobs.run", jobRunValue);
+  const runDefaults = DEFAULT_SETTINGS.jobs.run;
+  const runCalls = lifted("jobs.run.calls", jobRun["calls"], runDefaults.calls);
+  const runIn = lifted("jobs.run.tokensIn", jobRun["tokensIn"], runDefaults.tokensIn);
+  const runOut = lifted("jobs.run.tokensOut", jobRun["tokensOut"], runDefaults.tokensOut);
+  const runSeconds = lifted("jobs.run.time", jobRun["time"], runDefaults.time === undefined ? undefined : runDefaults.time / 1000);
+  const jobsPerDay = lifted("jobs.perDay", jobsSection["perDay"], DEFAULT_SETTINGS.jobs.perDay);
+  const judgeValue = rules["judge"];
+  const judge = typeof judgeValue === "string" && judgeValue.trim() !== "" ? judgeValue.trim() : undefined;
+  if (judgeValue !== undefined && judge === undefined) passed("rules.judge", judgeValue);
+
   return {
     turn: {
       ...(calls !== undefined ? { calls } : {}),
@@ -296,13 +370,26 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     searchHits: count("tools.search", tools["search"]) ?? DEFAULT_SETTINGS.searchHits,
     gapHits: count("tools.gapCheck", tools["gapCheck"]) ?? DEFAULT_SETTINGS.gapHits,
     perCall: count("tools.perCall", tools["perCall"]) ?? DEFAULT_SETTINGS.perCall,
+    schemaShown: whole("tools.schemaShown", tools["schemaShown"]) ?? DEFAULT_SETTINGS.schemaShown,
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
+    ...(judge !== undefined ? { judge } : {}),
     efforts,
     requests: oneOf<RequestsSetting>("trace.requests", trace["requests"], ["first", "all", "none"]) ?? DEFAULT_SETTINGS.requests,
     compaction: {
       reserve: whole("compaction.reserve", compaction["reserve"]) ?? DEFAULT_SETTINGS.compaction.reserve,
       keepTurns: whole("compaction.keepTurns", compaction["keepTurns"]) ?? DEFAULT_SETTINGS.compaction.keepTurns,
       records: count("compaction.records", compaction["records"]) ?? DEFAULT_SETTINGS.compaction.records,
+    },
+    jobs: {
+      atOnce: count("jobs.atOnce", jobsSection["atOnce"]) ?? DEFAULT_SETTINGS.jobs.atOnce,
+      ...(jobsPerDay !== undefined ? { perDay: jobsPerDay } : {}),
+      connections: jobConnections,
+      run: {
+        ...(runCalls !== undefined ? { calls: runCalls } : {}),
+        ...(runIn !== undefined ? { tokensIn: runIn } : {}),
+        ...(runOut !== undefined ? { tokensOut: runOut } : {}),
+        ...(runSeconds !== undefined ? { time: runSeconds * 1000 } : {}),
+      },
     },
   };
 }
@@ -318,4 +405,18 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
 export function effortFor(settings: Settings, connection: { id: string | null; name: string | null }): Effort | undefined {
   const key = [connection.id, connection.name].find((key) => key !== null && Object.hasOwn(settings.efforts, key));
   return key === undefined || key === null ? undefined : settings.efforts[key];
+}
+
+/** The user's counts for the jobs on one connection, under the setting's key that names it (its name or its id). */
+export interface ConnectionCounts {
+  key: string;
+  counts: JobCounts;
+}
+
+/** The user's counts for the jobs on a connection, each by the setting's key that names it. */
+export function jobCountsFor(settings: Settings, connection: { id: string | null; name: string | null }): ConnectionCounts[] {
+  return [...new Set([connection.id, connection.name].filter((key): key is string => key !== null))].flatMap((key) => {
+    const counts = settings.jobs.connections[key];
+    return counts === undefined ? [] : [{ key, counts }];
+  });
 }

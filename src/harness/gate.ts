@@ -74,26 +74,46 @@ export class TurnGate implements ToolGate {
     return { result: await this.#clip(call, result), remind };
   }
 
-  /** A result longer than the setting, cut to it: its whole is kept in the turn's folder, and the file's line says where. */
+  /**
+   * An answer longer than the setting, cut to it. What the model reads of an answer is its text and
+   * then its reports, one line each, so the setting counts both: whatever a tool reports, no more
+   * than the setting reaches the model, the trace, the session file or a later request. Its whole is
+   * kept in the turn's folder, and the file's line says how much was left out and where. The line
+   * comes after all that is shown, among the reports where the answer has any.
+   */
   async #clip(call: GateCall, result: LoopToolResult): Promise<LoopToolResult> {
     const d = this.#d;
     const texts = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
-    const length = texts.reduce((sum, text) => sum + text.length, 0);
+    const reports = result.reports ?? [];
+    const whole = [...texts, ...reports];
+    const length = whole.reduce((sum, text) => sum + text.length, 0);
     if (length <= d.clipChars) return result;
     let left = d.clipChars;
+    const cut = (text: string): string | undefined => {
+      if (left <= 0) return undefined;
+      const kept = text.slice(0, left);
+      left -= kept.length;
+      return kept;
+    };
     const content = result.content.flatMap((part): ToolContent[] => {
       if (part.type !== "text") return [part];
-      if (left <= 0) return [];
-      const kept = part.text.slice(0, left);
-      left -= kept.length;
-      return [{ ...part, text: kept }];
+      const kept = cut(part.text);
+      return kept === undefined ? [] : [{ ...part, text: kept }];
     });
+    const shownReports = reports.flatMap((report) => {
+      const kept = cut(report);
+      return kept === undefined ? [] : [kept];
+    });
+    const shown = d.clipChars - left;
+    const reportsLeft = reports.length - shownReports.filter((kept, at) => kept.length === reports[at]?.length).length;
     let path: string | undefined;
     if (d.places.turn !== undefined) {
-      const written = await d.files.write(d.scope, `${d.places.turn}${KEPT_RESULTS}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`, { op: "write", text: texts.join("\n") }, "harness");
+      const written = await d.files.write(d.scope, `${d.places.turn}${KEPT_RESULTS}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`, { op: "write", text: whole.join("\n") }, "harness");
       if (written.status === "written") path = written.path;
     }
-    const line = d.words("clipped", { shown: d.clipChars, length, ...(path !== undefined ? { path } : {}) });
-    return { ...result, content: line === undefined ? content : [...content, { type: "text", text: line }] };
+    const line = d.words("clipped", { shown, length, left: length - shown, ...(reportsLeft > 0 ? { reports: reports.length, reports_left: reportsLeft } : {}), ...(path !== undefined ? { path } : {}) });
+    const said = line === undefined ? [] : [line];
+    if (reports.length > 0) return { ...result, content, reports: [...shownReports, ...said] };
+    return { ...result, content: [...content, ...said.map((text) => ({ type: "text" as const, text }))] };
   }
 }

@@ -41,7 +41,9 @@
 // `arguments:<tool>` or `result:<tool>` with a glob, `*` for any), `interrupt: never` (left out, a
 // match on what is being written stops the call) and `hold: true` (on a tool's arguments, the text
 // comes back instead of running the tool); `question:`, with `scope:` (`text`, `thinking` or
-// `reply`); `at:` (`turn-start`, `run-end`, `before-compaction`), with or without `fact:`; `every:`,
+// `reply`), `interrupt: always` (the agent waits for the answer before its next call; left out, it
+// goes on) and `judge:` (the connection of the judging model, over the `rules.judge` setting and the
+// agent's own); `at:` (`turn-start`, `run-end`, `before-compaction`), with or without `fact:`; `every:`,
 // a number of turns, with or without `fact:`. `repeat:` is `once per turn` when left out, or
 // `once per session`, `after N turns`, `always`. A pattern on a tool's result looks at its text,
 // then its reports, then a line `marked <mark>` for each of its marks.
@@ -259,7 +261,7 @@ export interface FileChange {
 // ---------------------------------------------------------------- rules
 
 /** The header fields of a rule. Anything else in its header is reported. */
-export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
+export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "judge", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
 
 // ---------------------------------------------------------------- facts
 
@@ -335,6 +337,10 @@ export interface Question {
   watched: "text" | "thinking" | "reply";
   /** What it is asked about. */
   text: string;
+  /** Whether the agent waits for the answer before its next call (`interrupt: always`). */
+  interrupt: boolean;
+  /** The connection the rule's own header names for the judging model. */
+  judge?: string;
 }
 
 /**
@@ -381,6 +387,8 @@ export interface RuleRun {
   questions(agent: AgentRef, message: MessageSeen): Question[];
   /** The judging model's answer to a question; undefined when the rule does not fire. */
   answered(question: Question, yes: boolean): Promise<Answered | undefined>;
+  /** Holds a rule's text for `agent`'s next briefing (`turnStart`): a question answered yes once the agent's work had ended. */
+  hold(agent: AgentRef, fired: Fired): void;
   /** The memory as it stands now, for the caller to keep with the session. */
   memory(): RuleMemory;
 }

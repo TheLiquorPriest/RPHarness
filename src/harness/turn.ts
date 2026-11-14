@@ -19,9 +19,9 @@ import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team, type T
 import type { AgentRef, Environment, JsonValue, ModelsApi, Places, PromptNotice, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
-import { type AgentOutcome, AgentRunner, Budget, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
+import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
-import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
+import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
@@ -29,17 +29,20 @@ import { type CarriedInput, carriedFields, compactionAt, compactionFields, pathT
 import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, REPLY_FAMILY, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
+import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
 import { TurnGate } from "./gate";
+import { Judges } from "./judge";
 import type { LiveHub } from "./live";
+import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { HeldSink, IntentWait } from "./intents";
 import { requestPath, sentMessages } from "./requests";
 import { memoryAt, type Opening, type Sessions, turnAt, unsaid } from "./sessions";
-import { DEFAULT_SETTINGS, effortFor, formFor, readSettings, type Settings } from "./settings";
+import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools and tool search among them. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS] as const;
+/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search and `job_start` among them. */
+const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START] as const;
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
@@ -57,15 +60,8 @@ export interface TurnCore {
   sessions: Sessions;
   /** Each session's file (§11), which the turn's own entries are written to. */
   book: SessionBook;
-}
-
-/** A definition's connection, as its header names it: the choice for the model layer, and the connection's id and name where they are known. */
-interface Connection {
-  choice: AgentChoice;
-  id: string | null;
-  name: string | null;
-  /** How the trace names it. */
-  label: string;
+  /** The harness's jobs, which `job_start` starts (§13.5). */
+  jobs: JobsWork;
 }
 
 /** What a compaction at a turn's start works on: the lead's first request as it stands, and where in it the carried block is. */
@@ -91,14 +87,6 @@ function errorWords(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-function template(part: PromptPart | undefined): TemplatePart | undefined {
-  return part?.format === "template" ? part : undefined;
-}
-
-function lines(part: PromptPart | undefined): LinesPart | undefined {
-  return part?.format === "lines" ? part : undefined;
-}
-
 /** Texts placed one after another in a message: each without the line break its file ends on, the empty ones left out. */
 function joined(texts: readonly string[]): string {
   return texts
@@ -113,18 +101,6 @@ function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefine
   if (typeof tags !== "object" || tags === null || Array.isArray(tags)) return undefined;
   const { reply, intent } = tags as Record<string, unknown>;
   return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
-}
-
-/** A tool's file as the tool takes it: its body for the model, and its header's `arguments`. */
-function toolTextOf(part: PromptPart | undefined): ToolText | undefined {
-  const body = template(part);
-  if (body === undefined) return undefined;
-  const given = body.header["arguments"];
-  const args: Record<string, string> = {};
-  if (typeof given === "object" && given !== null && !Array.isArray(given)) {
-    for (const [name, text] of Object.entries(given)) if (typeof text === "string") args[name] = text;
-  }
-  return { description: joined([body.render().text]), arguments: args };
 }
 
 /** What the sink is told when the run ends without a reply released. */
@@ -181,7 +157,11 @@ export class Turn {
   /** The definition `write_reply` hands the prose to, as its file names it. */
   #writer: string | undefined;
   #draft: { text: string; by: AgentRef } | undefined;
-  #released: { text: string; form: ReleaseForm } | undefined;
+  #released: { text: string; form: ReleaseForm; by: string } | undefined;
+  /** Whether a question about the released reply has been put: it is asked once, by the agent that released it. */
+  #replyJudged = false;
+  /** The judging model of the `question:` rules, once the turn's rules are loaded. */
+  #judges: Judges | undefined;
   #intentWritten = false;
   #notices = 0;
   #stopped = false;
@@ -308,6 +288,7 @@ export class Turn {
       gate: (agent, parent) => this.#gate(agent, parent),
       texts: () => this.#texts,
       rules: () => this.#rulesRun(),
+      questions: () => this.#judges,
       budget: () => this.#budget,
       settings: () => this.#settings.subAgents,
       perCall: () => this.#settings.perCall,
@@ -325,6 +306,33 @@ export class Turn {
     if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
 
     const connection = await this.#connection(definition);
+    const judges = new Judges({
+      env,
+      trace: this.#trace,
+      guidance,
+      rules,
+      ids: () => this.#c.ids(),
+      models: this.#c.models,
+      connections: this.#c.connections,
+      settings,
+      budget: this.#budget,
+      own: async (agent) => {
+        if (agent.id === this.#lead.id) return connection;
+        const own = await guidance.definition(agent.definition);
+        return own === undefined ? connection : this.#connection(own);
+      },
+      reply: (agent) => {
+        if (this.#released === undefined || this.#released.by !== agent.id || this.#replyJudged) return undefined;
+        this.#replyJudged = true;
+        return this.#released.text;
+      },
+      track: (entry) => {
+        this.#working.add(entry);
+        return () => this.#working.delete(entry);
+      },
+      late: (agent, judged) => this.#late(agent, judged),
+    });
+    this.#judges = judges;
     let opening = session.openings.get(req.lead);
     if (opening === undefined) {
       const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing));
@@ -333,15 +341,7 @@ export class Turn {
       session.openings.set(req.lead, opening);
     }
     this.#opening = opening;
-    this.#texts = {
-      continueAfterRule: (fields) => joined([template(goOn)?.render(fields).text ?? ""]),
-      ...(opening.closing !== undefined ? { closing: opening.closing } : {}),
-      notFound: (fields) => this.#words("not_held", fields),
-      invalid: (fields) => this.#words("invalid", fields),
-      cutShort: (fields) => this.#words("cut_short", fields),
-      failed: (fields) => this.#words("failed", fields),
-      unfinished: (fields) => this.#words("unfinished", fields),
-    };
+    this.#texts = runnerTexts(this.#words, template(goOn), opening.closing, settings.schemaShown);
 
     let model: AgentModel;
     try {
@@ -434,6 +434,7 @@ export class Turn {
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,
+      questions: judges,
       gate: this.#gate(this.#lead, undefined),
       channel,
       ...this.#keeper(this.#lead),
@@ -445,6 +446,8 @@ export class Turn {
     this.#working.add(entry);
     const outcome = await work.done;
     this.#working.delete(entry);
+    // What the rules remembered is kept once every judgment still running has come in.
+    await judges.settled();
     session.memories.set(scope.turn, rules.memory());
     return this.#outcomeOf(outcome);
   }
@@ -656,22 +659,8 @@ export class Turn {
   }
 
   /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
-  async #connection(definition: AgentDefinition): Promise<Connection> {
-    const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
-    const list = await this.#c.connections.list().catch((error: unknown) => {
-      this.#c.env.log.warn("The connections could not be listed.", { error: errorWords(error) });
-      return undefined;
-    });
-    const view = named === null ? list?.connections.find((c) => c.id === list.default) : list?.connections.find((c) => c.name === named || c.id === named);
-    const id = view?.id ?? named;
-    const name = view?.name ?? named;
-    const effort = effortFor(this.#settings, { id: id ?? null, name }) ?? definition.effort;
-    return {
-      choice: { connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}) },
-      id: id ?? null,
-      name,
-      label: name ?? "default",
-    };
+  #connection(definition: AgentDefinition): Promise<Connection> {
+    return connectionOf(this.#c.connections, this.#settings, definition, this.#c.env.log);
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {
@@ -689,11 +678,13 @@ export class Turn {
       askAuthor(team, texts.get("ask_author")),
       agentMessage(team, texts.get("agent_message")),
       agentDrop(team, texts.get("agent_drop")),
+      jobStart(this.#c.jobs, texts.get(JOB_START)),
       ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
       ...searchTools({
         reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
         ...(env.switches !== undefined ? { switches: env.switches } : {}),
         guidance,
+        schemaShown: this.#settings.schemaShown,
         notices: (name, fields) => this.#words(name, fields),
         texts,
         hits: this.#settings.searchHits,
@@ -822,7 +813,7 @@ export class Turn {
   #release(text: string, form: ReleaseForm, by: AgentRef, path?: string): void {
     const { env } = this.#c;
     this.#desk.out();
-    this.#released = { text, form };
+    this.#released = { text, form, by: by.id };
     this.#keep?.sink.finish({ ...this.#budget.used });
     const parent = this.#parents.get(by.id);
     this.#tell(
@@ -902,6 +893,7 @@ export class Turn {
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,
+      ...(this.#judges !== undefined ? { questions: this.#judges } : {}),
       gate: this.#gate(ref, parent),
       channel,
       ...this.#keeper(ref),
@@ -1037,6 +1029,21 @@ export class Turn {
       default:
         return;
     }
+  }
+
+  /**
+   * A `question:` rule the judging model's answer fired once its agent's work had ended. The lead's
+   * text is held for its next briefing, as a rule on a reply already shown is; another agent's has
+   * no way in front of it, and the log says so. Either is traced and told, its agent having ended.
+   */
+  #late(agent: AgentRef, judged: Judged): void {
+    if (judged.deliver === "now" && agent.id !== this.#lead.id) {
+      this.#c.env.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { agent: agent.id, rule: judged.fired.firing.rule });
+      return;
+    }
+    if (judged.deliver === "now") this.#rulesRun().hold(agent, judged.fired);
+    this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_fired", firing: { ...judged.fired.firing, agent, action: "briefing" } });
+    this.#then(agent.id, () => true, { did: "ended" });
   }
 
   /** Tells the host of each rule that fired for `agent` and that `which` takes, now that what the agent did next is known (§5.4). */

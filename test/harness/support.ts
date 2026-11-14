@@ -216,7 +216,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   const host = await createFolderHost({ dir, user: USER, clock, log: recordingLog(logged), tools: handlers });
   const told: Stage["told"] = [];
   const recorded = (inner: TurnEvents): TurnEvents => {
-    const tell = <K extends keyof TurnEvents>(kind: K, scope: Scope, payload: unknown, then: () => ReturnType<TurnEvents[K]>): ReturnType<TurnEvents[K]> => {
+    const tell = <K extends keyof TurnEvents>(kind: K, scope: Scope, payload: unknown, then: () => ReturnType<NonNullable<TurnEvents[K]>>): ReturnType<NonNullable<TurnEvents[K]>> => {
       told.push({ kind, scope, payload });
       order.push(`told:${kind}`);
       return then();
@@ -231,6 +231,8 @@ export async function stage(options: StageOptions): Promise<Stage> {
       suggestion: (scope, agent, suggestion) => tell("suggestion", scope, suggestion, () => inner.suggestion(scope, agent, suggestion)),
       released: (scope, release) => tell("released", scope, release, () => inner.released(scope, release)),
       ended: (scope, outcome) => tell("ended", scope, outcome, () => inner.ended(scope, outcome)),
+      // The folder host keeps no jobs of its own: the stage records what it is told of them.
+      job: (scope, job) => tell("job", scope, job, () => inner.job?.(scope, job) ?? Promise.resolve()),
     };
   };
   const events = recorded(options.events !== undefined ? options.events(host.events) : host.events);

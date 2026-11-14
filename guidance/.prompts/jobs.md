@@ -5,4 +5,4 @@ format: lines
 started: Job {{job}} was started: {{agent}} works on it in the background{{#queued}} once a place is free{{/queued}}.
 day_limit: No job was started: {{value}} jobs were started today{{#connection}} on {{connection}}{{/connection}}, and the player allows {{max}}.
 run_limit: No job was started: this {{#job}}job{{/job}}{{^job}}turn{{/job}} has started {{value}} jobs, and the player allows {{max}}.
-day_tokens: No job was started: jobs have spent {{value}} tokens today, and the player allows {{max}}.
+day_tokens: No job was started: what jobs sent and wrote today counts as {{value}} tokens, and the player allows {{max}}.

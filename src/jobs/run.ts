@@ -91,7 +91,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
   const { time, ...counted } = settings.jobs.run;
   // A job started by another job's agent spends from that job's run, which spends from the day; any other, from the day.
-  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, ask.spent);
+  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, { used: ask.spent, cachedWeight: settings.jobs.cachedWeight });
   const budget = new Budget("job", counted, ask.over ?? day);
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;

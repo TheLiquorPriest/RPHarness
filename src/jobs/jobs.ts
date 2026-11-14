@@ -46,11 +46,16 @@ interface Live {
   settle(view: JobView): void;
 }
 
-/** A day's count of the jobs a user started: all of them, those on each connection a setting names, and the tokens all of them sent and wrote. */
+/**
+ * A day's count of the jobs a user started: all of them, those on each connection a setting names,
+ * and the tokens all of them sent (cached ones included), read again from a provider's cache, and
+ * wrote. The tokens are kept as they were spent, so that the weight of a cached token in force
+ * applies to the whole day.
+ */
 interface DayCount {
   all: number;
   connections: Record<string, number>;
-  tokens: number;
+  tokens: { input: number; cacheRead: number; output: number };
 }
 
 /** What all of one user's jobs spent in one of the user's days, as this process counts it: from the day's record in the store, then from every call of their agents as it is made. */
@@ -80,8 +85,12 @@ function dayCount(value: JsonValue | undefined): DayCount {
   const connections: Record<string, number> = {};
   const kept = isObject(value) ? value["connections"] : undefined;
   if (isObject(kept)) for (const [key, count] of Object.entries(kept)) if (typeof count === "number") connections[key] = count;
-  const tokens = isObject(value) && typeof value["tokens"] === "number" ? value["tokens"] : 0;
-  return { all, connections, tokens };
+  const spent = isObject(value) ? value["tokens"] : undefined;
+  const part = (name: string): number => {
+    const count = isObject(spent) ? spent[name] : undefined;
+    return typeof count === "number" ? count : 0;
+  };
+  return { all, connections, tokens: { input: part("input"), cacheRead: part("cacheRead"), output: part("output") } };
 }
 
 function errorWords(error: unknown): string {
@@ -167,7 +176,7 @@ export class Jobs implements JobsApi, JobsWork {
   async start(scope: Scope, start: JobStart): Promise<JobView> {
     const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids() }, { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, undefined, undefined, undefined);
     if ("view" in begun) return { ...begun.view };
-    if ("hit" in begun && begun.hit.limit === "tokens") throw new Error(`No job was started: jobs have spent ${begun.hit.value} tokens today, and the setting allows ${begun.hit.max}.`);
+    if ("hit" in begun && begun.hit.limit === "tokens") throw new Error(`No job was started: what jobs sent and wrote today counts as ${begun.hit.value} tokens, and the setting allows ${begun.hit.max}.`);
     if ("hit" in begun) throw new Error(`No job was started: ${begun.hit.value} jobs were started today${begun.hit.connection !== undefined ? ` on ${begun.hit.connection}` : ""}, and the setting allows ${begun.hit.max}.`);
     throw new Error(`No job was started: there is no agent definition named "${start.agent}", or no model for it to run on.`);
   }
@@ -273,9 +282,9 @@ export class Jobs implements JobsApi, JobsWork {
     for (const other of this.#days.keys()) if (!other.startsWith(`${day}\n`)) this.#days.delete(other);
     const key = `${DAYS}${day}`;
     const read = this.#core.env.store.get(key).then((value): DaySpend => {
+      // What was spent before this process, as it was spent: each job's day holds it to the weight of a cached token in force.
       const { tokens } = dayCount(isObject(value) ? value[user] : undefined);
-      // What was spent before this process, as one count: a day's limit holds tokens sent and written together.
-      return { key, user, used: { ...emptyUsage(), input: tokens } };
+      return { key, user, used: { ...emptyUsage(), ...tokens } };
     });
     this.#days.set(at, read);
     // A read that failed is tried again by the next start.
@@ -290,7 +299,7 @@ export class Jobs implements JobsApi, JobsWork {
     const kept = this.#core.env.store.update(spend.key, (current) => {
       const days = isObject(current) ? { ...current } : {};
       const count = dayCount(days[spend.user]);
-      days[spend.user] = { all: count.all, connections: count.connections, tokens: spend.used.input + spend.used.output };
+      days[spend.user] = { all: count.all, connections: count.connections, tokens: { input: spend.used.input, cacheRead: spend.used.cacheRead, output: spend.used.output } };
       return days;
     });
     this.#pend(kept, "What the user's jobs spent today could not be kept.", job);

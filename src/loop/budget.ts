@@ -21,31 +21,42 @@ export function addUsage(into: Usage, usage: Usage): void {
   if (usage.reasoning !== undefined) into.reasoning = (into.reasoning ?? 0) + usage.reasoning;
 }
 
+/**
+ * How a budget counts, where not as its own: `used`, a count that budgets of the same spend share
+ * (each of the user's jobs holds the day's to its own setting); and `cachedWeight`, the share of a
+ * token that a token read again from a provider's cache counts as against `tokens` (1 when absent).
+ */
+export interface BudgetCount {
+  used?: Usage;
+  cachedWeight?: number;
+}
+
 export class Budget {
   readonly per: LimitHit["per"];
   readonly used: Usage;
   readonly #max: Readonly<Partial<Record<Counted, number>>>;
   /** The budget whatever is counted here counts against too, and whose limits hold here as well. */
   readonly #over: Budget | undefined;
+  readonly #cachedWeight: number;
 
-  /**
-   * Each limit absent is no limit. `used` is what it counts into: its own, unless it is given one
-   * that budgets of the same spend share (each of the user's jobs holds the day's to its own setting).
-   */
-  constructor(per: LimitHit["per"], max: Readonly<Partial<Record<Counted, number>>>, over?: Budget, used: Usage = emptyUsage()) {
+  /** Each limit absent is no limit. */
+  constructor(per: LimitHit["per"], max: Readonly<Partial<Record<Counted, number>>>, over?: Budget, count: BudgetCount = {}) {
     this.per = per;
     this.#max = max;
     this.#over = over;
-    this.used = used;
+    this.used = count.used ?? emptyUsage();
+    this.#cachedWeight = count.cachedWeight ?? 1;
   }
 
   /** The limit a further call would pass, if one has been reached: this budget's own, or one it counts against. */
   reached(agent: AgentRef): LimitHit | undefined {
+    const { input, cacheRead, output } = this.used;
     const counts: [Counted, number][] = [
       ["calls", this.used.calls],
-      ["tokensIn", this.used.input],
-      ["tokensOut", this.used.output],
-      ["tokens", this.used.input + this.used.output],
+      ["tokensIn", input],
+      ["tokensOut", output],
+      // Tokens written, and sent without the cache, in full; a token read again from the cache at its weight; in whole tokens.
+      ["tokens", Math.round(input - cacheRead + cacheRead * this.#cachedWeight + output)],
     ];
     for (const [limit, value] of counts) {
       const max = this.#max[limit];

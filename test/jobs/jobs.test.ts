@@ -172,15 +172,36 @@ describe("a job an agent starts", () => {
 
     await s.turn(request("t2", { lead: "lead", parent: "t1" }));
 
-    expect(answerTo(s, "start-2")).toBe("No job was started: jobs have spent 120 tokens today, and the player allows 100.");
+    expect(answerTo(s, "start-2")).toBe("No job was started: what jobs sent and wrote today counts as 120 tokens, and the player allows 100.");
     expect(new Set(toldJobs(s).map((job) => job.id)).size).toBe(1);
   });
 
-  test("the day's job tokens hold across a restart: a harness made again over the same store starts no job past them", async () => {
+  test("the day's job tokens take a token read again from the cache at the player's weight, a tenth by default, and in full with the weight at 1", async () => {
+    /** What a second start is answered, once a first job's one call sent 100 tokens without the cache, read 9,000 from it, and wrote 50. */
+    const counted = async (config: string): Promise<string> => {
+      const s = (open = await stage({
+        config,
+        files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+        answers: routed([start("start-1"), reply("The tower is quiet."), start("start-2"), reply("Still quiet.")], [{ pieces: [{ text: "Fixture count: seven." }], usage: { input: 100, cacheRead: 9_000, output: 50 } }]),
+      }));
+      await s.turn(request("t1", { lead: "lead" }));
+      await jobEnded(s, "done");
+      await s.turn(request("t2", { lead: "lead", parent: "t1" }));
+      const answered = answerTo(s, "start-2");
+      await s.close();
+      open = undefined;
+      return answered;
+    };
+
+    expect(await counted("jobs:\n  tokensPerDay: 1000\n")).toBe("No job was started: what jobs sent and wrote today counts as 1050 tokens, and the player allows 1000.");
+    expect(await counted("jobs:\n  tokensPerDay: 1000\n  cachedWeight: 1\n")).toBe("No job was started: what jobs sent and wrote today counts as 9150 tokens, and the player allows 1000.");
+  });
+
+  test("the day's job tokens hold across a restart, cached ones at their weight: a harness made again over the same store starts no job past them", async () => {
     const s = (open = await stage({
-      config: "jobs:\n  tokensPerDay: 100\n",
+      config: "jobs:\n  tokensPerDay: 1000\n",
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
-      answers: routed([start("start-1"), reply("The tower is quiet.")], [{ pieces: [{ text: "Fixture count: seven." }], usage: { input: 90, output: 30 } }]),
+      answers: routed([start("start-1"), reply("The tower is quiet.")], [{ pieces: [{ text: "Fixture count: seven." }], usage: { input: 100, cacheRead: 9_000, output: 50 } }]),
     }));
     await s.turn(request("t1", { lead: "lead" }));
     await jobEnded(s, "done");
@@ -188,7 +209,7 @@ describe("a job an agent starts", () => {
 
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
-      await expect(again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: jobs have spent 120 tokens today, and the setting allows 100.");
+      await expect(again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: what jobs sent and wrote today counts as 1050 tokens, and the setting allows 1000.");
     } finally {
       await again.close();
     }

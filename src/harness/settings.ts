@@ -67,6 +67,9 @@
 //     tokensPerDay: 12000000           tokens, sent and written, that all of the user's jobs may spend in the
 //                                      user's day: past it no job is started, and a running job is stopped at its
 //                                      next call; ~ for no limit
+//     cachedWeight: 0.1                what a token read again from a provider's cache counts as in the day's job
+//                                      tokens, from 0 to 1; 1 counts it in full. Tokens written, and tokens sent
+//                                      without the cache, count in full; every other limit counts them all in full
 //     connections: { <connection>: { atOnce: 1, perDay: 20 } }
 //                                      the same for the jobs whose agent runs on one connection, by its name or id
 //     run:
@@ -162,6 +165,8 @@ export interface JobSettings extends JobCounts {
   perRun?: number;
   /** Tokens, sent and written, that all of the user's jobs may spend in the user's day. */
   tokensPerDay?: number;
+  /** What a token read again from a provider's cache counts as in the day's job tokens, from 0 to 1. */
+  cachedWeight: number;
   run: { calls?: number; tokensIn?: number; tokensOut?: number; time?: number };
 }
 
@@ -212,12 +217,13 @@ export const DEFAULT_SETTINGS: Settings = {
   // they are, and records folded once they pass 6,000 tokens. §11: the lead gets one call with the
   // rule's text before anything is summarized.
   compaction: { reserve: 16_384, keepTurns: 3, records: 6_000, saveCalls: 1 },
-  // Today's build's own (LumiAH's `jobs.atOnce`, `jobs.perRun`, `jobs.tokensPerDay` and `jobs.budget`:
-  // two at once, six a turn, 12,000,000 tokens a day, and for each job 60 rounds of calls, 600,000
-  // tokens in, 60,000 out and 15 minutes), kept as §10.11 says. Today's build counted no jobs a day:
-  // it counted their tokens. It counted a token read again from a provider's cache as a tenth of one;
-  // RPH counts every token sent, as each of its token limits does.
-  jobs: { atOnce: 2, connections: {}, perRun: 6, tokensPerDay: 12_000_000, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
+  // Today's build's own (LumiAH's `jobs.atOnce`, `jobs.perRun`, `jobs.tokensPerDay`, `spend.cachedWeight`
+  // and `jobs.budget`: two at once, six a turn, 12,000,000 tokens a day with a token read again from a
+  // provider's cache counted as a tenth of one, and for each job 60 rounds of calls, 600,000 tokens
+  // in, 60,000 out and 15 minutes), kept as §10.11 says. Today's build counted no jobs a day: it
+  // counted their tokens. It weighed a cached token so against every limit on tokens sent; here only
+  // the day's job tokens do, and every other limit counts it in full.
+  jobs: { atOnce: 2, connections: {}, perRun: 6, tokensPerDay: 12_000_000, cachedWeight: 0.1, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -375,6 +381,10 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const perRunValue = jobsSection["perRun"];
   const jobsPerRun = perRunValue === null ? undefined : (whole("jobs.perRun", perRunValue) ?? DEFAULT_SETTINGS.jobs.perRun);
   const jobTokensPerDay = lifted("jobs.tokensPerDay", jobsSection["tokensPerDay"], DEFAULT_SETTINGS.jobs.tokensPerDay);
+  // A share of a token, from 0 to 1.
+  const weightValue = jobsSection["cachedWeight"];
+  const cachedWeight = typeof weightValue === "number" && weightValue >= 0 && weightValue <= 1 ? weightValue : DEFAULT_SETTINGS.jobs.cachedWeight;
+  if (weightValue !== undefined && cachedWeight !== weightValue) passed("jobs.cachedWeight", weightValue);
   const judgeValue = rules["judge"];
   const judge = typeof judgeValue === "string" && judgeValue.trim() !== "" ? judgeValue.trim() : undefined;
   if (judgeValue !== undefined && judge === undefined) passed("rules.judge", judgeValue);
@@ -417,6 +427,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
       ...(jobsPerDay !== undefined ? { perDay: jobsPerDay } : {}),
       ...(jobsPerRun !== undefined ? { perRun: jobsPerRun } : {}),
       ...(jobTokensPerDay !== undefined ? { tokensPerDay: jobTokensPerDay } : {}),
+      cachedWeight,
       connections: jobConnections,
       run: {
         ...(runCalls !== undefined ? { calls: runCalls } : {}),

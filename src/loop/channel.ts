@@ -10,7 +10,10 @@ export interface TextChannel {
   write(piece: string): void;
   /** Sends on what may be shown now. */
   release(): void;
-  /** A rule stopped the call: what was written and not yet shown is dropped, and given back. */
+  /**
+   * A rule stopped the call, or the message did not end whole (its provider failed): what was written
+   * and not yet shown is dropped, and given back.
+   */
   cut(): string;
   /** The message ended, whole. */
   end(message: AssistantMessage): void;
@@ -20,8 +23,8 @@ export interface TextChannel {
   tail(): string;
   /**
    * Once a message has ended: what the agent is to be told about it, each a text from a file (a
-   * second reply that was not shown, §10.7). Each is given once. It goes in with the agent's next
-   * call, which it gets for it if its work would otherwise have ended.
+   * second reply that was not shown, §10.7, told once in the generation however often it comes). It
+   * goes in with the agent's next call, which it gets for it if its work would otherwise have ended.
    */
   answers?(): string[];
 }

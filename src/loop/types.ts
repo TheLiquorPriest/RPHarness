@@ -12,7 +12,7 @@ export type LoopClock = Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
 export interface LoopTool {
   name: string;
   description: string;
-  /** Its arguments, as an object schema. The runner adds `closing` to it; the tool never sees that argument. */
+  /** Its arguments, as an object schema. The runner adds `closing` to it; the tool never sees that argument, and one that has its own argument of that name is left out (`AgentRunner.leftOut`). */
   parameters: JsonSchema;
   run(args: JsonValue, ctx: ToolCtx): Promise<LoopToolResult>;
   /** Runs alone: a message that calls it runs its calls one after another. */

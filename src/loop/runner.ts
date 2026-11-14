@@ -11,7 +11,7 @@
 // the length limit, a tool that threw), the call is answered with the runner's texts instead, which
 // the harness reads from files. A text the file does not have leaves the answer empty.
 import { Agent, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import { addUsage, Budget, emptyUsage } from "./budget";
 import type { TextChannel } from "./channel";
@@ -39,6 +39,8 @@ export interface RunnerTexts {
   cutShort?(fields: { tool: string }): string | undefined;
   /** The answer to a call whose tool threw: the error's own words. */
   failed?(fields: { tool: string; error: string }): string | undefined;
+  /** The answer to a call the work stopped before it finished (a stop, or a limit), kept so the agent can be continued: it may have done its work, or not. */
+  unfinished?(fields: { tool: string }): string | undefined;
 }
 
 export interface RunnerOptions {
@@ -108,6 +110,8 @@ interface Stint {
   callText: string;
   callThinking: string;
   callStartedAt: number;
+  /** The transcript's length when the call under way began: a message a rule stops is cut back to it. */
+  callFrom: number;
   /**
    * A call this runner started is open. pi also ends every message it is given to start from (an
    * earlier reply in the prompt, a prefilled start), with the same event as a model's answer; only
@@ -137,6 +141,11 @@ export class AgentRunner {
   readonly #budget: Budget;
   /** Its tools by name, as the model was told them. */
   readonly #tools = new Map<string, AgentTool<JsonSchema, JsonValue | undefined>>();
+  /**
+   * Tools it was given that take an argument named `closing`, which RPH adds to every tool: left out,
+   * as a host's tool that takes the name of one of RPH's own is, for the host to report.
+   */
+  readonly leftOut: string[] = [];
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -147,7 +156,10 @@ export class AgentRunner {
     this.#o = options;
     this.#clock = options.trace.clock;
     this.#budget = new Budget("agent", options.limits ?? {});
-    for (const tool of options.tools ?? []) this.#tools.set(tool.name, this.#piTool(tool));
+    for (const tool of options.tools ?? []) {
+      if (Object.hasOwn(argumentsOf(tool), CLOSING)) this.leftOut.push(tool.name);
+      else this.#tools.set(tool.name, this.#piTool(tool));
+    }
     this.#pi = new Agent({
       initialState: {
         ...(options.instructions !== undefined ? { systemPrompt: options.instructions } : {}),
@@ -215,6 +227,7 @@ export class AgentRunner {
       callText: "",
       callThinking: "",
       callStartedAt: 0,
+      callFrom: 0,
       calling: false,
       results: new Map(),
       ruled: new Set(),
@@ -249,20 +262,20 @@ export class AgentRunner {
         await next();
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
-        break;
       }
       next = undefined;
       const cut = stint.cut;
-      if (cut !== undefined && stint.halt === undefined) {
-        // The call a rule stopped leaves no trace in the transcript; the agent goes on under the
-        // rule's text and the line that says where the player's view ends (§5.4).
-        stint.cut = undefined;
-        this.#dropAborted();
-        const shown = this.#o.channel?.tail() ?? "";
-        const goOn = this.#o.texts.continueAfterRule({ shown });
-        const content = goOn === "" ? [cut.text] : [cut.text, goOn];
-        next = () => this.#pi.prompt(userMessage(content));
-      }
+      if (cut === undefined) continue;
+      // The call a rule stopped leaves no trace in the transcript, whatever the provider had sent
+      // before pi's loop read the match: its words, its calls, and pi's answers to them.
+      stint.cut = undefined;
+      this.#pi.state.messages = this.#pi.state.messages.slice(0, stint.callFrom);
+      if (stint.halt !== undefined || failure !== undefined) continue;
+      // The agent goes on under the rule's text and the line that says where the player's view ends (§5.4).
+      const shown = this.#o.channel?.tail() ?? "";
+      const goOn = this.#o.texts.continueAfterRule({ shown });
+      const content = goOn === "" ? [cut.text] : [cut.text, goOn];
+      next = () => this.#pi.prompt(userMessage(content));
     }
     this.#finish(stint, failure);
   }
@@ -316,6 +329,7 @@ export class AgentRunner {
     stint.callText = "";
     stint.callThinking = "";
     stint.callStartedAt = this.#clock.now();
+    stint.callFrom = this.#pi.state.messages.length;
     stint.calling = true;
     this.#o.channel?.begin();
     this.#emit(stint, {
@@ -360,7 +374,10 @@ export class AgentRunner {
         if (stint.halt !== undefined) return;
         if (stint.cut === undefined) {
           stint.last = message;
-          this.#o.channel?.end(message);
+          // A message the provider failed in the middle of did not end whole: what of it was held back
+          // is dropped, as at a cut, and no reply is released on it (§10.7).
+          if (message.stopReason === "error" || message.stopReason === "aborted") this.#o.channel?.cut();
+          else this.#o.channel?.end(message);
         }
         const thinking = thinkingOf(message);
         this.#emit(stint, {
@@ -378,13 +395,14 @@ export class AgentRunner {
         return;
       }
       case "tool_execution_start": {
-        if (stint.halt !== undefined) return;
+        // After a cut, a call of the stopped message is never run: pi only answers it, and that answer leaves with the message.
+        if (stint.halt !== undefined || stint.cut !== undefined) return;
         const args = event.args as JsonValue;
         this.#emit(stint, { kind: "tool_started", callId: event.toolCallId, tool: event.toolName, args: withoutClosing(args), closing: isClosing(args) });
         return;
       }
       case "tool_execution_end": {
-        if (stint.halt !== undefined) return;
+        if (stint.halt !== undefined || stint.cut !== undefined) return;
         stint.finished.add(event.toolCallId);
         const own = stint.results.get(event.toolCallId);
         // A result pi made itself (an unknown tool, arguments that did not validate) is pi's AgentToolResult; pi types the event's field loosely.
@@ -478,6 +496,9 @@ export class AgentRunner {
     const stint = this.#stint;
     if (stint === undefined) return undefined;
     const { message } = turn;
+    // A message a rule stopped ends pi's loop as it stands, whatever end the provider gave it: no
+    // call of it is answered and no run ends on it. `#drive` goes on from before it.
+    if (stint.cut !== undefined) return { action: "end" };
     if (message.stopReason === "error" || message.stopReason === "aborted") return undefined;
     if (stint.halt !== undefined || stint.asked !== undefined) return { action: "end" };
     const reminders = stint.reminders.splice(0);
@@ -506,10 +527,11 @@ export class AgentRunner {
   }
 
   /**
-   * After a stop or a failure: a message cut short or failed, and a step whose calls did not all
-   * finish, leave the transcript, so the agent can be continued as it stands and its session never
-   * keeps half a step. (pi-ai would skip such a message and invent results for unanswered calls,
-   * in its own words; this way it never has to.)
+   * After a stop or a failure: a message cut short or failed leaves the transcript, and the step
+   * before it stays, its calls that finished with their answers and each that did not with the
+   * runner's text for it. So the agent can be continued as it stands, and no write that went through
+   * vanishes from what it knows. (pi-ai would skip such a message and invent results for unanswered
+   * calls, in its own words; this way it never has to.)
    */
   #settle(stint: Stint): void {
     const messages = this.#pi.state.messages.slice();
@@ -519,17 +541,19 @@ export class AgentRunner {
     for (let at = messages.length - 1; at >= stint.from; at -= 1) {
       const message = messages[at];
       if (message?.role !== "assistant") continue;
-      if (message.content.some((part) => part.type === "toolCall" && !stint.finished.has(part.id))) messages.splice(at);
+      const calls = message.content.flatMap((part) => (part.type === "toolCall" ? [part] : []));
+      if (calls.every((call) => stint.finished.has(call.id))) break;
+      const answers = new Map(messages.slice(at + 1).flatMap((after) => (after.role === "toolResult" ? [[after.toolCallId, after] as const] : [])));
+      // What pi holds for a call that did not finish is the empty answer the stop gave it, or pi's own words: neither is kept.
+      messages.splice(at + 1, messages.length, ...calls.map((call) => (stint.finished.has(call.id) ? answers.get(call.id) : undefined) ?? this.#unfinished(call)));
       break;
     }
     this.#pi.state.messages = messages;
   }
 
-  /** After a rule stopped a call: the message it cut short leaves the transcript. */
-  #dropAborted(): void {
-    const messages = this.#pi.state.messages;
-    const last = messages.at(-1);
-    if (last?.role === "assistant" && last.stopReason === "aborted") this.#pi.state.messages = messages.slice(0, -1);
+  #unfinished(call: ToolCall): ToolResultMessage {
+    const line = this.#o.texts.unfinished?.({ tool: call.name });
+    return { role: "toolResult", toolCallId: call.id, toolName: call.name, content: line === undefined ? [] : [{ type: "text", text: line }], isError: true, timestamp: Date.now() };
   }
 
   /** The answer to the question the agent stopped on becomes that call's result. */
@@ -578,17 +602,26 @@ export class AgentRunner {
     };
   }
 
-  /** One call through the gate: refused or held there, or run; then the rules on its result. Gives the answer and the rules' texts that go after it. */
-  async #gated(stint: Stint, tool: LoopTool, call: GateCall, ctx: ToolCtx): Promise<{ answer: LoopToolResult; texts: string[] }> {
+  /**
+   * One call through the gate: refused or held there, or run; then the rules on its result. Gives the
+   * answer and the rules' texts that go after it, or nothing once the work stopped: a call the gate
+   * was still asking about (a permission still open) never runs, and a result that comes in after the
+   * stop goes through nothing more.
+   */
+  async #gated(stint: Stint, tool: LoopTool, call: GateCall, ctx: ToolCtx): Promise<{ answer: LoopToolResult; texts: string[] } | undefined> {
     const gate = this.#o.gate;
     if (gate === undefined) return { answer: await this.#run(tool, call, ctx), texts: [] };
     const before = await gate.before(call, ctx.signal);
+    if (ctx.signal.aborted) return undefined;
     if (before.refuse !== undefined) return { answer: before.refuse, texts: [] };
     if (before.hold !== undefined) {
+      // Answered with the rule's text instead of running: never clean, so a closing call goes on to a call that reads it (§10.7).
+      stint.ruled.add(call.callId);
       this.#ruled(stint, call, before.hold, "hold");
       return { answer: { content: [{ type: "text", text: before.hold.text.trimEnd() }] }, texts: [] };
     }
     const ran = await this.#run(tool, call, ctx);
+    if (ctx.signal.aborted) return undefined;
     const after = await gate.after(call, ran, ctx.signal);
     const reminders = [...before.remind, ...after.remind];
     for (const fired of reminders) this.#ruled(stint, call, fired, "remind");
@@ -637,11 +670,14 @@ function withoutClosing(args: JsonValue): JsonValue {
   return rest;
 }
 
-function withClosing(tool: LoopTool, description: string | undefined): JsonSchema {
+/** A tool's own arguments, by name. */
+function argumentsOf(tool: LoopTool): JsonObject {
   const properties = tool.parameters["properties"];
-  const own: JsonObject = typeof properties === "object" && properties !== null && !Array.isArray(properties) ? properties : {};
-  if (CLOSING in own) throw new Error(`Tool ${tool.name} has an argument named "${CLOSING}", which RPH adds to every tool.`);
-  return { ...tool.parameters, properties: { ...own, [CLOSING]: description === undefined ? { type: "boolean" } : { type: "boolean", description } } };
+  return typeof properties === "object" && properties !== null && !Array.isArray(properties) ? properties : {};
+}
+
+function withClosing(tool: LoopTool, description: string | undefined): JsonSchema {
+  return { ...tool.parameters, properties: { ...argumentsOf(tool), [CLOSING]: description === undefined ? { type: "boolean" } : { type: "boolean", description } } };
 }
 
 /** Clean: no failure and nothing reported (§10.7). */

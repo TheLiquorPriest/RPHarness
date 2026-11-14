@@ -6,7 +6,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 import type { StreamRules, TextChannel, Written } from "../../src/loop";
 import { heldSentences, REPLY_DEFAULTS, sentenceEnds, TagReply } from "../../src/reply";
-import { fired, type Reply, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
+import { fired, type Reply, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 const tags = { reply: "reply", intent: "intent" };
@@ -115,5 +115,60 @@ describe("a rule on the stream", () => {
     expect(scripted.requests).toHaveLength(1);
     for (const waiting of held) expect(waiting).toBe("");
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["The hall is dark. ", "Her candle gutters. ", "Something moves, and a shiv", "er ran down her spine. ", "She runs."]);
+  });
+
+  // The provider can be ahead of pi's loop: when the matching piece is read, the message's end may
+  // already be on its way, and pi then ends the message as the provider did, not as stopped. The
+  // whole message comes in one burst, the match in its last piece, as a fast provider sends it.
+  const burst = (calls: boolean): Reply => ({
+    pieces: [
+      ...(calls ? [{ call: "scene_note", args: { note: "she fled", closing: true } }] : []),
+      ...["<reply>Something", " moves", " in", " the", " dark,", " and a shiv"].map((text) => ({ text })),
+      { text: "er ran down her spine. She runs.</reply>" },
+    ],
+  });
+  const goOn = "[Already shown]\n\n[Go on from there]";
+
+  test("a message the provider had already finished leaves no trace when a rule stops it: not its words, nor its calls, nor answers to them", async () => {
+    const sink = new SinkRecorder();
+    const rules = bannedPhrase(true);
+    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, REPLY_DEFAULTS.heldSentences), tailSentences: REPLY_DEFAULTS.tailSentences });
+    const notes: string[] = [];
+    const note = tool("scene_note", async () => (notes.push("noted"), said("noted")));
+    const { runner, scripted, recorder, clock } = rigAgent(author, [burst(true), secondCall], { tools: [note], channel: reply, stream: rules });
+
+    const outcome = await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
+
+    expect(outcome.status).toBe("done");
+    expect(rules.fired).toBe(1);
+    expect(scripted.requests).toHaveLength(2);
+    const next = scripted.requests[1]!.messages;
+    expect(next.filter((message) => message.role !== "system").map((message) => [message.role, textOf(message)])).toEqual([
+      ["user", "She enters the hall."],
+      ["user", `${RULE}${goOn}`],
+    ]);
+    // The cut message's call never ran and is in no record as if it had.
+    expect(notes).toEqual(["noted"]);
+    expect(recorder.of("tool_started")).toHaveLength(1);
+    expect(recorder.of("tool_ended").map((record) => [record.event.tool, record.event.clean, record.event.endedRun])).toEqual([["scene_note", true, true]]);
+    expect(sink.text).toBe("Something moves; the cold reaches her before the sound does. She runs.");
+  });
+
+  test("a message the provider had already finished is no run's end when a rule stops it: the rules due then do not fire on it", async () => {
+    const sink = new SinkRecorder();
+    const rules = bannedPhrase(true);
+    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, REPLY_DEFAULTS.heldSentences), tailSentences: REPLY_DEFAULTS.tailSentences });
+    const missing = replyMissing(() => reply.released, "Fixture rule: the turn is ending with no reply. Write it now.");
+    const rewritten: Reply = { pieces: [{ text: "<reply>Something moves; the cold reaches her first. She runs.</reply>" }] };
+    const { runner, scripted, recorder, clock } = rigAgent(author, [burst(false), rewritten], { channel: reply, stream: rules, runEnd: missing });
+
+    const outcome = await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
+
+    expect(outcome.status).toBe("done");
+    expect(missing.fired).toBe(0);
+    expect(scripted.requests).toHaveLength(2);
+    expect(scripted.requests[1]!.messages.filter((message) => message.role !== "system").map(textOf)).toEqual(["She enters the hall.", `${RULE}${goOn}`]);
+    expect(recorder.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.action])).toEqual([["banned-phrases", "cut"]]);
+    expect(sink.text).toBe("Something moves; the cold reaches her first. She runs.");
   });
 });

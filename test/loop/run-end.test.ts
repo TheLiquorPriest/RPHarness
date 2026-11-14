@@ -1,9 +1,11 @@
 // Claims b and h (§18.1 row 0.2, §13.3, §5.4): a rule due at a run's end puts its text in as a
 // follow-up and the agent gets exactly one more call, whether the run would have ended on closing
-// calls or with no calls left.
+// calls or with no calls left. After the reply went out, a second one is answered once, never in a
+// loop.
 import { describe, expect, test } from "bun:test";
-import { REPLY_DEFAULTS, TagReply } from "../../src/reply";
-import { replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
+import type { Fired, RunEndRules, TextChannel } from "../../src/loop";
+import { MessageReply, REPLY_DEFAULTS, TagReply } from "../../src/reply";
+import { fired, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 const tags = { reply: "reply", intent: "intent" };
@@ -80,5 +82,44 @@ describe("a rule at a run's end", () => {
 
     expect(scripted.requests).toHaveLength(1);
     expect(rules.fired).toBe(0);
+  });
+});
+
+describe("after the reply went out", () => {
+  const SECOND = "Fixture: the reply for this turn already went out.";
+  const AFTER = "Fixture rule: say what changed in the scene.";
+
+  /** A rule due at a run's end once, whatever was released: the work after the reply (§10.9). */
+  function onceAtEnd(): RunEndRules {
+    let due = true;
+    return {
+      due: (): Fired[] => {
+        if (!due) return [];
+        due = false;
+        return [fired("scene-changes", "run-end", AFTER)];
+      },
+    };
+  }
+
+  /** The reply first, then plain answers to everything after it, more of them than the work may take. */
+  async function afterReply(channel: TextChannel, sink: SinkRecorder, texts: string[]) {
+    const { runner, scripted, clock } = rigAgent(author, texts.map((text) => ({ pieces: [{ text }] })), { channel, runEnd: onceAtEnd(), limits: { calls: texts.length } });
+    const outcome = await clock.settle(runner.start({ messages: [user("Light the lamp.")] }).done);
+    expect(outcome.status).toBe("done");
+    expect(sink.text).toBe("The lamp flares.");
+    // The reply, the rule's call, and one call that hears the reply already went out: then the run ends.
+    expect(scripted.requests.map((request) => textOf(request.messages.at(-1)!))).toEqual(["Light the lamp.", AFTER, SECOND]);
+  }
+
+  test("in the two-step form, text after the reply is told once that the reply went out, and the run ends", async () => {
+    const sink = new SinkRecorder();
+    const reply = new MessageReply({ sink, stream: false, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences, second: SECOND });
+    await afterReply(reply, sink, ["The lamp flares.", "Nothing else changed.", "Still nothing changed.", "Nothing, again.", "Nothing at all.", "Done."]);
+  });
+
+  test("in the tag form, a reply tag after the reply is told once that the reply went out, and the run ends", async () => {
+    const sink = new SinkRecorder();
+    const reply = new TagReply({ tags, sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences, second: SECOND });
+    await afterReply(reply, sink, ["<reply>The lamp flares.</reply>", "<reply>It flares again.</reply>", "<reply>And again.</reply>", "<reply>Once more.</reply>", "<reply>More.</reply>", "<reply>Done.</reply>"]);
   });
 });

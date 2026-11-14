@@ -1,7 +1,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 import type { StreamRules } from "../../src/loop";
-import { heldSentences, REPLY_DEFAULTS, TagReply } from "../../src/reply";
+import { heldSentences, REPLY_DEFAULTS, ReplyDesk, TagReply } from "../../src/reply";
 
 const tags = { reply: "reply", intent: "intent" };
 const anyMessage = {} as AssistantMessage;
@@ -83,5 +83,37 @@ describe("the reply in the tag form", () => {
     expect(heldSentences(covering, REPLY_DEFAULTS.heldSentences)).toBe(1);
     expect(heldSentences(elsewhere, REPLY_DEFAULTS.heldSentences)).toBe(0);
     expect(heldSentences(undefined, REPLY_DEFAULTS.heldSentences)).toBe(0);
+  });
+
+  test("the reply is taken only as its first text goes out: one cut before anything of it showed leaves it free for another way", () => {
+    const desk = new ReplyDesk();
+    const sent: string[] = [];
+    const channel = new TagReply({ tags, sink: { content: (text) => sent.push(text) }, heldSentences: 1, tailSentences: 2, claim: () => desk.claim("tags") });
+    channel.begin();
+    stream(channel, ["<reply>Something moves, and a shiv"]);
+    channel.cut();
+    expect(sent).toEqual([]);
+    expect(desk.taken).toBe(false);
+    // Written again, it is this form's from its first sentence out.
+    channel.begin();
+    stream(channel, ["<reply>The cold reaches her first. ", "She runs.</reply>"]);
+    channel.end(anyMessage);
+    expect(sent.join("")).toBe("The cold reaches her first. She runs.");
+    expect(desk.form).toBe("tags");
+    expect(channel.released).toBe(true);
+  });
+
+  test("a reply another way already holds is not shown, and the agent is told so once", () => {
+    const desk = new ReplyDesk();
+    desk.claim("narrator-live");
+    const sent: string[] = [];
+    const channel = new TagReply({ tags, sink: { content: (text) => sent.push(text) }, heldSentences: 0, tailSentences: 2, claim: () => desk.claim("tags"), second: "Fixture: the reply is not yours to give." });
+    channel.begin();
+    stream(channel, ["<reply>Mine, ", "all mine.</reply>"]);
+    channel.end(anyMessage);
+    expect(sent).toEqual([]);
+    expect(channel.released).toBe(false);
+    expect(channel.answers()).toEqual(["Fixture: the reply is not yours to give."]);
+    expect(desk.form).toBe("narrator-live");
   });
 });

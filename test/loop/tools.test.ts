@@ -1,8 +1,10 @@
 // What the runner does around each tool call and model call besides the claims: live updates in
-// the trace, a tool's failure and reports as the model sees them, marks kept for the rules, and a
-// model that fails.
+// the trace, a tool's failure and reports as the model sees them, marks kept for the rules, a rule
+// that holds a call, and a model that fails.
 import { describe, expect, test } from "bun:test";
-import { rigAgent, said, textOf, tool, user } from "./support";
+import type { TextChannel, ToolGate } from "../../src/loop";
+import { MessageReply, TagReply } from "../../src/reply";
+import { type Answer, fired, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 
@@ -40,6 +42,44 @@ describe("around a tool call", () => {
     expect(textOf(result)).toContain("Fixture failure: the ledger is locked.");
     expect(recorder.of("tool_ended")[0]!.event).toMatchObject({ clean: false, endedRun: false, result: { error: true } });
   });
+
+  test("a closing call a rule holds does not end the run: the call does not run, and the agent reads the rule's text in its place", async () => {
+    const HOLD = "Fixture rule: the vault stays shut.";
+    const opened: string[] = [];
+    const apply = tool("world_apply", async () => (opened.push("opened"), said("the vault is open")));
+    const holding: ToolGate = {
+      before: async (call) => (call.tool === "world_apply" ? { hold: fired("vault-shut", "tool-call", HOLD), remind: [] } : { remind: [] }),
+      after: async (_call, result) => ({ result, remind: [] }),
+    };
+    const { runner, scripted, recorder, clock } = rigAgent(
+      author,
+      [{ pieces: [{ text: "<reply>She tries the vault.</reply>" }, { call: "world_apply", args: { note: "open the vault", closing: true } }] }, { pieces: [{ text: "It stays shut." }] }],
+      { tools: [apply], gate: holding },
+    );
+
+    const outcome = await clock.settle(runner.start({ messages: [user("Open the vault.")] }).done);
+
+    expect(outcome.status).toBe("done");
+    expect(opened).toEqual([]);
+    expect(scripted.requests).toHaveLength(2);
+    const answered = scripted.requests[1]!.messages.at(-1)!;
+    expect([answered.role, textOf(answered)]).toEqual(["toolResult", HOLD]);
+    expect(recorder.of("tool_ended")[0]!.event).toMatchObject({ tool: "world_apply", clean: false, endedRun: false });
+    expect(recorder.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.action])).toEqual([["vault-shut", "hold"]]);
+  });
+
+  test("a tool that takes an argument named closing is left out and named, and the agent works with the rest", async () => {
+    const query = tool("world_query", async () => said("an answer"), { parameters: { type: "object", properties: { closing: { type: "string" } } } });
+    const note = tool("scene_note", async () => said("noted"));
+    const { runner, scripted, clock } = rigAgent(author, [{ pieces: [{ call: "world_query", args: { closing: "the door" } }] }, { pieces: [{ text: "Done." }] }], { tools: [query, note] });
+
+    expect(runner.leftOut).toEqual(["world_query"]);
+    const outcome = await clock.settle(runner.start({ messages: [user("Ask about the door.")] }).done);
+
+    expect(outcome.status).toBe("done");
+    expect(scripted.requests[0]!.tools.map((declared) => declared.name)).toEqual(["scene_note"]);
+    expect(textOf(scripted.requests[1]!.messages.at(-1)!)).toBe("Fixture: no tool named world_query.");
+  });
 });
 
 describe("a model that fails", () => {
@@ -60,5 +100,28 @@ describe("a model that fails", () => {
     const outcome = await clock.settle(runner.start({ messages: [user("Speak.")] }).done);
     expect(outcome.status).toBe("failed");
     expect(outcome.error).not.toBe("");
+  });
+
+  test("a reply its provider failed in the middle of is not released, in either form: what was held back never shows", async () => {
+    const failing = (text: string): Answer => ({ pieces: [{ text }], end: { error: "Fixture provider error: overloaded." } });
+    const released: string[] = [];
+    async function failed(channel: TextChannel, answer: Answer): Promise<void> {
+      const { runner, clock } = rigAgent(author, [answer], { channel });
+      const outcome = await clock.settle(runner.start({ messages: [user("Speak.")] }).done);
+      expect(outcome.status).toBe("failed");
+    }
+    // The tag form, holding back the sentence in progress as it does under a rule that covers the reply.
+    const tagSink = new SinkRecorder();
+    const tagged = new TagReply({ tags: { reply: "reply", intent: "intent" }, sink: tagSink, heldSentences: 1, tailSentences: 2, onReleased: (text) => released.push(text) });
+    await failed(tagged, failing("<reply>The lamp turns. The sea is lou"));
+    expect(tagged.released).toBe(false);
+    expect(tagSink.text).toBe("The lamp turns. ");
+    // The two-step form, which shows a message whole when it ends.
+    const plainSink = new SinkRecorder();
+    const plain = new MessageReply({ sink: plainSink, stream: false, heldSentences: 0, tailSentences: 2, onReleased: (text) => released.push(text) });
+    await failed(plain, failing("The lamp turns. The sea is lou"));
+    expect(plain.released).toBe(false);
+    expect(plainSink.text).toBe("");
+    expect(released).toEqual([]);
   });
 });

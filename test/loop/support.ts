@@ -17,6 +17,7 @@ export const texts = {
   invalid: ({ tool, arguments: sent }: { tool: string; arguments: string; parameters: string }) => `Fixture: ${tool} does not take ${sent}.`,
   cutShort: ({ tool }: { tool: string }) => `Fixture: ${tool} was cut short.`,
   failed: ({ tool, error }: { tool: string; error: string }) => `Fixture: ${tool} failed: ${error}`,
+  unfinished: ({ tool }: { tool: string }) => `Fixture: ${tool} did not finish.`,
 };
 
 export class TraceRecorder implements TracePort {

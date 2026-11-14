@@ -24,7 +24,11 @@ export interface TagReplyOptions {
   heldSentences: number;
   /** Of what was shown, how many of the last sentences go with the line an agent goes on under after a rule stopped it. */
   tailSentences: number;
-  /** Asked as a reply tag opens: false when the reply is another form's, or went out already; that reply is then not shown. Absent: always this form's. */
+  /**
+   * Asked just before the reply's first text is shown, never sooner (a reply cut before anything of
+   * it showed takes nothing): false when the reply is another form's, or went out already; that
+   * reply is then not shown. Absent: always this form's.
+   */
   claim?(): boolean;
   /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
   second?: string;
@@ -49,15 +53,18 @@ export class TagReply implements TextChannel {
   #intent = "";
   /** Inside a reply tag opened after the reply was released, or while another form has it: not shown. */
   #extra = false;
-  /** A reply tag was opened that could not be shown: the agent is told, once. */
-  #second = false;
+  /**
+   * A reply tag was opened that could not be shown: the agent is told after the message, once in the
+   * generation, so a second reply never buys it call after call (each answer is a further call).
+   */
+  #second: "unsaid" | "due" | "said" = "unsaid";
   /** This message wrote reply text: only then does its end close a reply its closing tag left open. */
   #wrote = false;
 
   constructor(options: TagReplyOptions) {
     this.#o = options;
     this.#parser = new TagParser(options.tags);
-    this.#release = new Release((text) => options.sink.content(text), options.heldSentences);
+    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => options.claim?.() !== false);
   }
 
   /** Whether the reply was released. */
@@ -90,9 +97,8 @@ export class TagReply implements TextChannel {
   }
 
   release(): void {
-    if (this.#state === "open") this.#release.flush();
-    else if (this.#state === "closing") {
-      this.#release.flush(true);
+    if (this.#state === "open") this.#flush(false);
+    else if (this.#state === "closing" && this.#flush(true)) {
       this.#state = "released";
       this.#o.onReleased?.(this.#release.shown);
     }
@@ -118,17 +124,17 @@ export class TagReply implements TextChannel {
   }
 
   answers(): string[] {
-    const second = this.#second;
-    this.#second = false;
-    return second && this.#o.second !== undefined ? [this.#o.second] : [];
+    if (this.#second !== "due") return [];
+    this.#second = "said";
+    return this.#o.second !== undefined ? [this.#o.second] : [];
   }
 
   #take(part: TagPart): void {
     if (part.kind === "open") {
       if (part.role !== "reply") return;
-      if (this.#state === "released" || this.#state === "closing" || this.#o.claim?.() === false) {
+      if (this.#state === "released" || this.#state === "closing") {
         this.#extra = true;
-        this.#second = true;
+        this.#notShown();
         return;
       }
       if (this.#state === "none") this.#o.onBegin?.();
@@ -147,6 +153,24 @@ export class TagReply implements TextChannel {
       if (part.text !== "") this.#wrote = true;
     }
     // Text outside every tag, and a second reply, are working text: the trace has them.
+  }
+
+  /**
+   * Sends on what may be shown. False when the reply was not this form's as its first text was to go
+   * out (another way has it, or it went out): none of it is shown, the rest of its tag is skipped, and
+   * the agent is told.
+   */
+  #flush(all: boolean): boolean {
+    if (this.#release.flush(all)) return true;
+    if (this.#state === "open") this.#extra = true;
+    this.#state = "none";
+    this.#notShown();
+    return false;
+  }
+
+  /** A reply this form does not show: the agent is told after the message, once in the generation. */
+  #notShown(): void {
+    if (this.#second === "unsaid") this.#second = "due";
   }
 
   #endIntent(): void {

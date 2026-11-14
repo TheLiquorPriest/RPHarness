@@ -22,11 +22,15 @@ export interface MessageReplyOptions {
   heldSentences: number;
   /** Of what was shown, how many of the last sentences go with the line an agent goes on under after a rule stopped it. */
   tailSentences: number;
-  /** Asked before anything is shown: false when the reply is another form's, or went out already; this one is then not shown. Absent: always this form's. */
+  /**
+   * Asked just before the reply's first text is shown, never sooner (a reply cut before anything of
+   * it showed takes nothing): false when the reply is another form's, or went out already; this one
+   * is then not shown. Absent: always this form's.
+   */
   claim?(): boolean;
   /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
   second?: string;
-  /** The reply begins to show. */
+  /** The reply begins to show: its first text is about to go out. */
   onBegin?(): void;
   /** The reply is complete and was sent on: once. */
   onReleased?(reply: string): void;
@@ -40,12 +44,15 @@ export class MessageReply implements TextChannel {
   #message = "";
   /** This message is a reply that cannot be shown. */
   #refused = false;
-  /** A reply was not shown: the agent is told, once. */
-  #second = false;
+  /**
+   * A reply was not shown: the agent is told after the message, once in the generation, so text after
+   * the reply never buys it call after call (each answer is a further call).
+   */
+  #second: "unsaid" | "due" | "said" = "unsaid";
 
   constructor(options: MessageReplyOptions) {
     this.#o = options;
-    this.#release = new Release((text) => options.sink.content(text), options.heldSentences);
+    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => this.#claim());
   }
 
   /** Whether the reply was released. */
@@ -79,19 +86,12 @@ export class MessageReply implements TextChannel {
       this.#refuse();
       return;
     }
-    if (this.#state === "none") {
-      if (this.#o.claim?.() === false) {
-        this.#refuse();
-        return;
-      }
-      this.#state = "open";
-      this.#o.onBegin?.();
-    }
+    this.#state = "open";
     this.#release.hold(piece);
   }
 
   release(): void {
-    if (this.#state === "open" && !this.#refused) this.#release.flush();
+    if (this.#state === "open" && !this.#refused) this.#flush(false);
   }
 
   cut(): string {
@@ -103,32 +103,43 @@ export class MessageReply implements TextChannel {
 
   end(message: AssistantMessage): void {
     if (this.#o.stream) {
-      if (this.#state !== "open" || this.#refused) return;
-      this.#release.flush(true);
-      this.#finish();
+      if (this.#state === "open" && !this.#refused && this.#flush(true)) this.#finish();
       return;
     }
     const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall" || isClosing(part.arguments as JsonValue));
     if (!replies) return;
-    if (this.#state === "released" || this.#o.claim?.() === false) {
+    if (this.#state === "released") {
       this.#refuse();
       return;
     }
-    this.#o.onBegin?.();
     this.#release.hold(this.#message);
-    this.#release.flush(true);
-    this.#finish();
+    if (this.#flush(true)) this.#finish();
+  }
+
+  /** Sends on what may be shown. False when the reply was not this form's as its first text was to go out: none of this message is shown, and the agent is told. */
+  #flush(all: boolean): boolean {
+    if (this.#release.flush(all)) return true;
+    this.#state = "none";
+    this.#refuse();
+    return false;
+  }
+
+  /** Just before the first text goes out: whether the reply is this form's; if it is, it begins to show. */
+  #claim(): boolean {
+    if (this.#o.claim?.() === false) return false;
+    this.#o.onBegin?.();
+    return true;
   }
 
   answers(): string[] {
-    const second = this.#second;
-    this.#second = false;
-    return second && this.#o.second !== undefined ? [this.#o.second] : [];
+    if (this.#second !== "due") return [];
+    this.#second = "said";
+    return this.#o.second !== undefined ? [this.#o.second] : [];
   }
 
   #refuse(): void {
     this.#refused = true;
-    this.#second = true;
+    if (this.#second === "unsaid") this.#second = "due";
   }
 
   #finish(): void {

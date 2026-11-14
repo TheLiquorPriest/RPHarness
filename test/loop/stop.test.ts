@@ -3,9 +3,9 @@
 // transcript it can be continued from. Then the limits (§10.11), which end work the same way.
 import type { Message } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
-import { Budget } from "../../src/loop";
+import { Budget, type GateAfter, type GateBefore, type LoopToolResult, type ToolGate } from "../../src/loop";
 import { REPLY_DEFAULTS, TagReply } from "../../src/reply";
-import { FakeClock, gate, rigAgent, said, SinkRecorder, tool, TraceRecorder, user } from "./support";
+import { FakeClock, gate, rigAgent, said, SinkRecorder, textOf, tool, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 const tags = { reply: "reply", intent: "intent" };
@@ -49,7 +49,7 @@ describe("stop", () => {
     expect(consistent(scripted.requests[1]!.messages)).toBe(true);
   });
 
-  test("in the middle of a tool: the stop does not wait on it, its late answer and updates go nowhere, and the unfinished step leaves the transcript", async () => {
+  test("in the middle of a tool: the stop does not wait on it, its late answer and updates go nowhere, and the step stays with every call answered", async () => {
     const slowDone = gate();
     let slowSignal: AbortSignal | undefined;
     let lateUpdate: (() => void) | undefined;
@@ -80,10 +80,88 @@ describe("stop", () => {
     expect(scripted.requests).toHaveLength(1);
     expect(runner.idle).toBe(true);
     expect(consistent(runner.transcript as Message[])).toBe(true);
-    expect(runner.transcript.at(-1)?.role).toBe("user");
+    // The call that finished keeps its answer; the one the stop left is answered as unfinished, never with its late answer.
+    expect(runner.transcript.slice(-3).map((message) => [message.role, textOf(message)])).toEqual([
+      ["assistant", "Checking two things."],
+      ["toolResult", "quick answer"],
+      ["toolResult", "Fixture: slow did not finish."],
+    ]);
     // Continued, its next request is one a provider accepts.
     await clock.settle(runner.start({ message: "Again, briefly." }).done);
     expect(consistent(scripted.requests[1]!.messages)).toBe(true);
+  });
+
+  test("in the middle of tools that run one after another: a call the stop kept from starting is answered as unfinished too", async () => {
+    const firstDone = gate();
+    const first = tool("first", async () => (await firstDone.opened, said("first answer")), { sequential: true });
+    const second = tool("second", async () => said("second answer"), { sequential: true });
+    const { runner, clock } = rigAgent(author, [{ pieces: [{ call: "first" }, { call: "second" }] }], { tools: [first, second] });
+    const work = runner.start({ messages: [user("Check.")] });
+    await clock.settle(clock.sleep(5));
+
+    work.stop();
+    await clock.settle(work.done);
+    firstDone.open();
+    await clock.settle(clock.sleep(50));
+
+    expect(consistent(runner.transcript as Message[])).toBe(true);
+    expect(runner.transcript.slice(-3).map((message) => [message.role, textOf(message)])).toEqual([
+      ["assistant", ""],
+      ["toolResult", "Fixture: first did not finish."],
+      ["toolResult", "Fixture: second did not finish."],
+    ]);
+  });
+
+  /** A gate that waits on the player before every call (a permission asked), and counts what runs after a tool. */
+  function asking(player: { opened: Promise<void> }): ToolGate & { afters: number } {
+    const around = {
+      afters: 0,
+      before: async (): Promise<GateBefore> => (await player.opened, { remind: [] }),
+      after: async (_call: unknown, result: LoopToolResult): Promise<GateAfter> => {
+        around.afters += 1;
+        return { result, remind: [] };
+      },
+    };
+    return around;
+  }
+
+  test("while the gate is asked (a permission still open): the call never runs, even when the answer comes after the stop", async () => {
+    const player = gate();
+    const ran: string[] = [];
+    const apply = tool("world_apply", async () => (ran.push("ran"), said("applied")));
+    const around = asking(player);
+    const { runner, scripted, clock } = rigAgent(author, [{ pieces: [{ call: "world_apply", args: { note: "open the vault" } }] }, { pieces: [{ text: "Done." }] }], { tools: [apply], gate: around });
+    const work = runner.start({ messages: [user("Open the vault.")] });
+    await clock.settle(clock.sleep(5));
+
+    work.stop();
+    const outcome = await clock.settle(work.done);
+    // The player says yes once the turn has stopped.
+    player.open();
+    await clock.settle(clock.sleep(50));
+
+    expect(outcome.status).toBe("stopped");
+    expect(ran).toEqual([]);
+    expect(around.afters).toBe(0);
+    expect(scripted.requests).toHaveLength(1);
+  });
+
+  test("in the middle of a tool: what would run around its late result (rules on it, clipping) does not", async () => {
+    const player = gate();
+    player.open();
+    const slowDone = gate();
+    const slow = tool("slow", async () => (await slowDone.opened, said("slow answer")));
+    const around = asking(player);
+    const { runner, clock } = rigAgent(author, [{ pieces: [{ call: "slow" }] }], { tools: [slow], gate: around });
+    const work = runner.start({ messages: [user("Check.")] });
+    await clock.settle(clock.sleep(5));
+
+    work.stop();
+    await clock.settle(work.done);
+    slowDone.open();
+    await clock.settle(clock.sleep(50));
+
+    expect(around.afters).toBe(0);
   });
 });
 

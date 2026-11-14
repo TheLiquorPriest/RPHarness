@@ -43,7 +43,6 @@ What it does not have yet: tools that run a command or call an address (command 
 | `src/hosts/folder/` | A second host: point it at a directory and a tools manifest and it runs. |
 | `src/testing/` | The scripted-model rig and the kit any host must pass. |
 | `guidance/` | The files RPH ships: its tools' descriptions, its prompt parts, one rule. A host's own files replace any of them by name. |
-| `spikes/` | Runnable measurements, each with what it found. |
 
 ## Use it from a host
 

@@ -35,6 +35,10 @@ export interface StoredConnection {
   headers?: Record<string, string | null>;
   /** It takes one tool call per answer. */
   serialTools?: true;
+  /** Message threads are on. Off unless set: every request then carries everything it is about. */
+  messageThreads?: true;
+  /** How many times a call that failed before any answer arrived is tried again; 2 when absent. */
+  retries?: number;
   /** What the user entered as each model's limits, by model id (§13.3, Y33: an override per connection). */
   limits?: Record<string, ModelLimitsEntry>;
   /** What the connection's server reported as each model's limits, by model id. */
@@ -67,12 +71,14 @@ export interface SecretsDoc {
 
 /**
  * Where the host keeps the two documents. Storage only: keep each document whole as last given and
- * give it back. RPH is their one writer and writes one at a time. The secrets are written so a
- * reader never meets half a file, readable by the user alone, and never in the agents' file tree,
- * a transcript or a page (§16).
+ * give it back. RPH writes one at a time. The connections may live in the user's own config file,
+ * and a hand edit there is honoured: RPH reads them through this port whenever it needs them and
+ * keeps nothing of them past a turn. Keys are never in the connections document. The secrets are
+ * written so a reader never meets half a file, readable by the user alone, and never in the agents'
+ * file tree, a transcript or a page (§16).
  */
 export interface ModelsPort {
-  /** The connections document as last saved, as it comes (the layer checks it); null when none was ever saved. */
+  /** The connections document as last saved or as the user edited it, as it comes (the layer checks it); null when there is none. */
   loadConnections(): Promise<unknown>;
   saveConnections(doc: ConnectionsDoc): Promise<void>;
   /** The secrets document as last saved, as it comes; null when none was ever saved. */
@@ -110,6 +116,8 @@ export interface ConnectionInput {
   /** Absent: the stored headers stay. Null: all are taken away. A record: exactly these, a text setting a value and null keeping the stored one. */
   headers?: Record<string, string | null> | null;
   serialTools?: boolean | null;
+  messageThreads?: boolean | null;
+  retries?: number | null;
   /** The user's limits for its models, by model id. Null clears them. */
   limits?: Record<string, ModelLimitsEntry> | null;
 }
@@ -240,6 +248,8 @@ export interface ModelsApi {
   models(connection: string | null): Promise<ModelChoice[]>;
   /** A model's limits as RPH uses them; the connection's own model when `model` is absent. */
   limits(connection: string | null, model?: string): Promise<ModelLimits>;
+  // `embed`, for search by meaning (§9.4, §10.5), comes here with the search lane, so a host's
+  // indexes are built through RPH's model layer and never by the host calling a model.
   signIn: SignInApi;
   /** Passes a request through to its connection and streams the answer to `sink`. Resolves after `finish` or `error`. */
   pass(request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void>;

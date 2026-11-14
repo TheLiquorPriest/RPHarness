@@ -19,7 +19,9 @@
 //   host/log.jsonl                         the log
 //
 // Not here: the host's other stores (`stores`), searchers for `gap_check` (none), the user's
-// permissions per lane (`approvals`, so every lane is Auto), and running command tools.
+// permissions per lane (`approvals`, so every lane and `external` are Auto), the registry of what
+// is switched on (`switches`, so everything that runs a command or calls out is off), and running
+// command tools.
 
 import { join } from "node:path";
 import type { Clock, Environment, Log, Scope } from "../../contract/index";

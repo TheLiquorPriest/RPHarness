@@ -35,18 +35,28 @@ export interface ContextBlock {
   text: string;
 }
 
-/** The lead allowed something to be invented (§10.5 step 5), within bounds, resting on a gap check that came back empty. */
+/**
+ * How a consent was given (§10.5). `write`: the lead's own write named its source as invented and
+ * cited a gap check; `tool` and `callId` are that write's. `answer`: the lead answered a sub-agent
+ * with `agent_message`, using its argument that says what may be invented and within what bounds;
+ * `callId` is that call's.
+ */
+export type ConsentVia = { kind: "write"; tool: string; callId: string } | { kind: "answer"; callId: string };
+
+/** The lead allowed something to be invented (§10.5 step 5), recorded by code in one of the two ways of `ConsentVia`. */
 export interface ConsentGrant {
   id: string;
   /** Who allowed it. */
   by: AgentRef;
-  /** The agent allowed, when it was another than `by`. */
+  /** For whom: the agent allowed to invent. Absent when it is `by` itself, in its own write. */
   to?: AgentRef;
+  /** How it was given. */
+  via: ConsentVia;
   /** What may be invented. */
   topic: string;
-  /** Within what bounds. */
-  bounds: string;
-  /** The gap check it rests on, by id; absent when none was run (shown so, §10.5 "What is shown"). */
+  /** Within what bounds, where they were said. */
+  bounds?: string;
+  /** The gap check it rests on, by id; absent when none was cited (shown so, §10.5 "What is shown"). */
   gapCheck?: string;
 }
 

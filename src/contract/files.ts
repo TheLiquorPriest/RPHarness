@@ -21,7 +21,7 @@ export interface Layer {
   level: LayerLevel;
   /**
    * Where the level appears in the paths agents and RPH use. `""` for the chat level, which is the
-   * agents' root; a folder ending in "/" for each other level (for the folder host, `@global/`).
+   * agents' root; for the others, the same in every host: `@shipped/`, `@global/`, `@character/`.
    */
   mount: string;
   /**
@@ -30,8 +30,8 @@ export interface Layer {
    */
   folders: { [kind in GuidanceKind]?: string };
   /**
-   * The level's config file, relative to `mount`, where it has one (§5.4 "Config": limits,
-   * permissions, which files are in force and when). RPH reads it like any other file.
+   * The level's config file, relative to `mount`, where it has one: YAML (§5.4 "Config": limits,
+   * permissions, which files are in force and when). The host writes it; RPH reads it like any other file.
    */
   config?: string;
 }

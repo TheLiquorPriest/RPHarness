@@ -64,7 +64,11 @@ export interface HostTool {
   /** The family it belongs to, as the `.tools/` guides group them (§5.4). */
   family: string;
   tier: ToolTier;
-  /** For a tool that writes: the lane it writes to, so the user's Auto / Confirm / Never for that lane applies (§6.8). */
+  /**
+   * For a tool that writes: the lane it writes to, so the user's Auto / Confirm / Never for that
+   * lane applies (§6.8). Never `external`: that name is the setting of every tool of the external
+   * tier, which is under it whatever lane it names.
+   */
   lane?: string;
   /** What it does and when to use it. The text is the host's editable file (§5.4 "Tools"). */
   description: string;

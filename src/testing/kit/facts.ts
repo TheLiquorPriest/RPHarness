@@ -21,6 +21,7 @@ export const BASE_TOOL_NAMES = [
   "delegate",
   "agent_message",
   "ask_author",
+  "prompt_map_write",
   "write_reply",
   "reply_release",
   "file_read",
@@ -92,6 +93,7 @@ export function toolCases(ctx: KitContext): void {
       if (t.family.trim() === "") problems.push(`${t.name} has no family`);
       if (!["read", "write", "external"].includes(t.tier)) problems.push(`${t.name} has no tier`);
       if (t.lane !== undefined && t.lane.trim() === "") problems.push(`${t.name} has an empty lane`);
+      if (t.lane === "external") problems.push(`${t.name} names the lane "external", which is the external tier's own setting`);
       if (t.description.trim() === "") problems.push(`${t.name} has no description`);
       if (typeof t.run !== "function") problems.push(`${t.name} cannot run`);
       problems.push(...schemaProblems(t.parameters).map((p) => `${t.name}: ${p}`));

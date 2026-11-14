@@ -15,6 +15,7 @@ export type * from "./models";
 export type * from "./prompt";
 export type * from "./store";
 export type * from "./stores";
+export type * from "./switches";
 export type * from "./tools";
 export type * from "./trace";
 export type * from "./turn";

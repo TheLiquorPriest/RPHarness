@@ -15,6 +15,7 @@ import type { ModelsPort } from "./models";
 import type { PromptPort } from "./prompt";
 import type { StorePort } from "./store";
 import type { Searcher, StoresPort } from "./stores";
+import type { SwitchesPort } from "./switches";
 import type { ToolsPort } from "./tools";
 import type { TracePort } from "./trace";
 
@@ -49,6 +50,8 @@ export interface Environment {
   events: TurnEvents;
   /** The user's Auto / Confirm / Never per lane, and the user's answer when it is Confirm. Without it, every lane is Auto. */
   approvals?: ApprovalsPort;
+  /** Whether each thing that runs a command or calls out is switched on from the host's own command line (§16). Without it, every such thing is off. */
+  switches?: SwitchesPort;
   clock: Clock;
   log: Log;
 }

@@ -18,9 +18,8 @@ export function fileCases(ctx: KitContext): void {
     const levels = layers.map((l) => l.level);
     expect(levels).toEqual(ORDER);
     expect(layers.find((l) => l.level === "chat")?.mount).toBe("");
-    const mounts = layers.filter((l) => l.level !== "chat").map((l) => l.mount);
-    expect(new Set(mounts).size).toBe(mounts.length);
-    for (const m of mounts) expect(m.endsWith("/") && m.length > 1).toBe(true);
+    // The mounts are the same in every host, so guidance can name them.
+    expect(layers.filter((l) => l.level !== "chat").map((l) => l.mount)).toEqual(["@shipped/", "@global/", "@character/"]);
     for (const layer of layers) {
       for (const folder of Object.values(layer.folders)) expect(folder.startsWith("/") || folder.split("/").includes("..")).toBe(false);
     }

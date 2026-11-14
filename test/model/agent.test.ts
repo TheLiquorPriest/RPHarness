@@ -18,8 +18,8 @@ afterEach(async () => {
 });
 
 /** A turn whose model first calls `lookup`, then answers; the requests that left, and what the agent heard and did. */
-async function lookupTurn(made: Rig, sessionId?: string): Promise<{ run: Agent; asked: unknown[]; pieces: string[]; bodies: Record<string, unknown>[] }> {
-  const saved = await made.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+async function lookupTurn(made: Rig, sessionId?: string, messageThreads?: true): Promise<{ run: Agent; asked: unknown[]; pieces: string[]; bodies: Record<string, unknown>[] }> {
+  const saved = await made.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", ...(messageThreads ? { messageThreads } : {}) }, KEY);
   const agent = await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "high" });
   expect(agent.thinkingLevel).toBe("high");
   const asked: unknown[] = [];
@@ -71,9 +71,21 @@ describe("a turn on the layer's model, run by pi's Agent", () => {
     expect(messages[1]?.content[0]).toMatchObject({ type: "thinking", thinking: "The keys first.", signature: "sig-1" });
   });
 
-  test("in an agent session, Anthropic's endpoint keeps the conversation: the next call sends only what is new, until the session ends", async () => {
+  test("in an agent session, every request carries the whole conversation: Anthropic's message threads are off", async () => {
     r = rig({ script: lookupAnswers });
     const { run, bodies } = await lookupTurn(r, "agent-session-7");
+    expect(run.state.errorMessage).toBeUndefined();
+    expect(bodies.map((b) => Object.keys(b).includes("thread"))).toEqual([false, false]);
+    expect((bodies[1]?.messages as { role: string; content: { type: string }[] }[]).map((m) => [m.role, m.content.map((b) => b.type)])).toEqual([
+      ["user", ["text"]],
+      ["assistant", ["thinking", "tool_use"]],
+      ["user", ["tool_result"]],
+    ]);
+  });
+
+  test("a connection that turns threads on: Anthropic's endpoint keeps the conversation, the next call sends only what is new, until the session ends", async () => {
+    r = rig({ script: lookupAnswers });
+    const { run, bodies } = await lookupTurn(r, "agent-session-7", true);
     expect(run.state.errorMessage).toBeUndefined();
     expect(bodies[0]?.thread).toEqual({ type: "create" });
     expect(bodies[1]?.thread).toEqual({ type: "continue", previous_message_id: "msg_1" });

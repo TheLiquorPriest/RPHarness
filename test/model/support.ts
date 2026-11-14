@@ -171,6 +171,7 @@ export interface RigOptions {
   askMs?: number;
   signInMs?: number;
   settingWords?: (wait: ModelWait) => string;
+  markNote?: (text: string) => string;
 }
 
 export interface Rig {
@@ -211,6 +212,7 @@ export function rig(options: RigOptions = {}): Rig {
     ...(options.askMs !== undefined ? { askMs: () => options.askMs ?? 0 } : {}),
     ...(options.signInMs !== undefined ? { signInMs: () => options.signInMs ?? 0 } : {}),
     ...(options.settingWords ? { settingWords: options.settingWords } : {}),
+    ...(options.markNote ? { markNote: options.markNote } : {}),
   });
   return { layer, store, sent, clock, logs, done: () => layer.close() };
 }

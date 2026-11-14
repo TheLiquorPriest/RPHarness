@@ -45,11 +45,11 @@ describe("the connections", () => {
   test("are read back by a layer made again over the same documents", async () => {
     const store = new MemoryStore();
     r = rig({ store });
-    await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", headers: { "x-team": "harbour" }, serialTools: true, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } } }, KEY);
+    await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", headers: { "x-team": "harbour" }, serialTools: true, messageThreads: true, retries: 4, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } } }, KEY);
     await r.done();
     r = rig({ store });
     expect((await r.layer.api.list()).connections).toEqual([
-      { id: "id1", name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", serialTools: true, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } }, headers: [{ name: "x-team", set: true }], default: true, key: { set: true, last4: "WXYZ" } },
+      { id: "id1", name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", serialTools: true, messageThreads: true, retries: 4, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } }, headers: [{ name: "x-team", set: true }], default: true, key: { set: true, last4: "WXYZ" } },
     ]);
   });
 
@@ -91,6 +91,7 @@ describe("the connections", () => {
       [{ name: "X", provider: "openai-compatible", auth: "none", baseUrl: "https://okoro:hunter2@proxy.example.com/v1" }, "An address can't hold a name or a password: give the key in its own field, or a header."],
       [{ name: "X", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080", api: "anthropic-messages" }, "OpenAI-compatible connections speak openai-completions or openai-responses, not anthropic-messages."],
       [{ name: "X", provider: "anthropic", auth: "key", limits: { "claude-sonnet-4-5": { contextWindow: -5 } } }, "A model's window and longest reply are whole numbers of tokens above 0."],
+      [{ name: "X", provider: "anthropic", auth: "key", retries: 1.5 }, "Retries are a whole number: 0 for none."],
       // A whole header pasted where its name goes: the words don't repeat it, credential and all.
       [{ name: "X", provider: "anthropic", auth: "key", headers: { "x-api-key: sk-pasted-0123456789abcdef": "x" } }, "A header's name is a single word, such as x-team, with no space or colon in it: give its value in its own field."],
       [{ name: "X", provider: "anthropic", auth: "key", headers: { "x-team": "harbour\r\nx-api-key: other" } }, `The header "x-team" can't hold a line break.`],

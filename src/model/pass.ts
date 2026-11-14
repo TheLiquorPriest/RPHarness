@@ -450,8 +450,10 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
     for (const [key, value] of Object.entries(body)) if (!Object.hasOwn(READ, key) && !Object.hasOwn(OWN_FIELDS, key)) extras[key] = value;
     const maxTokens = maxTokensOf(body);
     out = createAssistantMessageEventStream();
+    // A request passed through goes as it came: a system message in its middle goes in place unmarked.
+    const { markNote: _unmarked, ...asItCame } = deps;
     void makeCall(
-      deps,
+      asItCame,
       shape,
       context,
       {
@@ -462,7 +464,6 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
         serialTools: body.parallel_tool_calls === false || shape.connection.serialTools === true,
         // pi-ai's own default retention; a request passed through belongs to no session.
         cacheRetention: "short",
-        maxRetries: 0,
         ...(Object.keys(extras).length > 0 ? { extras } : {}),
         carried: {},
       },

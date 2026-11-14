@@ -72,6 +72,8 @@ export interface ModelLayerDeps {
   signInMs?(): number | Promise<number>;
   /** The words that name a wait's setting and where it is changed, for the words of a wait that ran out: `The setting "<its name>"` when not given. */
   settingWords?(wait: ModelWait): string;
+  /** The text a system message is sent as, in its place, where its model takes no system message mid-conversation: from a shipped file's mark. Absent: its own text, unmarked. Never applied to a request passed through. */
+  markNote?(text: string): string;
 }
 
 export interface ModelLayer extends ModelSource {
@@ -177,7 +179,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   const book = new Book({ store: deps.store, log: deps.log });
   const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
   for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-  const callDeps: CallDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => (await deps.silentMs?.()) ?? SILENT_MS, silentSetting: () => settingWords("silentMs") };
+  const callDeps: CallDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => (await deps.silentMs?.()) ?? SILENT_MS, silentSetting: () => settingWords("silentMs"), ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
   const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: async () => (await deps.signInMs?.()) ?? SIGN_IN_MS, signInSetting: () => settingWords("signInMs"), appName: deps.appName });
 
   /** Each model `agentModel` made, with the agent's choice it was made for. */
@@ -260,7 +262,8 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
         const shape = await shapeOf(callDeps, { connectionId: id, model: null, effort: "off" });
         const context = normalizeContext({ messages: [{ role: "user", content: await deps.testPrompt(), timestamp: deps.now() }] });
         const out = createAssistantMessageEventStream();
-        await makeCall(callDeps, shape, context, { maxTokens: TEST_ROOM, sampling: {}, serialTools: false, cacheRetention: "none", maxRetries: 0, carried: {} }, ended, out);
+        // A test says how the connection stands now: it is never made again.
+        await makeCall(callDeps, shape, context, { maxTokens: TEST_ROOM, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, ended, out);
         const result = await out.result();
         if (result.stopReason !== "error" && result.stopReason !== "aborted") return { ok: true, ms: deps.now() - t0, model: result.responseModel ?? result.model };
         return { ok: false, ms: deps.now() - t0, error: wait.signal.aborted ? errorWords(wait.signal.reason) : (result.errorMessage ?? "") };

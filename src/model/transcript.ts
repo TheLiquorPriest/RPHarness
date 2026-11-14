@@ -33,8 +33,8 @@ export function keepsSystemInPlace(model: Model<Api>): boolean {
   return compatSays(model, "supportsMidConvoSystemMessages");
 }
 
-/** A call's messages with each system message kept where it stands (see the head of this file). */
-export function inPlace(messages: readonly Message[], systemInPlace: boolean): Message[] {
+/** A call's messages with each system message kept where it stands (see the head of this file); `mark` makes the text a later one is sent as a user's message with, where it gives one. */
+export function inPlace(messages: readonly Message[], systemInPlace: boolean, mark?: (text: string) => string): Message[] {
   let lead = 0;
   while (messages[lead]?.role === "system") lead += 1;
   const head = lead > 1 ? getCurrentSystemMessage(messages.slice(0, lead)) : undefined;
@@ -45,7 +45,7 @@ export function inPlace(messages: readonly Message[], systemInPlace: boolean): M
       continue;
     }
     const text = contentText(m.content);
-    if (text !== "") out.push({ role: "user", content: text, timestamp: m.timestamp });
+    if (text !== "") out.push({ role: "user", content: mark?.(text) ?? text, timestamp: m.timestamp });
     const { sections, toolsAdded, toolsRemoved } = m;
     if (sections !== undefined || toolsAdded !== undefined || toolsRemoved !== undefined) out.push({ ...m, content: "" });
   }

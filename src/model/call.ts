@@ -8,8 +8,14 @@
 // A stream function's contract holds here: nothing throws. A call that can't be made, a failed one
 // and a stopped one each end the stream with an error event, in words: a failure in the provider's
 // own words with its status first, a stop with the reason "aborted", and never a secret the layer
-// holds. pi-ai's own retries stay off unless the caller asks for them (`maxRetries`): whoever runs
-// the loop decides whether a failure is made again.
+// holds. A call that failed before any piece of its answer came (its server couldn't be reached, or
+// answered 429 or 5xx) is made again, as many times as its connection's setting says (`RETRIES`
+// when it says nothing), after a wait that doubles each time; one that failed after something came
+// never is. pi-ai's own retries stay off, so these are the only ones.
+//
+// Every request carries everything it is about, so that what an agent was sent can be read back
+// whole: Anthropic's message threads, where pi-ai sends a later request only what is new and the
+// server keeps the rest, are off unless the connection turns them on.
 //
 // What leaves with a call goes only where its connection says: the call follows no redirect, since
 // its key and headers would go with it to an address nobody gave them for, and neither a key nor a
@@ -17,7 +23,7 @@
 // begun is ended after a wait (`silenceWatch`), in words that say so.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import type { Api, AssistantMessage, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
+import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS, clampReasoning } from "@earendil-works/pi-ai/api/simple-options";
 import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
@@ -44,6 +50,8 @@ export interface CallDeps {
   silentMs(): Promise<number>;
   /** The words that name that wait's setting, and where it is changed. */
   silentSetting(): string;
+  /** The text a system message is sent as where its model takes none mid-conversation, from the system message's text; absent: its text, unmarked. */
+  markNote?(text: string): string;
 }
 
 /** What a call goes to and how its model is asked to think, known before anything is sent. */
@@ -73,7 +81,8 @@ export interface CallAsk {
   cacheRetention: CacheRetention;
   /** The agent session the call belongs to: its calls share the provider's prompt cache. */
   sessionId?: string;
-  maxRetries: number;
+  /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's setting, else `RETRIES`. */
+  retries?: number;
   /** Fields of a passed request sent as they came, where the call speaks the request's own API (OpenAI's chat completions). */
   extras?: JsonObject;
   /** What the loop's options carry to pi-ai as they are. */
@@ -137,6 +146,8 @@ export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: Agent
   let model: Model<Api> = { ...found, contextWindow: limits.contextWindow?.tokens ?? 0, maxTokens: limits.maxTokens?.tokens ?? 0 };
   // On OpenAI's two APIs a system message may stand anywhere, as a chat application's custom connection sends it, and a compatible server is sent the `system` role every server knows, not OpenAI's newer `developer`. Both APIs' flags have these fields.
   if (model.api === "openai-completions" || model.api === "openai-responses") model = { ...model, compat: { ...(model.compat as OpenAICompletionsCompat | OpenAIResponsesCompat | undefined), supportsMidConvoSystemMessages: true, ...(kind.needsBaseUrl ? { supportsDeveloperRole: false } : {}) } };
+  // Every request carries everything (see the head of this file); a connection that turns threads on gets pi-ai's own default, which is Anthropic's own endpoint alone.
+  if (model.api === "anthropic-messages" && connection.messageThreads !== true) model = { ...model, compat: { ...(model.compat as AnthropicMessagesCompat | undefined), supportsMessageThreads: false } };
   const asked = askedLevel(choice.effort, connection);
   if (asked === null) {
     // The provider's own default: pi-ai sends no switch for a level it has no value for.
@@ -243,10 +254,25 @@ function silenceWatch(deps: CallDeps, ms: number, silent: () => void): SilenceWa
   };
 }
 
-/** The fetch a call's client goes out through: it follows no redirect, and hands each piece of the response to `alive` as it passes. */
-function callFetch(fetch: typeof globalThis.fetch, alive: () => void): typeof globalThis.fetch {
+/** What a call's latest request met: the status its server answered with, or that no server was reached. */
+interface Wire {
+  status?: number;
+  unreached?: boolean;
+}
+
+/** The fetch a call's client goes out through: it follows no redirect, notes on `wire` what each request met, and hands each piece of the response to `alive` as it passes. */
+function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void): typeof globalThis.fetch {
   const watched = async (input: Parameters<typeof globalThis.fetch>[0], init?: Parameters<typeof globalThis.fetch>[1]): Promise<Response> => {
-    const response = await fetch(input, { ...init, redirect: "error" });
+    let response: Response;
+    try {
+      response = await fetch(input, { ...init, redirect: "error" });
+    } catch (error) {
+      // A redirect refused or a stop is no server out of reach.
+      const said = error instanceof Error ? `${error.name} ${error.message} ${"code" in error ? String(error.code) : ""}` : String(error);
+      wire.unreached = init?.signal?.aborted !== true && !REDIRECT_REFUSED.test(said);
+      throw error;
+    }
+    wire.status = response.status;
     if (response.body === null) return response;
     const body = response.body.pipeThrough(
       new TransformStream<Uint8Array, Uint8Array>({
@@ -259,6 +285,19 @@ function callFetch(fetch: typeof globalThis.fetch, alive: () => void): typeof gl
     return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
   return Object.assign(watched, { preconnect: fetch.preconnect });
+}
+
+/** How many times a call that failed before any piece of its answer came is made again, where its connection doesn't say. */
+const RETRIES = 2;
+/** The wait before a call is first made again; each wait after is twice the one before. */
+const RETRY_WAIT_MS = 1_000;
+
+/** Whether a call that failed before any piece of its answer came may be made again: no server was reached, or it answered 429 or 5xx. */
+function mayRetry(wire: Wire, failed: AssistantMessage): boolean {
+  if (wire.unreached === true) return true;
+  // Google's client goes out through no fetch of the layer's: its status is the one its words lead with.
+  const status = wire.status ?? Number(/^(\d{3}):/.exec(failureWords(failed.errorMessage ?? ""))?.[1]);
+  return status === 429 || (status >= 500 && status <= 599);
 }
 
 /** An answer that ended before anything of it came: the call couldn't be made, or was stopped first. */
@@ -287,8 +326,6 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   // Ends a call that went silent, beside the caller's own signal, with words that say so.
   const quiet = new AbortController();
   let watch: SilenceWatch | undefined;
-  /** The answer as far as it came. */
-  let partial: AssistantMessage | undefined;
   const secrets = (): Promise<string[]> => deps.book.secretValues().catch(() => []);
   /** How an answer that ended in an error or a stop goes on: in the words of whatever ended it. */
   const failure = async (message: AssistantMessage): Promise<AssistantMessage> => {
@@ -325,7 +362,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       delete taken.top_p;
     }
     const { temperature, ...rest } = taken;
-    const messages = inPlace(context.messages, keepsSystemInPlace(model));
+    const messages = inPlace(context.messages, keepsSystemInPlace(model), deps.markNote);
     // Under the provider's own default its model may think, so what thinking refuses is left out then too.
     const changes: PayloadChanges = { sampling: openAI ? {} : rest, serial: ask.serialTools, providerDefault: leftToProvider, thinking: reasoning !== undefined || leftToProvider, extras: ask.extras };
     const silentFor = await deps.silentMs();
@@ -334,11 +371,12 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
     const headers = sentHeaders(connection);
     const theirs = ask.carried.onPayload;
+    const wire: Wire = {};
     const options: SimpleStreamOptions = {
       ...ask.carried,
       signal: ended,
       // Google's client takes no fetch but the process's own (pi-ai refuses another): only pi-ai's events tell of its life.
-      ...(model.api === "google-generative-ai" ? {} : { fetch: callFetch(deps.fetch, watching.alive) }),
+      ...(model.api === "google-generative-ai" ? {} : { fetch: callFetch(deps.fetch, wire, watching.alive) }),
       ...budget,
       ...(reasoning !== undefined ? { reasoning } : {}),
       ...(typeof temperature === "number" ? { temperature } : {}),
@@ -348,7 +386,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       ...(ask.toolChoice !== undefined ? { toolChoice: ask.toolChoice } : {}),
       cacheRetention: ask.cacheRetention,
       ...(ask.sessionId !== undefined ? { sessionId: ask.sessionId } : {}),
-      maxRetries: ask.maxRetries,
+      maxRetries: 0,
       // The caller sees the request as it is sent, after the changes, and may replace it.
       onPayload: async (payload, sent) => {
         const changed = changePayload(model.api, payload, changes) ?? payload;
@@ -356,31 +394,81 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       },
     };
 
-    const events = deps.pi.streamSimple(model, { messages }, options);
-    const iterator = events[Symbol.asyncIterator]();
     // The stream ends the moment the signal or the silence does, whether or not pi-ai's own end has come yet.
     const { promise: stopped, resolve: stop } = Promise.withResolvers<typeof STOPPED>();
     if (ended.aborted) stop(STOPPED);
     else ended.addEventListener("abort", () => stop(STOPPED), { once: true });
-    for (;;) {
-      const next = await Promise.race([iterator.next(), stopped]);
-      if (next === STOPPED) {
-        void iterator.return?.();
-        return endWith(out, await failure(partial ?? emptyAnswer(model, "aborted", "", deps.now())));
+    /** Ends `out` with `ending`, the silence's wait let go first, so that nothing of the call waits once its answer has ended. */
+    const close = (ending: AssistantMessage): void => {
+      watching.stop();
+      endWith(out, ending);
+    };
+    /** One go at the call: `out` ended, or the failure of a go that received nothing, which may be made again. */
+    const attempt = async (): Promise<AssistantMessage | undefined> => {
+      const events = deps.pi.streamSimple(model, { messages }, options);
+      const iterator = events[Symbol.asyncIterator]();
+      /** The answer as far as it came. */
+      let partial: AssistantMessage | undefined;
+      // pi-ai's `start` is held until something of the answer comes, so that a call made again never begins its answer twice.
+      let start: AssistantMessageEvent | undefined;
+      let received = false;
+      const receive = (): void => {
+        if (received) return;
+        received = true;
+        if (start !== undefined) out.push(start);
+      };
+      for (;;) {
+        const next = await Promise.race([iterator.next(), stopped]);
+        if (next === STOPPED) {
+          void iterator.return?.();
+          close(await failure(partial ?? emptyAnswer(model, "aborted", stopWords(signal), deps.now())));
+          return undefined;
+        }
+        if (next.done === true) break;
+        const event = next.value;
+        watching.alive();
+        // The answer has begun: a piece of text, of thinking or of a tool call, or a tool call given whole.
+        if (event.type === "toolcall_start" || ((event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") && event.delta !== "")) watching.begun();
+        if (event.type === "error") {
+          if (!received) return event.error;
+          close(await failure(event.error));
+          return undefined;
+        }
+        if ("partial" in event) partial = event.partial;
+        if (event.type === "start" && !received) {
+          start = event;
+          continue;
+        }
+        receive();
+        if (event.type === "done") watching.stop();
+        out.push(event);
+        if (event.type === "done") return undefined;
       }
-      if (next.done === true) break;
-      const event = next.value;
-      watching.alive();
-      // The answer has begun: a piece of text, of thinking or of a tool call, or a tool call given whole.
-      if (event.type === "toolcall_start" || ((event.type === "text_delta" || event.type === "thinking_delta" || event.type === "toolcall_delta") && event.delta !== "")) watching.begun();
-      if (event.type === "error") return endWith(out, await failure(event.error));
-      if ("partial" in event) partial = event.partial;
-      out.push(event);
-      if (event.type === "done") return;
+      const result = await events.result();
+      if (result.stopReason === "error" || result.stopReason === "aborted") {
+        if (!received) return result;
+        close(await failure(result));
+        return undefined;
+      }
+      receive();
+      watching.stop();
+      out.end(result);
+      return undefined;
+    };
+
+    const retries = ask.retries ?? connection.retries ?? RETRIES;
+    for (let tried = 0; ; tried += 1) {
+      delete wire.status;
+      delete wire.unreached;
+      const failed = await attempt();
+      if (failed === undefined) return;
+      if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) return endWith(out, await failure(failed));
+      const { promise: waited, resolve: wake } = Promise.withResolvers<void>();
+      const timer = deps.setTimeout(wake, RETRY_WAIT_MS * 2 ** tried);
+      const woke = await Promise.race([waited, stopped]);
+      deps.clearTimeout(timer);
+      if (woke === STOPPED) return endWith(out, await failure(emptyAnswer(model, "aborted", stopWords(signal), deps.now())));
     }
-    const result = await events.result();
-    if (result.stopReason === "error" || result.stopReason === "aborted") return endWith(out, await failure(result));
-    out.end(result);
   } catch (error) {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
     // Whatever words leave here, no key, token or header's value the layer holds is in them.
@@ -418,7 +506,6 @@ function askOf(options: SimpleStreamOptions, shape: CallShape): CallAsk {
     // pi-ai's own default retention, said here so that nothing of the environment's changes it.
     cacheRetention: options.cacheRetention ?? "short",
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
-    maxRetries: options.maxRetries ?? 0,
     carried,
   };
 }

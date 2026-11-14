@@ -75,13 +75,18 @@ function limitRecord(value: unknown): Record<string, ModelLimitsEntry> | null {
   return out;
 }
 
+/** A count of retries: a whole number, none at least. */
+function isRetries(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
 /** A stored connection read from the document; null when it isn't one this build can read. */
 function storedOf(raw: unknown): StoredConnection | null {
   if (!isRecord(raw)) return null;
-  const { id, name, provider, auth, baseUrl, api, model, effort, headers, serialTools, limits, reported } = raw;
+  const { id, name, provider, auth, baseUrl, api, model, effort, headers, serialTools, messageThreads, retries, limits, reported } = raw;
   if (typeof id !== "string" || typeof name !== "string" || typeof provider !== "string" || (auth !== "key" && auth !== "signin" && auth !== "none")) return null;
   if ((baseUrl !== undefined && typeof baseUrl !== "string") || (api !== undefined && typeof api !== "string") || (model !== undefined && typeof model !== "string") || (effort !== undefined && !isLevel(effort)) || (headers !== undefined && !isHeaderRecord(headers))) return null;
-  if (serialTools !== undefined && serialTools !== true) return null;
+  if ((serialTools !== undefined && serialTools !== true) || (messageThreads !== undefined && messageThreads !== true) || (retries !== undefined && !isRetries(retries))) return null;
   const entered = limits === undefined ? undefined : limitRecord(limits);
   const told = reported === undefined ? undefined : limitRecord(reported);
   if (entered === null || told === null) return null;
@@ -96,6 +101,8 @@ function storedOf(raw: unknown): StoredConnection | null {
     ...(effort !== undefined ? { effort } : {}),
     ...(headers !== undefined ? { headers } : {}),
     ...(serialTools === true ? { serialTools } : {}),
+    ...(messageThreads === true ? { messageThreads } : {}),
+    ...(retries !== undefined ? { retries } : {}),
     ...(entered !== undefined ? { limits: entered } : {}),
     ...(told !== undefined ? { reported: told } : {}),
   };
@@ -147,6 +154,8 @@ function checked(input: ConnectionInput, id: string): StoredConnection {
   if (effort !== undefined && !isLevel(effort)) throw new Error(`"${String(effort)}" isn't an effort: use one of ${LEVELS.join(", ")}.`);
   const limits = input.limits === undefined || input.limits === null ? undefined : limitRecord(input.limits);
   if (limits === null) throw new Error("A model's window and longest reply are whole numbers of tokens above 0.");
+  const retries = input.retries ?? undefined;
+  if (retries !== undefined && !isRetries(retries)) throw new Error("Retries are a whole number: 0 for none.");
   return {
     id,
     name,
@@ -157,6 +166,8 @@ function checked(input: ConnectionInput, id: string): StoredConnection {
     ...(model !== undefined ? { model } : {}),
     ...(effort !== undefined ? { effort } : {}),
     ...(input.serialTools === true ? { serialTools: true as const } : {}),
+    ...(input.messageThreads === true ? { messageThreads: true as const } : {}),
+    ...(retries !== undefined ? { retries } : {}),
     ...(limits !== undefined && Object.keys(limits).length > 0 ? { limits } : {}),
   };
 }

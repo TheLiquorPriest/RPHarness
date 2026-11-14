@@ -82,6 +82,18 @@ describe("an agent's call keeps every system message where it stood", () => {
     expect((body.tools as { name: string }[]).map((t) => t.name)).toEqual(["lookup"]);
   });
 
+  test("where a system message goes as a user's message, it goes with the host's mark, and unmarked where the host gives none", async () => {
+    r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "The tide turns." }))), markNote: (text) => `[Fixture mark] ${text}` });
+    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    expect(spoken((await sent(r, saved.id)).messages)).toEqual([
+      ["user", "Where is Ilse?"],
+      ["assistant", "At the mill."],
+      ["user", `[Fixture mark] ${NOTE}`],
+      ["user", "And now?"],
+      ["user", `[Fixture mark] ${AFTER}`],
+    ]);
+  });
+
   test("on an Anthropic model that takes system messages itself, which pi-ai would hold back until the next answer: the same, in place", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ model: "claude-opus-5", text: "The tide turns." }))) });
     const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-opus-5" }, "sk-ant-api03-0123456789abcdef");

@@ -20,6 +20,8 @@ export { DEFAULT_SETTINGS, type Settings } from "./settings";
 export interface CreateHarnessOptions extends HarnessOptions {
   /** The models agents run on, in place of the model layer's: the rig's scripted models, in tests. */
   models?: ModelSource;
+  /** How the model layer's HTTP goes out (a provider's calls, a server's list of its models): `globalThis.fetch` when absent. */
+  fetch?: typeof globalThis.fetch;
   /** The name the app goes by where a provider's sign-in page shows one; the host's id when absent. */
   appName?: string;
 }
@@ -44,7 +46,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     id: ids,
     uuid: () => crypto.randomUUID(),
     log: (text) => env.log.info(text),
-    fetch: globalThis.fetch,
+    fetch: options.fetch ?? globalThis.fetch,
     setTimeout: (run, ms) => env.clock.setTimeout(run, ms),
     clearTimeout: (handle) => env.clock.clearTimeout(handle),
     appName: options.appName ?? env.id,
@@ -63,7 +65,10 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       const turn = new Turn(core, req, sink);
       const key = turnKey(req.scope);
       turns.set(key, turn);
-      const answered = turn.answer(signal);
+      // The connections are read again first, so a hand edit made since holds from this turn's first
+      // call. What the read has to say goes to the log, never to an agent: the layer writes each line
+      // there once, through the `log` it was given. The turn is already registered, so it can be left.
+      const answered = layer.turnStarting().then(() => turn.answer(signal));
       answering.add(answered);
       try {
         return await answered;

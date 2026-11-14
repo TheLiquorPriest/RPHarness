@@ -112,6 +112,8 @@ export interface StageOptions {
   config?: string;
   /** Every model call's answer, in order, whichever agent makes it. */
   answers: Answer[];
+  /** Model calls go through the model layer, on the connections the host keeps, over this fetch, in place of the scripted model. */
+  fetch?: typeof globalThis.fetch;
   tools?: Record<string, HostToolFixture>;
   approvals?: ApprovalsPort;
   /** More files, by their path under the agents' tree on disk (`files/`). */
@@ -211,7 +213,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   const env: Environment = { ...host, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
   const model = scriptedModel(options.answers, { clock, contextWindow: 64_000, maxTokens: 4_000 });
   let next = 0;
-  const harness = createHarness(env, { models: { agentModel: async () => model.agentModel() }, ids: () => `id-${(next += 1)}` });
+  const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: { agentModel: async () => model.agentModel() } }), ids: () => `id-${(next += 1)}` });
 
   return {
     dir,

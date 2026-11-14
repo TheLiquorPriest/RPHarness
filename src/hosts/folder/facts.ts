@@ -24,7 +24,8 @@ export async function folderFacts(site: Site): Promise<FactsPort> {
   }
 
   return {
-    defs: () => defs.map((d) => ({ ...d, ...(d.by !== undefined ? { by: [...d.by] } : {}) })),
+    // Copies, so a caller that changes what it was given changes nothing here.
+    defs: () => defs.map((d) => ({ ...d, ...(d.by !== undefined ? { by: [...d.by] } : {}), ...(d.fields !== undefined ? { fields: [...d.fields] } : {}) })),
 
     async read(scope, names) {
       site.check(scope);

@@ -30,8 +30,14 @@ export const KIT_FACTS = {
   defs: [
     { name: "stage.unperceived", counts: "Characters on stage this turn with no perception recorded for it.", by: ["principal", "supporting", "extra"] },
     { name: "threads.open", counts: "Story threads the record holds open." },
+    { name: "history.leaving.uncovered", counts: "Messages about to leave the prompt that the record does not cover.", fields: ["range"] },
   ],
-  values: { "kit-chat": { "stage.unperceived": { count: 2, names: ["Wren Alder", "Tamsin"], by: { principal: 1, supporting: 1 } } } },
+  values: {
+    "kit-chat": {
+      "stage.unperceived": { count: 2, names: ["Wren Alder", "Tamsin"], by: { principal: 1, supporting: 1 }, namesBy: { principal: ["Wren Alder"], supporting: ["Tamsin"] } },
+      "history.leaving.uncovered": { count: 3, fields: { range: { from: 12, to: 15 } } },
+    },
+  },
 };
 
 /** The manifest the folder host lists its tools from in the kit's run. */

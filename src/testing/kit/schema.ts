@@ -15,8 +15,8 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** Where a value is not JSON: undefined, a function, a number that is not finite, or another kind of thing. */
-function notJson(value: unknown, at: string, out: string[]): void {
+/** Where a value is not JSON (undefined, a function, a number that is not finite, or another kind of thing), each pushed to `out`. */
+export function notJson(value: unknown, at: string, out: string[]): void {
   if (value === null || typeof value === "string" || typeof value === "boolean") return;
   if (typeof value === "number") {
     if (!Number.isFinite(value)) out.push(`${at} is a number JSON cannot hold`);

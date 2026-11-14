@@ -96,14 +96,20 @@ export interface RuleView {
   name: string;
   path: string;
   level: LayerLevel;
+  /** Its header's description; empty for a `broken` rule whose header does not give one. */
   description: string;
-  /** Who it is for: every agent, or the definitions it names. */
+  /** Who it is for: every agent, or the definitions it names; none for a `broken` rule whose header does not say. */
   agents: "all" | string[];
-  trigger: RuleTrigger;
+  /** How it is triggered; absent for a `broken` rule whose header does not say. */
+  trigger?: RuleTrigger;
   /** In force now. */
   inForce: boolean;
-  /** Why not: switched off, or a file its `needs:` names is not in force (§5.4). */
-  why?: "off" | "needs";
+  /**
+   * Why not: switched off; a file its `needs:` names is not in force (§5.4); it is one of the
+   * examples under `examples/`, where nothing is in force (§5.4); or its header or text does not
+   * parse.
+   */
+  why?: "off" | "needs" | "example" | "broken";
   /** The farther files of the same name it replaces (§5.2). */
   replaces: { level: LayerLevel; path: string }[];
 }
@@ -119,8 +125,8 @@ export interface RuleTest {
 export interface RulesApi {
   /** Every rule of the chat's stack, in force or not. */
   list(scope: Scope): Promise<RuleView[]>;
-  /** Runs one rule against a past turn's record (§5.4: "the Rules page can run any rule against a past turn"). */
-  test(scope: Scope, rule: string, turn: string): Promise<RuleTest>;
+  /** Runs one rule against a past turn's record (§5.4: "the Rules page can run any rule against a past turn"). Absent until the harness has it; a host offers the page's button only when it is there. */
+  test?(scope: Scope, rule: string, turn: string): Promise<RuleTest>;
 }
 
 // ---------------------------------------------------------------- the live view
@@ -195,13 +201,29 @@ export interface DefinitionView {
   given: string[];
 }
 
-/** One part of an agent's stack (§5.2): which part, the file it came from, and whether it sits in the opening block or comes with the briefing. */
+/**
+ * Why a part an agent's definition names is left out of its stack: no file at any level; switched
+ * off; nothing in it but headings and comments; its header or text does not parse; or a file its
+ * `needs:` names is not in force.
+ */
+export type StackLeft = "missing" | "off" | "empty" | "broken" | "needs";
+
+/**
+ * One part of an agent's stack (§5.2): which part, the file it came from, and whether it sits in the
+ * opening block or comes with the briefing. A part left out is listed too, with why, so the Files
+ * page says so.
+ */
 export interface StackPart {
   part: string;
+  /** The file it came from; for a part left out as `missing`, where it would be. */
   path: string;
   level: LayerLevel;
-  hash: string;
+  /** SHA-256 of the file, lower-case hex; absent for a part left out as `missing`. */
+  hash?: string;
+  /** Where it sits, or for a part left out, where it would. */
   where: "opening" | "briefing";
+  /** Why it is left out; absent for a part in the stack. */
+  left?: StackLeft;
 }
 
 export interface DefinitionsApi {
@@ -221,10 +243,14 @@ export interface Harness {
   answer(req: TurnRequest, sink: ReplySink, signal: AbortSignal): Promise<TurnOutcome>;
   /** The host: this turn is off the path (swiped away, deleted). Its work is cancelled, its jobs too, and a session it closed is open again (§11, §13.5). */
   turnLeft(scope: Scope): Promise<void>;
-  /** The user talks with an agent (the assistant, or one kept alive past the reply, §13.4); its answer goes to `sink`. */
-  talk(scope: Scope, agent: string, message: string, sink: ReplySink, signal?: AbortSignal): Promise<void>;
-  jobs: JobsApi;
-  sessions: SessionsApi;
+  /**
+   * The user talks with an agent (the assistant, or one kept alive past the reply, §13.4); its answer goes to `sink`.
+   * `talk`, `jobs` and `sessions` are absent until the harness has them: a host asks whether each is
+   * there and offers what depends on it only then. Nothing stands in for a missing one.
+   */
+  talk?(scope: Scope, agent: string, message: string, sink: ReplySink, signal?: AbortSignal): Promise<void>;
+  jobs?: JobsApi;
+  sessions?: SessionsApi;
   rules: RulesApi;
   live: LiveApi;
   usage: UsageApi;

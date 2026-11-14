@@ -167,7 +167,11 @@ describe("folder host", () => {
   });
 
   test("a fact declared with no value counts 0; a scope of another user, or with an id that reaches out, is refused", async () => {
-    expect(await host.facts.read(scope)).toEqual({ "stage.unperceived": { count: 2, names: ["Wren Alder", "Tamsin"], by: { principal: 1, supporting: 1 } }, "threads.open": { count: 0 } });
+    expect(await host.facts.read(scope)).toEqual({
+      "stage.unperceived": { count: 2, names: ["Wren Alder", "Tamsin"], by: { principal: 1, supporting: 1 }, namesBy: { principal: ["Wren Alder"], supporting: ["Tamsin"] } },
+      "threads.open": { count: 0 },
+      "history.leaving.uncovered": { count: 3, fields: { range: { from: 12, to: 15 } } },
+    });
     await expect(host.files.read({ ...scope, user: "someone-else" }, "AGENTS.md")).rejects.toThrow("serves the user");
     await expect(host.files.read({ ...scope, chat: "../kit-chat" }, "AGENTS.md")).rejects.toThrow("cannot keep a chat");
     await expect(host.files.read({ ...scope, turn: "../../x" }, "AGENTS.md")).rejects.toThrow("cannot keep a turn");

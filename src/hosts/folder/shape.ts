@@ -286,6 +286,16 @@ function factValue(where: string, value: unknown): FactValue {
     for (const [group, n] of Object.entries(object(where, v.by, "by"))) by[group] = count(where, n, `by.${group}`);
     out.by = by;
   }
+  if (v.namesBy !== undefined) {
+    const namesBy: Record<string, string[]> = {};
+    for (const [group, names] of Object.entries(object(where, v.namesBy, "namesBy"))) namesBy[group] = texts(where, names, `namesBy.${group}`);
+    out.namesBy = namesBy;
+  }
+  if (v.fields !== undefined) {
+    const fields = object(where, v.fields, "fields");
+    if (!isJson(fields)) throw new ShapeError(where, `"fields" must be JSON`);
+    out.fields = fields as Record<string, JsonValue>;
+  }
   return out;
 }
 
@@ -294,7 +304,12 @@ export function factsDoc(where: string, value: unknown): FactsDoc {
   if (!Array.isArray(v.defs)) throw new ShapeError(where, `"defs" must be a list`);
   const defs = v.defs.map((raw, i): FactDef => {
     const d = object(where, raw, `defs[${i}]`);
-    return { name: text(where, d.name, `defs[${i}].name`), counts: text(where, d.counts, `defs[${i}].counts`), ...(d.by !== undefined ? { by: texts(where, d.by, `defs[${i}].by`) } : {}) };
+    return {
+      name: text(where, d.name, `defs[${i}].name`),
+      counts: text(where, d.counts, `defs[${i}].counts`),
+      ...(d.by !== undefined ? { by: texts(where, d.by, `defs[${i}].by`) } : {}),
+      ...(d.fields !== undefined ? { fields: texts(where, d.fields, `defs[${i}].fields`) } : {}),
+    };
   });
   const values: Record<string, Record<string, FactValue>> = {};
   if (v.values !== undefined) {

@@ -4,6 +4,7 @@
 // `reply.released`, `prompt.notices`); these are the host's.
 
 import type { Scope } from "./common";
+import type { JsonValue } from "./json";
 
 /** A fact the host can count, as the Rules page lists it. */
 export interface FactDef {
@@ -16,13 +17,27 @@ export interface FactDef {
    * (`stage.unperceived(principal, supporting) > 0` sums those two). Absent: it has none.
    */
   by?: string[];
+  /**
+   * The fields its value may carry beyond its count and names, which a rule's text can show
+   * (`{{history.leaving.range}}`). Absent: it has none.
+   */
+  fields?: string[];
 }
 
-/** A fact's value now: its count, who or what it counts by name, and the count of each group of `FactDef.by`. */
+/** A fact's value now. */
 export interface FactValue {
   count: number;
+  /** Who or what it counts, by name. */
   names?: string[];
+  /** The count of each group of `FactDef.by`. */
   by?: Record<string, number>;
+  /**
+   * The names in each group of `FactDef.by`, each one among `names`, so a rule that picks groups
+   * (`stage.unperceived(principal, supporting)`) can name only theirs.
+   */
+  namesBy?: Record<string, string[]>;
+  /** The value of each field `FactDef.fields` declares. */
+  fields?: Record<string, JsonValue>;
 }
 
 export interface FactsPort {

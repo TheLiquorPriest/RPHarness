@@ -16,7 +16,7 @@ import { storeCases, traceCases } from "./store";
 
 export type { KitFactory, KitHost } from "./context";
 export { KIT_AGENT } from "./files";
-export { BASE_TOOL_NAMES } from "./facts";
+export { BASE_TOOL_NAMES, factProblems } from "./facts";
 export { schemaProblems } from "./schema";
 export type { KitFile, KitMessage, KitPrompt, KitPromptMessage, KitSeed } from "./seed";
 export { KIT_SEED } from "./seed";

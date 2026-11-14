@@ -124,6 +124,19 @@ describe("a job an agent starts", () => {
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
   });
 
+  test("a job owes the player no reply: its agent's clean closing call ends its run, with what it wrote as its report", async () => {
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+      answers: routed([start("start-1"), reply("The tower is quiet.")], [{ pieces: [{ text: "Counted seven." }, { call: "todo", args: { items: [{ text: "count the bells", done: true }], closing: true } }] }]),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted seven.", usage: { calls: 1 } });
+    expect(s.trace.of("tool_ended").filter((record) => record.event.tool === "todo").map((record) => record.event.endedRun)).toEqual([true]);
+  });
+
   test("a job an agent of another job starts spends from that job's run too: past the first job's limit, the second makes no call", async () => {
     const keeper = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [job_start]\n---\nFixture keeper: you count what you are asked to count.\n";
     const s = (open = await stage({

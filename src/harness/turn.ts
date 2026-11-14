@@ -478,6 +478,8 @@ export class Turn {
         questions: judges,
         gate: this.#gate(this.#lead, undefined),
         channel,
+        // The harness's own word on the release; the request's on whether a reply is owed at all.
+        owed: () => req.owesReply !== false && !this.#desk.released,
         ...this.#keeper(this.#lead),
       });
     const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {

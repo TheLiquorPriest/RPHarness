@@ -1,10 +1,11 @@
 // How a turn ends (§10.7, §10.9, §10.10, §5.4): with no reply released, the shipped reminder is put
-// in front of the lead once, and then the host is told; closing calls do not end the run while a
-// run-end rule is due; the run may go on after the reply; and a stop, from the signal or because
-// the turn left the path, leaves nothing running, even a writer that was still being made.
+// in front of the lead once, and then the host is told; closing calls do not end the run while the
+// reply is still owed, in either form, and end it once the reply is out, or for a run that owes
+// none; the run may go on after the reply; and a stop, from the signal or because the turn left the
+// path, leaves nothing running, even a writer that was still being made.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { RuleFiring } from "../../src/contract";
-import { gate, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
+import { type ChatFixture, gate, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -36,25 +37,85 @@ describe("a turn that would end with no reply", () => {
     expect(firings(s)).toMatchObject([{ rule: "reply-missing", moment: "run-end", action: "follow-up", then: { did: "wrote" } }]);
     expect(s.told.at(-1)).toMatchObject({ kind: "ended", payload: { status: "no-reply", released: false } });
   });
+});
 
-  test("closing calls do not end the run while the reminder is due: it comes after their results, and the reply follows", async () => {
+/** The chat's active path, for `chat_read` to read. */
+const CHAT: ChatFixture[] = [
+  { id: "m1", role: "user", name: "Reader", text: "I ask Wren whether the supply boat came." },
+  { id: "m2", role: "assistant", name: "Wren Hale", text: "The supply boat is two days late, Wren says." },
+];
+
+/** A read the lead marks closing, though it needs its answer. */
+const CLOSING_READ = { call: "chat_read", args: { last: 4, closing: true } };
+
+/** Each tool call's tool, whether it came back clean, and whether it ended the run. */
+function ended(s: Stage): [string, boolean, boolean][] {
+  return s.trace.of("tool_ended").map((record) => [record.event.tool, record.event.clean, record.event.endedRun]);
+}
+
+describe("closing calls while the reply is owed", () => {
+  test("in the tag form, a first call that is one closing read is answered as any call is, and the work goes on to the intent record and the reply; no reminder comes, since the run did not end", async () => {
     const s = (open = await stage({
       drafted: true,
-      answers: [
-        { pieces: [{ text: "<intent>Note it first.</intent>" }, { call: "todo", args: { items: [{ text: "answer about the boat", done: false }], closing: true } }] },
-        { pieces: [{ text: "<reply>No boat, Wren says.</reply>" }] },
-      ],
+      chat: CHAT,
+      answers: [{ pieces: [CLOSING_READ] }, { pieces: [{ text: "<intent>News of the boat.</intent><reply>No boat, Wren says.</reply>" }] }],
     }));
 
     const { outcome, sink } = await s.turn(request("t1"));
 
-    expect(outcome).toMatchObject({ status: "released", reply: "No boat, Wren says." });
+    expect(outcome).toMatchObject({ status: "released", form: "tags", reply: "No boat, Wren says." });
     expect(s.model.requests).toHaveLength(2);
-    expect(s.trace.of("tool_ended").map((record) => [record.event.tool, record.event.clean, record.event.endedRun])).toEqual([["todo", true, true]]);
-    expect(s.model.requests[1]!.messages.slice(-2).map((message) => message.role)).toEqual(["toolResult", "user"]);
-    expect(textOf(s.model.requests[1]!.messages.at(-1)!)).toBe(REMINDER);
+    expect(ended(s)).toEqual([["chat_read", true, false]]);
+    // Its answer went back, and nothing was put after it.
+    expect(s.model.requests[1]!.messages.at(-1)!.role).toBe("toolResult");
     expect(sink.text).toBe("No boat, Wren says.");
-    expect(firings(s)).toMatchObject([{ rule: "reply-missing", then: { did: "released" } }]);
+    expect(firings(s)).toEqual([]);
+    expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
+  });
+
+  test("in the two-step form, a first call that is one closing read is answered, so is the intent record written as a closing call, and the reply follows", async () => {
+    const s = (open = await stage({
+      config: "reply:\n  form: two-step\n",
+      chat: CHAT,
+      answers: [
+        { pieces: [CLOSING_READ] },
+        { pieces: [{ call: "file_write", args: { path: "sessions/s1/turns/t1/scratch/intent.md", op: "write", text: "News of the boat.", closing: true } }] },
+        { pieces: [{ text: "No boat, Wren says." }] },
+      ],
+    }));
+
+    const { outcome } = await s.turn(request("t1", { lead: "lead" }));
+
+    expect(outcome).toMatchObject({ status: "released", form: "message", reply: "No boat, Wren says." });
+    expect(s.model.requests).toHaveLength(3);
+    expect(ended(s)).toEqual([
+      ["chat_read", true, false],
+      ["file_write", true, false],
+    ]);
+    expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
+  });
+
+  test("once the reply is out, the same closing read in the reply's own message ends the run, in either form", async () => {
+    const tagged = (open = await stage({ chat: CHAT, answers: [{ pieces: [{ text: "<reply>No boat, Wren says.</reply>" }, CLOSING_READ] }] }));
+    expect((await tagged.turn(request("t1", { lead: "lead" }))).outcome).toMatchObject({ status: "released", reply: "No boat, Wren says." });
+    expect(tagged.model.requests).toHaveLength(1);
+    expect(ended(tagged)).toEqual([["chat_read", true, true]]);
+    await tagged.close();
+
+    const plain = (open = await stage({ config: "reply:\n  form: two-step\n", chat: CHAT, answers: [{ pieces: [{ text: "No boat, Wren says." }, CLOSING_READ] }] }));
+    expect((await plain.turn(request("t1", { lead: "lead" }))).outcome).toMatchObject({ status: "released", form: "message", reply: "No boat, Wren says." });
+    expect(plain.model.requests).toHaveLength(1);
+    expect(ended(plain)).toEqual([["chat_read", true, true]]);
+  });
+
+  test("a run that owes the player no reply ends on its closing calls", async () => {
+    const s = (open = await stage({ chat: CHAT, answers: [{ pieces: [CLOSING_READ] }] }));
+
+    const { outcome } = await s.turn(request("t1", { lead: "lead", owesReply: false }));
+
+    expect(outcome).toMatchObject({ status: "no-reply", released: false });
+    expect(s.model.requests).toHaveLength(1);
+    expect(ended(s)).toEqual([["chat_read", true, true]]);
   });
 });
 

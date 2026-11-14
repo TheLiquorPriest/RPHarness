@@ -59,6 +59,13 @@ export interface TurnRequest {
    */
   parent?: string | null;
   kind: TurnKind;
+  /**
+   * Whether the run owes the player a reply (§10.7). Absent or true: it does, and until the reply
+   * is released it is due, so the lead's closing calls do not end its run. False for a run that
+   * writes nothing into the chat (one asked for to settle a turn's records, say): its closing calls
+   * end it, as a job's do.
+   */
+  owesReply?: boolean;
   /** Who the reply speaks as, in a group chat (§10.10). */
   speaker?: string;
   /** Which agent definition leads. */

@@ -3,8 +3,9 @@
 // `closing` argument, the call's context, the gate around it (permissions, rules, clipping), and a
 // stop that does not wait on a tool. Per message: the text to the reply as it streams, rules on what
 // is written (stop the call, drop what was not shown, go on), and at the moment the work would end,
-// the rules due then as follow-ups. Every event goes to the run's trace with the agent and the run it
-// belongs to; after a stop, nothing but the agent's end.
+// the rules due then as follow-ups. Closing calls end the work only while nothing else is due: a
+// reply the run still owes the player is. Every event goes to the run's trace with the agent and the
+// run it belongs to; after a stop, nothing but the agent's end.
 //
 // No text reaches a model that did not come from a file or from the request: where pi would answer a
 // call in its own words (a tool it does not know, arguments that do not fit, arguments cut short by
@@ -81,6 +82,12 @@ export interface RunnerOptions {
   gate?: ToolGate;
   /** Where its text goes as it streams, when it writes the reply. */
   channel?: TextChannel;
+  /**
+   * Whether its run still owes the player the reply (§10.7): while it does, the reply is due, so a
+   * closing call does not end the work. Its answer goes back and the next call comes, as for any
+   * other call. Absent: the run owes the player nothing (a sub-agent's, a job's).
+   */
+  owed?(): boolean;
   /** Keeps what its calls are sent, where the user's setting asks for it; none keeps nothing. */
   keep?: KeepRequest;
 }
@@ -534,10 +541,11 @@ export class AgentRunner {
       stint.ended.add(id);
       return { terminate: true };
     }
-    // A closing call that comes back clean needs no further call (§10.7). Whether something is due
-    // at the run's end is asked once the whole batch is in (`#finishTurn`): pi still takes a
-    // follow-up after a batch that ended this way.
-    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result) && !stint.unclean.has(id)) {
+    // A closing call that comes back clean needs no further call (§10.7), when nothing else is due:
+    // while the run still owes the player its reply, the reply is, and the call is answered as any
+    // other is. Whether something is due at the run's end is asked once the whole batch is in
+    // (`#finishTurn`): pi still takes a follow-up after a batch that ended this way.
+    if (isClosing(context.args as JsonValue) && !context.isError && result !== undefined && isClean(result) && !stint.unclean.has(id) && this.#o.owed?.() !== true) {
       stint.ended.add(id);
       return { terminate: true };
     }

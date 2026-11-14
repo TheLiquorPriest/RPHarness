@@ -128,6 +128,10 @@ interface Stint {
   readonly finished: Set<string>;
   /** Rules on the stream that remind after the message. */
   readonly reminders: StreamFired[];
+  /** A carrier's calls (`tool_use`) as they began, by call id: its own arguments, traced only if it carries no tool. */
+  readonly carried: Map<string, { args: JsonValue; closing: boolean }>;
+  /** The tool each carrier's call ran as itself (`runAs`), by the carrier's call id, and its answer as the gate gave it. */
+  readonly ranAs: Map<string, { tool: string; result: LoopToolResult }>;
   asked?: { call: string; question: JsonValue };
   last?: AssistantMessage;
   timer?: unknown;
@@ -146,6 +150,8 @@ export class AgentRunner {
    * as a host's tool that takes the name of one of RPH's own is, for the host to report.
    */
   readonly leftOut: string[] = [];
+  /** Its tools that carry a call of another tool (`LoopTool.carrier`). */
+  readonly #carriers = new Set<string>();
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -158,7 +164,10 @@ export class AgentRunner {
     this.#budget = new Budget("agent", options.limits ?? {});
     for (const tool of options.tools ?? []) {
       if (Object.hasOwn(argumentsOf(tool), CLOSING)) this.leftOut.push(tool.name);
-      else this.#tools.set(tool.name, this.#piTool(tool));
+      else {
+        this.#tools.set(tool.name, this.#piTool(tool));
+        if (tool.carrier === true) this.#carriers.add(tool.name);
+      }
     }
     this.#pi = new Agent({
       initialState: {
@@ -234,6 +243,8 @@ export class AgentRunner {
       ended: new Set(),
       finished: new Set(),
       reminders: [],
+      carried: new Map(),
+      ranAs: new Map(),
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
@@ -398,7 +409,9 @@ export class AgentRunner {
         // After a cut, a call of the stopped message is never run: pi only answers it, and that answer leaves with the message.
         if (stint.halt !== undefined || stint.cut !== undefined) return;
         const args = event.args as JsonValue;
-        this.#emit(stint, { kind: "tool_started", callId: event.toolCallId, tool: event.toolName, args: withoutClosing(args), closing: isClosing(args) });
+        // A carrier's call is traced as the tool it runs (`runAs`); one that runs none is traced as itself when it ends.
+        if (this.#carriers.has(event.toolName)) stint.carried.set(event.toolCallId, { args: withoutClosing(args), closing: isClosing(args) });
+        else this.#emit(stint, { kind: "tool_started", callId: event.toolCallId, tool: event.toolName, args: withoutClosing(args), closing: isClosing(args) });
         return;
       }
       case "tool_execution_end": {
@@ -408,9 +421,14 @@ export class AgentRunner {
         // A result pi made itself (an unknown tool, arguments that did not validate) is pi's AgentToolResult; pi types the event's field loosely.
         const made: AgentToolResult = event.result;
         if (own === undefined) this.#reword(stint, event.toolCallId, event.toolName, made);
-        const result: ToolResult = own !== undefined ? withoutAsk(own) : { content: made.content, ...(event.isError ? { error: true as const } : {}) };
+        const ranAs = stint.ranAs.get(event.toolCallId);
+        const tool = ranAs?.tool ?? event.toolName;
+        // A tool run as itself is traced with its answer as the gate gave it, as a call of the agent's own list is: its reports and the rules' texts went to the model after it.
+        const result: ToolResult = ranAs !== undefined ? withoutAsk(ranAs.result) : own !== undefined ? withoutAsk(own) : { content: made.content, ...(event.isError ? { error: true as const } : {}) };
         const clean = !event.isError && isClean(result) && !stint.ruled.has(event.toolCallId);
-        this.#emit(stint, { kind: "tool_ended", callId: event.toolCallId, tool: event.toolName, result, clean, endedRun: stint.ended.has(event.toolCallId), ms: event.durationMs ?? 0 });
+        const carried = stint.carried.get(event.toolCallId);
+        if (carried !== undefined && ranAs === undefined) this.#emit(stint, { kind: "tool_started", callId: event.toolCallId, tool, args: carried.args, closing: carried.closing });
+        this.#emit(stint, { kind: "tool_ended", callId: event.toolCallId, tool, result, clean, endedRun: stint.ended.has(event.toolCallId), ms: event.durationMs ?? 0 });
         return;
       }
       default:
@@ -585,6 +603,15 @@ export class AgentRunner {
             this.#emit(stint, { kind: "tool_update", callId, tool: tool.name, partial });
           },
         };
+        if (tool.carrier === true) {
+          // The tool it carries runs through `runAs`, gated and ruled on as itself with its lines after its answer; the carrier has no gate of its own.
+          const carried = await untilAborted(this.#run(tool, call, ctx), signal);
+          answered = true;
+          if (carried === undefined) return { content: [], details: undefined };
+          stint.results.set(callId, carried);
+          const reports = stint.ranAs.has(callId) ? [] : (carried.reports ?? []).map((line) => ({ type: "text" as const, text: line }));
+          return { content: [...carried.content, ...reports], details: carried.details, ...(carried.error === true ? { isError: true } : {}) };
+        }
         // pi waits on a tool until it settles; a stop does not. What fails around the tool (a permission
         // or a rule that could not be asked) is answered like a tool that failed, never in pi's words.
         const result = await untilAborted(
@@ -600,6 +627,35 @@ export class AgentRunner {
         return { content: [...result.answer.content, ...after], details: result.answer.details, ...(result.answer.error === true ? { isError: true } : {}) };
       },
     };
+  }
+
+  /**
+   * Runs the tool a carrier's call names (`tool_use`, §6.8) as itself, from inside that call: through
+   * the gate, ruled on and traced under its own name and the carrier's call id, with its reports and
+   * the texts of the rules on it after its answer, as a call of the agent's own list is. Outside a
+   * carrier's call of the work in flight it runs nothing.
+   */
+  async runAs(tool: LoopTool, args: JsonValue, ctx: ToolCtx): Promise<LoopToolResult> {
+    const stint = this.#stint;
+    const carried = stint?.carried.get(ctx.callId);
+    if (stint === undefined || carried === undefined || stint.halt !== undefined) return { content: [] };
+    const callId = ctx.callId;
+    let answered = false;
+    const own: ToolCtx = {
+      ...ctx,
+      onUpdate: (partial) => {
+        if (answered || stint.halt !== undefined) return;
+        this.#emit(stint, { kind: "tool_update", callId, tool: tool.name, partial });
+      },
+    };
+    this.#emit(stint, { kind: "tool_started", callId, tool: tool.name, args, closing: carried.closing, via: "tool_use" });
+    const ran = await this.#gated(stint, tool, { agent: this.agent, callId, tool: tool.name, args }, own).catch((error: unknown) => ({ answer: this.#failed(tool, error), texts: [] }));
+    answered = true;
+    if (ran === undefined) return { content: [] };
+    stint.ranAs.set(callId, { tool: tool.name, result: ran.answer });
+    if (ran.texts.length > 0) stint.ruled.add(callId);
+    const after = [...(ran.answer.reports ?? []), ...ran.texts].map((line) => ({ type: "text" as const, text: line }));
+    return { ...ran.answer, content: [...ran.answer.content, ...after] };
   }
 
   /**

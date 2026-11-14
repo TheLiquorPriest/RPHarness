@@ -10,11 +10,12 @@
 // release), a clipped result, a held call, a rule on a result, a tool that threw, one nobody holds,
 // a write where the player allows none and one the player declined, calls cut short at the length
 // limit, and a changed file's notice; the narrator, as a draft, as a draft it leaves empty, and live;
-// and the two-step form, with a release before any draft and a hand-over to a writer nobody defined.
+// and the two-step form, with a release before any draft, a hand-over to a writer nobody defined, a
+// stretch of the chat read, and a gap check whose evidence is kept in the turn's folder.
 import { afterEach, expect, test } from "bun:test";
 import type { ApprovalsPort, JsonObject, JsonValue, TurnRequest } from "../../src/contract";
 import { chunk } from "../model/support";
-import { CHARACTER, CHAT, PROMPT, request, said, type Stage, stage, type WatchedSink } from "./support";
+import { CHARACTER, CHAT, type ChatFixture, PROMPT, request, said, type Stage, stage, type WatchedSink } from "./support";
 
 const opened: Stage[] = [];
 afterEach(async () => {
@@ -30,6 +31,12 @@ const RULES = {
 };
 
 const TIDES = "Tide table: high water at six, low water at noon, and the spring tide on the fourth night of the storm.";
+
+/** The chat's active path in the two-step turn, for the base tools to read and search. */
+const CHAT_PATH: ChatFixture[] = [
+  { id: "m1", role: "user", name: "Reader", text: "I ask Wren whether the supply boat came." },
+  { id: "m2", role: "assistant", name: "Wren Hale", text: "The supply boat is two days late, Wren says." },
+];
 
 /** One answer of the provider's server: the text and the tool calls it streams, in order, and how it ends when not as the model finished. */
 interface Said {
@@ -192,6 +199,14 @@ async function keptResults(s: Stage): Promise<{ path: string; text: string }[]> 
   return kept;
 }
 
+/** Each gap check kept in a turn's folder: its path as agents see it, and every string of what was searched and what came back. */
+async function keptChecks(s: Stage): Promise<{ path: string; texts: string[] }[]> {
+  const chat = `${s.dir}/files/chats/${CHARACTER}/${CHAT}`;
+  const kept: { path: string; texts: string[] }[] = [];
+  for await (const path of new Bun.Glob("sessions/*/turns/*/queries/*.json").scan({ cwd: chat })) kept.push({ path, texts: strings((await Bun.file(`${chat}/${path}`).json()) as JsonValue) });
+  return kept;
+}
+
 /** What of each request's texts nothing accounts for. */
 function unaccounted(bodies: readonly Record<string, unknown>[], known: string[]): { request: number; left: string }[] {
   const sorted = [...known].sort((a, b) => b.length - a.length);
@@ -289,11 +304,13 @@ test("every text sent to a provider in five whole turns, as the provider receive
         { call: "reply_release", args: {} },
         { call: "write_reply", args: { brief: "Wren shakes her head." } },
         { call: "file_write", args: { path: "sessions/s1/turns/t4/scratch/intent.md", op: "write", text: "Wants: news of the boat." } },
+        { call: "chat_read", args: { last: 2 } },
+        { call: "gap_check", args: { topic: "supply boat", terms: ["Wren"] } },
       ],
     },
     { steps: [{ text: "Wren shakes her head. No boat, not in this sea." }, { call: "todo", args: { items: [], closing: true } }] },
   ];
-  const plainStage = await served(plain, { config: "reply:\n  form: two-step\n" });
+  const plainStage = await served(plain, { config: "reply:\n  form: two-step\n", chat: CHAT_PATH });
   const fourth = request("t4", { lead: "lead" });
   const four = await plainStage.s.turn(fourth);
   expect(four.outcome).toMatchObject({ status: "released", form: "message", reply: "Wren shakes her head. No boat, not in this sea." });
@@ -301,7 +318,7 @@ test("every text sent to a provider in five whole turns, as the provider receive
 
   // Each path was taken, whatever the words the files give it: every call above got an answer of its own, and the fixtures' texts went where they go.
   for (const call of ["call_2_1", "call_2_2", "call_2_3", "call_2_4", "call_2_5", "call_2_6", "call_2_7", "call_2_8", "call_2_9", "call_2_10", "call_2_11", "call_2_12", "call_2_13", "call_2_14", "call_3_1", "call_8_1"]) expect(answerTo(bodies, call)).not.toBe("");
-  for (const call of ["call_1_1", "call_1_2", "call_1_3"]) expect(answerTo(plainStage.bodies, call)).not.toBe("");
+  for (const call of ["call_1_1", "call_1_2", "call_1_3", "call_1_4", "call_1_5"]) expect(answerTo(plainStage.bodies, call)).not.toBe("");
   const all = [...bodies, ...plainStage.bodies].flatMap(sentTexts).join("\n");
   for (const expected of [
     "Fixture rule: the storm is the scene's clock.",
@@ -344,7 +361,11 @@ test("every text sent to a provider in five whole turns, as the provider receive
     tags.push(path, text.slice(0, 90));
   }
   expect(unaccounted(bodies, tags)).toEqual([]);
-  expect(unaccounted(plainStage.bodies, [...(await plainStage.s.files()).flatMap(pieces), ...requestTexts(fourth), ...modelsOwn(plain), ...shown([four.sink]), ...plainStage.bodies.flatMap(declaredNames), ...hostData])).toEqual([]);
+  // The chat the base tools read, as the host keeps it; and each gap check, kept whole in the turn's folder, with where it is kept.
+  const checks = await keptChecks(plainStage.s);
+  expect(checks).toHaveLength(1);
+  const chatData = [...CHAT_PATH.flatMap((message) => [message.id, message.name, message.text]), ...checks.flatMap((check) => [check.path, ...check.texts])];
+  expect(unaccounted(plainStage.bodies, [...(await plainStage.s.files()).flatMap(pieces), ...requestTexts(fourth), ...modelsOwn(plain), ...shown([four.sink]), ...plainStage.bodies.flatMap(declaredNames), ...hostData, ...chatData])).toEqual([]);
 });
 
 test("the check finds a text that came from nowhere", () => {

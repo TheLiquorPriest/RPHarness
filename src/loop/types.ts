@@ -17,6 +17,12 @@ export interface LoopTool {
   run(args: JsonValue, ctx: ToolCtx): Promise<LoopToolResult>;
   /** Runs alone: a message that calls it runs its calls one after another. */
   sequential?: boolean;
+  /**
+   * Carries a call of another tool (`tool_use`): the tool it carries runs through
+   * `AgentRunner.runAs`, gated, ruled on and traced as itself, so the carrier itself is never gated
+   * and is traced only when it ran nothing.
+   */
+  carrier?: boolean;
 }
 
 /** A tool's answer, with what only RPH's own tools may add. */

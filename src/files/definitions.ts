@@ -43,13 +43,14 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
     if (effort === undefined) problems.push(problemAt(at, line("effort"), `\`effort:\` is one of ${EFFORTS.join(", ")}; ${JSON.stringify(h.effort)} is not, so the model's own is used.`));
   }
 
-  const list = (key: "tools" | "reads" | "given", what: string): string[] => {
+  const list = (key: "tools" | "out_of_reach" | "reads" | "given", what: string): string[] => {
     const names = nameList(h[key]);
     if (names !== undefined) return names;
     problems.push(problemAt(at, line(key), `\`${key}:\` is a list of ${what}, \`[a, b]\` or one \`- a\` line each; as written it is left out.`));
     return [];
   };
   const tools = list("tools", "tools by name");
+  const outOfReach = list("out_of_reach", "families of tools a search does not reach");
   const reads = list("reads", "instruction files by name, with `rules` for the always-on rules");
   const given = list("given", "what the agent is handed by name");
 
@@ -82,6 +83,7 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
       tools,
+      outOfReach,
       reads,
       given,
       limits,

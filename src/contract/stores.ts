@@ -1,6 +1,6 @@
 // The host's other stores (§6.8 `archive_search`: databanks, the chat application's memory,
-// summaries) and the searchers `gap_check` runs besides chat and lore (§10.5: state and the story
-// record, for RPE).
+// summaries), the searchers `gap_check` runs besides chat and lore (§10.5: state and the story
+// record, for RPE), and the web searcher (§6.8 `web_search`).
 
 import type { Scope, SearchHit } from "./common";
 
@@ -58,4 +58,18 @@ export interface Searcher {
   name: string;
   /** Searches by the names and words given, and by meaning where the host has that set up. */
   search(scope: Scope, query: GapQuery): Promise<SearchHit[]>;
+}
+
+/** What to look for on the web. */
+export interface WebQuery {
+  /** The words to look for. */
+  text: string;
+  /** At most this many hits; the searcher's own cap when absent. */
+  limit?: number;
+}
+
+/** A web searcher, as a host offers one (§6.8 `web_search`: off until the user sets a provider). */
+export interface WebSearchPort {
+  /** Searches the web by the words given. Each hit's `ref` is the page's address. */
+  search(scope: Scope, query: WebQuery): Promise<SearchHit[]>;
 }

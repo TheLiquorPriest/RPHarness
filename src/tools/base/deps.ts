@@ -2,30 +2,13 @@
 // answer in: the lines of the prompt part `base-tools`, read through the turn's guidance when a tool
 // is called. Each tool's description and its arguments' are its own file in `.tools/`, read by the
 // harness with its other tools' files (`BASE_TOOLS`).
-import type { Environment, JsonValue, Scope, SearchHit } from "../../contract";
+import type { Environment, JsonValue, WebSearchPort } from "../../contract";
 import type { Guidance } from "../../files/api";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, type ToolText, type Words } from "../kit";
 
 /** The prompt part that holds every line these tools answer with (`.prompts/base-tools.md`). */
 export const BASE_PART = "base-tools";
-
-/** What to look for on the web. */
-export interface WebQuery {
-  /** The words to look for. */
-  text: string;
-  /** At most this many hits; the searcher's own cap when absent. */
-  limit?: number;
-}
-
-/**
- * A web searcher, as a host offers one (§6.8 `web_search`: off until the user sets a provider).
- * The contract does not carry it yet, so the harness passes the host's to `baseTools`.
- */
-export interface WebSearchPort {
-  /** Searches the web by the words given. Each hit's `ref` is the page's address. */
-  search(scope: Scope, query: WebQuery): Promise<SearchHit[]>;
-}
 
 /** What the base tools are made with. */
 export interface BaseToolsDeps {

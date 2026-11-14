@@ -24,6 +24,8 @@
 //     silence: 60                      seconds of nothing shown before that line
 //   results:
 //     clip: 12000                      characters of a tool's result the model reads; the rest is kept in a file
+//   tools:
+//     search: 8                        tools one tool_search gives when the agent names no limit
 //   rules:
 //     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
 //                                      written, and stretches of a tool's arguments or result
@@ -31,6 +33,7 @@
 import type { FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
 import { REPLY_DEFAULTS } from "../reply/defaults";
+import { SEARCH_HITS } from "../tools/search";
 
 export type ReplyFormSetting = "tags" | "two-step";
 
@@ -57,6 +60,8 @@ export interface Settings {
   progress: "all" | "least";
   silenceMs: number;
   clipChars: number;
+  /** Tools one `tool_search` gives when the agent names no limit. */
+  searchHits: number;
   /** Characters a rule's pattern looks at at a time. */
   ruleWindow: number;
 }
@@ -80,6 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
   silenceMs: REPLY_DEFAULTS.silenceMs,
   // A long message of a story, or a lore entry, runs from 6,000 to 12,000 characters, and an agent should read one in one go.
   clipChars: 12_000,
+  // Tool search's own (`SEARCH_HITS`): a handful an agent reads at a glance.
+  searchHits: SEARCH_HITS,
   // Wide enough for any phrase a rule looks for, with room to spare; narrow enough that a pattern of
   // the kinds the rules let in takes at most some tens of milliseconds on it.
   ruleWindow: 500,
@@ -194,6 +201,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const progress = section("progress");
   const silence = count("progress.silence", progress["silence"]);
   const results = section("results");
+  const tools = section("tools");
   const rules = section("rules");
 
   return {
@@ -213,6 +221,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     progress: oneOf<"all" | "least">("progress.show", progress["show"], ["all", "least"]) ?? DEFAULT_SETTINGS.progress,
     silenceMs: silence !== undefined ? silence * 1000 : DEFAULT_SETTINGS.silenceMs,
     clipChars: count("results.clip", results["clip"]) ?? DEFAULT_SETTINGS.clipChars,
+    searchHits: count("tools.search", tools["search"]) ?? DEFAULT_SETTINGS.searchHits,
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
   };
 }

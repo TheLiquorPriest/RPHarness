@@ -6,7 +6,8 @@
 // when its template says so.
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import type { TurnRequest } from "../../src/contract";
+import { loadGuidance, SHIPPED_GUIDANCE } from "../../src/index";
 import { briefingAround, CONTRACT_MARK, contractFor, gate, PROMPT, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
@@ -140,6 +141,30 @@ describe("where the reply contract is shown", () => {
     expect(briefing).not.toBe("");
     expect(briefing).not.toContain(contract);
   });
+
+  test("in the two-step form, where the lead writes its intent record to a file itself, the briefing gives that file's whole path; in the tag form it does not", async () => {
+    /** The whole path of the intent record's file in a stage's turn: the turn's folder, and the file the reply contract's header names. */
+    const intentPath = async (s: Stage, scope: TurnRequest["scope"]): Promise<string> => {
+      const contract = await loadGuidance(s.env.files, scope).part("reply-contract");
+      const file = contract?.format === "template" ? contract.header["intent_file"] : undefined;
+      const turn = (await s.env.files.places(scope)).turn;
+      if (typeof file !== "string" || turn === undefined) throw new Error("The shipped reply contract names no intent file, or the turn has no folder.");
+      return `${turn}${file}`;
+    };
+    const twoStep = (open = await stage({ config: "reply:\n  form: two-step\n", answers: [{ pieces: [{ text: "No boat tonight." }] }] }));
+    const first = request("t1", { lead: "lead" });
+    await twoStep.turn(first);
+    const whole = await intentPath(twoStep, first.scope);
+    expect(textOf(twoStep.model.requests[0]!.messages.at(-1)!)).toContain(whole);
+    await twoStep.close();
+
+    const tags = (open = await stage({ answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }] }));
+    const second = request("t1", { lead: "lead" });
+    await tags.turn(second);
+    const briefing = textOf(tags.model.requests[0]!.messages.at(-1)!);
+    expect(briefing).toContain((await tags.env.files.places(second.scope)).turn ?? "no turn folder");
+    expect(briefing).not.toContain(await intentPath(tags, second.scope));
+  });
 });
 
 describe("a rule on what the lead writes", () => {
@@ -170,9 +195,11 @@ describe("the lead's tools", () => {
 
     expect(outcome.status).toBe("released");
     const declared = s.model.requests[0]!.tools.map((tool) => tool.name).sort();
-    expect(declared).toEqual(["agent_message", "delegate", "file_find", "file_read", "file_write", "reply_release", "todo", "world_query", "write_reply"]);
+    expect(declared).toEqual(["agent_message", "chat_read", "chat_search", "delegate", "file_find", "file_read", "file_write", "gap_check", "lore_read", "lore_search", "reply_release", "skill_load", "suggest", "todo", "tool_search", "tool_use", "world_query", "write_reply"]);
     const reported = s.logged.find((line) => line.level === "warn" && line.message.startsWith("Tools the lead's definition lists are registered by nobody"));
-    expect(reported?.fields?.["tools"]).toContain("chat_read");
+    expect(reported?.fields?.["tools"]).toContain("roll");
+    // The folder host has no other stores and no web searcher, so nobody registers the searches of them.
+    expect(reported?.fields?.["tools"]).toEqual(expect.arrayContaining(["archive_search", "web_search"]));
     expect(reported?.fields?.["tools"]).not.toContain("delegate");
     expect(reported?.fields?.["tools"]).not.toContain("world_query");
   });

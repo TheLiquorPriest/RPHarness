@@ -113,7 +113,7 @@ export interface Template {
 // ---------------------------------------------------------------- agent definitions
 
 /** The header fields of an agent definition. Anything else in its header is reported. */
-export const DEFINITION_FIELDS = ["name", "description", "model", "effort", "tools", "reads", "given", "limits"] as const;
+export const DEFINITION_FIELDS = ["name", "description", "model", "effort", "tools", "out_of_reach", "reads", "given", "limits"] as const;
 
 /** An agent's own limits from its definition (§10.11). Each absent is no limit of the definition's. */
 export interface DefinitionLimits {
@@ -134,6 +134,8 @@ export interface AgentDefinition {
   effort?: Effort;
   /** The tools it holds, by name, as written. */
   tools: string[];
+  /** Families of tools it does not reach by searching (`out_of_reach:`, §6.8); a tool of one that `tools` names it still holds. */
+  outOfReach: string[];
   /** The instruction files of its stack, in order; `rules` stands for the always-on rules it is named in. */
   reads: string[];
   /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */

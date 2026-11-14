@@ -1,6 +1,6 @@
 // The tool registry (§6.8, §13.1): RPH's own tools and the host's, by name. An agent holds exactly
 // the tools its definition lists; a name nobody registered is left out and reported, never an error.
-import type { HostTool, ToolTier } from "../contract";
+import type { HostTool, Switchable, ToolTier } from "../contract";
 import type { LoopTool } from "../loop/types";
 import type { OwnTool } from "./kit";
 
@@ -11,6 +11,8 @@ export interface HeldTool extends LoopTool {
   lane?: string;
   /** RPH's own, or the host's. */
   from: "rph" | "host";
+  /** For a tool that runs a command or calls out (an MCP server's tool, a command tool, an HTTP tool): what it runs or calls, which the host's switches must have on. */
+  switchable?: Switchable;
 }
 
 export interface Held {
@@ -40,6 +42,11 @@ export class Registry {
   /** Whether a tool answers to the name. */
   has(name: string): boolean {
     return this.#tools.has(name);
+  }
+
+  /** Every tool registered, RPH's own first: everything an agent may reach by searching (§6.8). */
+  all(): HeldTool[] {
+    return [...this.#tools.values()];
   }
 
   /** The tools an agent whose definition lists `names` holds, each once. */

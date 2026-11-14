@@ -17,6 +17,8 @@ export interface Opening {
   /** The tools its definition listed, and what it was given: the front of the cached prompt, fixed for the session (§6.8). */
   tools: string[];
   given: string[];
+  /** The families of tools its definition kept out of a search's reach, which hold for the session as its tools do (§6.8). */
+  outOfReach: string[];
   /** How `closing` was described in every tool's declaration. */
   closing?: string;
   /** The form its reply takes, whether a two-step reply streams anyway, and what the contract it was told names. */

@@ -14,14 +14,16 @@
 // `briefing`).
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_TOOLS, agentMessage, askAuthor, delegate, Team, type TeamWork } from "../agents";
-import type { AgentRef, Environment, ModelsApi, Places, PromptNotice, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
+import type { AgentRef, Environment, JsonValue, ModelsApi, Places, PromptNotice, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
-import { type AgentOutcome, AgentRunner, Budget, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
+import { type AgentOutcome, AgentRunner, Budget, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SilentReply } from "../reply/silent";
-import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type HeldTool, type OwnTool, Registry, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
+import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
+import { BASE_TOOLS, baseTools } from "../tools/base";
+import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { TurnGate } from "./gate";
 import type { LiveHub } from "./live";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
@@ -29,8 +31,8 @@ import type { Opening, Sessions } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`; the sub-agents' among them. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS] as const;
+/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools and tool search among them. */
+const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS] as const;
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
@@ -253,7 +255,7 @@ export class Turn {
       models: this.#c.models,
       connection: (definition) => this.#connection(definition),
       hold: (names) => this.#registry?.hold(names) ?? { tools: [], missing: [...names] },
-      gate: (agent, parent, tools) => this.#gate(agent, parent, tools),
+      gate: (agent, parent) => this.#gate(agent, parent),
       texts: () => this.#texts,
       rules: () => this.#rulesRun(),
       budget: () => this.#budget,
@@ -265,7 +267,7 @@ export class Turn {
       gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
       progress: (name, fields) => this.#say(name, fields),
     });
-    const registry = new Registry(this.#ownTools(ownTexts, team), await env.tools.all(scope));
+    const registry = new Registry(this.#ownTools(ownTexts, team, guidance), await env.tools.all(scope));
     this.#registry = registry;
     if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
 
@@ -363,7 +365,7 @@ export class Turn {
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,
-      gate: this.#gate(this.#lead, undefined, held.tools),
+      gate: this.#gate(this.#lead, undefined),
       channel,
     });
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
@@ -413,6 +415,7 @@ export class Turn {
       snapshot: snapshot(stack),
       tools: [...definition.tools],
       given: [...definition.given],
+      outOfReach: [...definition.outOfReach],
       ...(closingText !== undefined && closingText !== "" ? { closing: closingText } : {}),
       form,
       stream,
@@ -460,6 +463,8 @@ export class Turn {
       ...(noticesText.length > 0 ? { prompt_notices: noticesText.join("\n") } : {}),
       ...(req.briefing.length > 0 ? { blocks: req.briefing.map((part) => ({ name: part.name, text: part.text })) } : {}),
       ...(places.turn !== undefined ? { turn_files: places.turn } : {}),
+      // Where the lead writes its intent record itself, whole: in the tag form the record goes in its tag, and this turn's file is the harness's to write.
+      ...(opening.form === "two-step" && opening.intentFile !== undefined && places.turn !== undefined ? { intent_path: `${places.turn}${opening.intentFile}` } : {}),
       // The reply contract again, exactly as the opening block holds it: the template decides whether and where.
       ...(opening.contract !== undefined ? { reply_contract: opening.contract } : {}),
     };
@@ -502,7 +507,7 @@ export class Turn {
     };
   }
 
-  #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork): OwnTool[] {
+  #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {
     const { env } = this.#c;
     const fileDeps: FileToolsDeps = { files: env.files, words: (name, fields) => this.#words(name, fields), texts, written: (_scope, by, done) => this.#written(by, done.path) };
     const work: ReplyWork = { write: (brief, live, ctx) => this.#write(brief, live, ctx), release: (path, ctx) => this.#releaseReply(path, ctx) };
@@ -516,10 +521,37 @@ export class Turn {
       delegate(team, texts.get("delegate")),
       askAuthor(team, texts.get("ask_author")),
       agentMessage(team, texts.get("agent_message")),
+      ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), ...(env.web !== undefined ? { web: env.web } : {}) }),
+      ...searchTools({
+        reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
+        ...(env.switches !== undefined ? { switches: env.switches } : {}),
+        guidance,
+        notices: (name, fields) => this.#words(name, fields),
+        texts,
+        hits: this.#settings.searchHits,
+        // `tool_use` carries the call of the tool it found, which the agent's runner runs as itself.
+      }).map((tool) => (tool.name === TOOL_USE ? { ...tool, carrier: true } : tool)),
     ];
   }
 
-  #gate(agent: AgentRef, parent: ParentCall | undefined, tools: readonly HeldTool[]): TurnGate {
+  /** What an agent may reach by searching (§6.8): every tool registered, the tools its requests carry, and the families its definition keeps out of reach; the lead's as its opening block fixed them for the session. */
+  async #reach(agent: AgentRef): Promise<AgentReach> {
+    const tools = this.#registry?.all() ?? [];
+    const opening = this.#opening;
+    if (agent.id === this.#lead.id && opening !== undefined) return { tools, fixed: opening.tools, outOfReach: opening.outOfReach };
+    const definition = await this.#guidance?.definition(agent.definition);
+    return { tools, fixed: definition?.tools ?? [], outOfReach: definition?.outOfReach ?? [] };
+  }
+
+  /** A tool found by `tool_use`, run as itself by the runner of the agent whose call carries it. */
+  #runAs(tool: LoopTool, args: JsonValue, ctx: ToolCtx): Promise<LoopToolResult> {
+    for (const { runner } of this.#working) if (runner.agent.id === ctx.agent.id) return runner.runAs(tool, args, ctx);
+    // Every agent's work is tracked from its start, before it can call anything: a call from any other runs nothing.
+    this.#c.env.log.error("A tool found by tool_use was called by an agent the turn has no work of.", { agent: ctx.agent.id, tool: tool.name });
+    return Promise.resolve({ content: [], error: true });
+  }
+
+  #gate(agent: AgentRef, parent: ParentCall | undefined): TurnGate {
     const { env } = this.#c;
     return new TurnGate({
       scope: this.scope,
@@ -532,7 +564,8 @@ export class Turn {
       places: this.#places ?? { notes: "", session: "", writable: [] },
       rules: this.#rulesRun(),
       words: (name, fields) => this.#words(name, fields),
-      tools: new Map(tools.map((tool) => [tool.name, tool])),
+      // Every tool the agent may reach, so a tool found by `tool_use` is permitted and ruled on by its own tier and lane.
+      tools: new Map((this.#registry?.all() ?? []).map((tool) => [tool.name, tool])),
       clipChars: this.#settings.clipChars,
       ready: async () => {
         await Promise.allSettled(this.#intents);
@@ -660,7 +693,7 @@ export class Turn {
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,
-      gate: this.#gate(ref, parent, held.tools),
+      gate: this.#gate(ref, parent),
       channel,
     });
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: writer, tools: runner.leftOut });

@@ -10,7 +10,9 @@ import { loreRead, loreSearch } from "./lore";
 import { skillLoad, suggest } from "./other";
 import { archiveSearch, webSearch } from "./searches";
 
-export { BASE_PART, type BaseToolsDeps, type WebQuery, type WebSearchPort } from "./deps";
+// The contract carries the web searcher; the base tools' own tests name it from here.
+export type { WebSearchPort } from "../../contract";
+export { BASE_PART, type BaseToolsDeps } from "./deps";
 export { GAP_HITS } from "./gap";
 
 /** The names of these tools, whose files the harness reads with its other tools' (`.tools/<name>.md`). */

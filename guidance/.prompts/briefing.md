@@ -1,5 +1,5 @@
 ---
-description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. Take a part out and it is no longer shown. Its last part is the reply contract again, exactly as the opening block holds it, so it is the last thing read before the reply is written; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing.
+description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. Take a part out and it is no longer shown. Its last part is the reply contract again, exactly as the opening block holds it, so it is the last thing read before the reply is written, with this turn's folder and, where the lead writes its intent record to a file itself, that file's whole path; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing.
 ---
 # Briefing for this turn
 
@@ -64,4 +64,7 @@ This turn's files are in {{turn_files}}
 
 This turn's folder: `{{turn_files}}`
 {{/turn_files}}
+{{#intent_path}}
+This turn's intent file: `{{intent_path}}`
+{{/intent_path}}
 {{/reply_contract}}

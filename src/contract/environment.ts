@@ -14,7 +14,7 @@ import type { LorePort } from "./lore";
 import type { ModelsPort } from "./models";
 import type { PromptPort } from "./prompt";
 import type { StorePort } from "./store";
-import type { Searcher, StoresPort } from "./stores";
+import type { Searcher, StoresPort, WebSearchPort } from "./stores";
 import type { SwitchesPort } from "./switches";
 import type { ToolsPort } from "./tools";
 import type { TracePort } from "./trace";
@@ -38,6 +38,8 @@ export interface Environment {
   tools: ToolsPort;
   /** What `gap_check` searches besides chat and lore; none is a fine answer. */
   searchers: Searcher[];
+  /** The web searcher `web_search` goes through, once the user has set one up; without it there is no `web_search`. */
+  web?: WebSearchPort;
   /** Named facts of the moment that rules may test and the briefing may show. */
   facts: FactsPort;
   /** Where the model layer's connections and secrets are kept. */

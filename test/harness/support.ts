@@ -8,7 +8,7 @@
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ApprovalsPort, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, ToolResult, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage } from "../../src/contract";
+import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, StoresPort, ToolResult, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { createHarness, SHIPPED_GUIDANCE } from "../../src/index";
@@ -106,6 +106,14 @@ export interface HostToolFixture {
   run: ToolHandler;
 }
 
+/** A message of the chat's active path, as the folder host keeps it. */
+export interface ChatFixture {
+  id: string;
+  role: ChatRole;
+  name: string;
+  text: string;
+}
+
 export interface StageOptions {
   /** Lay the drafted guidance over RPH's own files, as RPE's shipped files would be. */
   drafted?: boolean;
@@ -125,6 +133,12 @@ export interface StageOptions {
   filesPort?: (inner: FilesPort) => FilesPort;
   /** Each time an agent's model is asked for, by its count from 1: a test can hold the answer back. */
   modelAsked?: (count: number) => void | Promise<void>;
+  /** The chat's active path, oldest first; none when absent. */
+  chat?: ChatFixture[];
+  /** The host's other stores; it has none when absent. */
+  stores?: StoresPort;
+  /** The host's web searcher; it offers none when absent. */
+  web?: WebSearchPort;
 }
 
 export interface Stage {
@@ -182,6 +196,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   const records = join(dir, "host", "chats", CHAT);
   await mkdir(records, { recursive: true });
   await writeFile(join(records, "chat.json"), JSON.stringify({ character: CHARACTER, preset: { id: "fixture-preset", name: "Fixture preset" } }));
+  if (options.chat !== undefined) await writeFile(join(records, "messages.jsonl"), options.chat.map((message) => JSON.stringify(message)).join("\n"));
   await writeFile(join(dir, "host", "facts.json"), JSON.stringify({ defs: [], values: {} }));
   const handlers: Record<string, ToolHandler> = {};
   const manifest = Object.entries(options.tools ?? {}).map(([name, tool]) => {
@@ -215,7 +230,15 @@ export async function stage(options: StageOptions): Promise<Stage> {
   };
   const events = recorded(options.events !== undefined ? options.events(host.events) : host.events);
   const trace = new WatchedTrace();
-  const env: Environment = { ...host, files: options.filesPort?.(host.files) ?? host.files, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
+  const env: Environment = {
+    ...host,
+    files: options.filesPort?.(host.files) ?? host.files,
+    events,
+    trace,
+    ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
+    ...(options.stores !== undefined ? { stores: options.stores } : {}),
+    ...(options.web !== undefined ? { web: options.web } : {}),
+  };
   const model = scriptedModel(options.answers, { clock, contextWindow: 64_000, maxTokens: 4_000 });
   let next = 0;
   let asked = 0;

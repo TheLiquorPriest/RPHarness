@@ -1,10 +1,10 @@
 // `archive_search` and `web_search` (§6.8): searches of what the host keeps besides the chat and the
 // lore (databanks, the chat application's memory, summaries), and of the web. Each is made only
 // when the host offers a searcher for it, so an agent never holds a tool that has nothing behind it.
-import type { SearchHit, StoresPort } from "../../contract";
+import type { SearchHit, StoresPort, WebSearchPort } from "../../contract";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
-import { type BaseToolsDeps, linesAnswer, shown, textsOf, type WebSearchPort, wordsOf } from "./deps";
+import { type BaseToolsDeps, linesAnswer, shown, textsOf, wordsOf } from "./deps";
 
 /** Hits, one line each by `line`, or the line for none. */
 function hitsAnswer(words: Words, line: string, hits: readonly SearchHit[]): LoopToolResult {

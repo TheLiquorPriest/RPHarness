@@ -56,6 +56,18 @@ describe("a model pi's catalogue doesn't list", () => {
     expect(agent.limits).toEqual({ contextWindow: null, maxTokens: null });
   });
 
+  test("with no longest reply known and no room asked, a call on an OpenAI-style API sends no cap at all, so the provider's own default stands; a room asked is sent", async () => {
+    r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
+    const saved = await r.layer.api.save({ name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, KEY);
+    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const ask: Message[] = [{ role: "user", content: "Ready?", timestamp: 1 }];
+    await call(agent, ask);
+    await call(agent, ask, { maxTokens: 300 });
+    const [uncapped, capped] = r.sent.map((s) => bodyOf(s));
+    expect(Object.keys(uncapped ?? {}).filter((k) => k.startsWith("max_"))).toEqual([]);
+    expect(capped?.max_tokens).toBe(300);
+  });
+
   test("takes what the user entered for it", async () => {
     r = rig();
     const saved = await r.layer.api.save({ name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", limits: { "deepseek-v4-flash": { contextWindow: 1_000_000, maxTokens: 384_000 } } }, KEY);

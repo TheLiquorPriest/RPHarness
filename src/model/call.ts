@@ -172,11 +172,13 @@ interface PayloadChanges {
   providerDefault: boolean;
   thinking: boolean;
   extras: JsonObject | undefined;
+  /** Nobody knows how long a reply the model can write and the call asked for no room: the cap pi-ai fills in on its own (one token, for a model with no limit) is taken out, so the provider's own default stands. */
+  uncapped: boolean;
 }
 
 function changePayload(api: string, payload: unknown, changes: PayloadChanges): unknown {
   if (!isRecord(payload)) return undefined;
-  const { sampling, serial, providerDefault, thinking, extras } = changes;
+  const { sampling, serial, providerDefault, thinking, extras, uncapped } = changes;
   const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
   switch (api) {
     case "anthropic-messages":
@@ -187,6 +189,7 @@ function changePayload(api: string, payload: unknown, changes: PayloadChanges): 
       break;
     case "openai-completions":
     case "openai-responses":
+      if (uncapped) for (const cap of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) delete payload[cap];
       if (serial && hasTools) payload.parallel_tool_calls = false;
       if (api === "openai-completions" && extras !== undefined) for (const [k, v] of Object.entries(extras)) if (!(k in payload)) payload[k] = v;
       break;
@@ -194,10 +197,12 @@ function changePayload(api: string, payload: unknown, changes: PayloadChanges): 
       const config = isRecord(payload.config) ? payload.config : {};
       setAll(config, sampling, { top_p: "topP", top_k: "topK", seed: "seed", stop: "stopSequences" });
       if (providerDefault) delete config.thinkingConfig;
+      if (uncapped) delete config.maxOutputTokens;
       payload.config = config;
       break;
     }
     case "mistral-conversations":
+      if (uncapped) delete payload.maxTokens;
       setAll(payload, sampling, { top_p: "topP", seed: "randomSeed", stop: "stop", frequency_penalty: "frequencyPenalty", presence_penalty: "presencePenalty" });
       if (serial && hasTools) payload.parallelToolCalls = false;
       break;
@@ -366,7 +371,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const { temperature, ...rest } = taken;
     const messages = inPlace(context.messages, keepsSystemInPlace(model), deps.markNote);
     // Under the provider's own default its model may think, so what thinking refuses is left out then too.
-    const changes: PayloadChanges = { sampling: openAI ? {} : rest, serial: ask.serialTools, providerDefault: leftToProvider, thinking: reasoning !== undefined || leftToProvider, extras: ask.extras };
+    const changes: PayloadChanges = { sampling: openAI ? {} : rest, serial: ask.serialTools, providerDefault: leftToProvider, thinking: reasoning !== undefined || leftToProvider, extras: ask.extras, uncapped: room === undefined };
     const silentFor = await deps.silentMs();
     const watching = silenceWatch(deps, silentFor, () => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${deps.silentSetting()} says how long an answer may go silent.`)));
     watch = watching;

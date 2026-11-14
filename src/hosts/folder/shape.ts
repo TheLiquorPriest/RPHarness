@@ -386,10 +386,17 @@ export function journalLine(where: string, value: unknown): JournalLine {
   const agent = object(where, v.agent, "agent");
   const parent = optionalText(where, agent.parent, "agent.parent");
   const job = optionalText(where, agent.job, "agent.job");
+  const plays = optionalText(where, agent.plays, "agent.plays");
   if (v.before !== null && typeof v.before !== "string") throw new ShapeError(where, `"before" must be text or null`);
   if (v.after !== null && typeof v.after !== "string") throw new ShapeError(where, `"after" must be text or null`);
   return {
-    agent: { id: text(where, agent.id, "agent.id"), definition: text(where, agent.definition, "agent.definition"), ...(parent !== undefined ? { parent } : {}), ...(job !== undefined ? { job } : {}) },
+    agent: {
+      id: text(where, agent.id, "agent.id"),
+      definition: text(where, agent.definition, "agent.definition"),
+      ...(parent !== undefined ? { parent } : {}),
+      ...(job !== undefined ? { job } : {}),
+      ...(plays !== undefined ? { plays } : {}),
+    },
     path: text(where, v.path, "path"),
     before: v.before,
     after: v.after,

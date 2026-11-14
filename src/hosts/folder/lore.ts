@@ -1,15 +1,33 @@
 // The folder host's lore (§9.4) over a folder of entries: `host/lore/*.json`, one entry per file,
 // every entry part of every chat's lore. What activated for a turn is what the prompt given for it
 // says (`prompt.json`'s `activated`).
+//
+// Who may read an entry is what its `knowing` says (§9.4). In the folder host a character's id is
+// its name, so a reader that plays a character reads an entry known by named characters when its
+// name is among them. The folder host keeps no secret parts inside an entry's text (§9.6), so
+// it has none to leave out.
 
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { LoreEntry, LoreHit, LorePort } from "../../contract/index";
+import type { AgentRef, LoreEntry, LoreHit, LorePort } from "../../contract/index";
 import { codeOf, readJson } from "./disk";
 import { readGiven } from "./prompt";
 import { loreEntry } from "./shape";
 import type { Site } from "./site";
 import { match, SEARCH_LIMIT, snippetOf, termsOf } from "./words";
+
+/** Whether `reader` may read `entry`: every entry for a reader that plays no character; else what anyone may know, what its character is named for, and what is behind a gate that holds. */
+function mayRead(entry: LoreEntry, reader: AgentRef): boolean {
+  if (reader.plays === undefined || entry.knowing === undefined) return true;
+  switch (entry.knowing.by) {
+    case "anyone":
+      return true;
+    case "characters":
+      return entry.knowing.names.includes(reader.plays);
+    case "gate":
+      return entry.knowing.open;
+  }
+}
 
 export function folderLore(site: Site): LorePort {
   const folder = join(site.host, "lore");
@@ -37,20 +55,19 @@ export function folderLore(site: Site): LorePort {
   }
 
   return {
-    async read(scope, ids) {
+    async read(scope, ids, reader) {
       site.check(scope);
-      const all = await entries();
-      const byId = new Map(all.map((e) => [e.id, e]));
+      const byId = new Map((await entries()).filter((e) => mayRead(e, reader)).map((e) => [e.id, e]));
       return ids.flatMap((id) => byId.get(id) ?? []);
     },
 
-    async search(scope, query) {
+    async search(scope, query, reader) {
       site.check(scope);
       const terms = termsOf(query.text);
       if (terms.length === 0) return [];
       const found: { hit: LoreHit; score: number; order: number }[] = [];
       for (const [order, e] of (await entries()).entries()) {
-        if (query.sources !== undefined && !query.sources.includes(e.source)) continue;
+        if (!mayRead(e, reader) || (query.sources !== undefined && !query.sources.includes(e.source))) continue;
         // Title and keys count as much as the text: a word found in any of them counts once.
         const inText = match(e.text, terms);
         const score = terms.filter((t) => e.title.toLowerCase().includes(t) || e.keys.some((k) => k.toLowerCase().includes(t)) || e.text.toLowerCase().includes(t)).length;

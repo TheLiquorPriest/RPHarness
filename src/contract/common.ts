@@ -27,7 +27,7 @@ export interface Scope {
   turn?: string;
 }
 
-/** One agent of a run, as RPH names it to the host: for the record of who wrote what, and for dropping one agent's staged writes. */
+/** One agent of a run, as RPH names it to the host: for the record of who wrote what, for dropping one agent's staged writes, and for who reads lore. */
 export interface AgentRef {
   /** The agent's handle, unique within its run (a turn, a job or a talk). The lead continues a sub-agent by it (§13.4). */
   id: string;
@@ -37,6 +37,12 @@ export interface AgentRef {
   parent?: string;
   /** The job it runs in, when it runs in one. */
   job?: string;
+  /**
+   * The character it plays, by the host's id for that character, when it plays one (a character's
+   * agent, §13.4), as the agent that started it said. Absent for an agent that plays none (the lead,
+   * the GM). A host that keeps who may know a lore entry reads by it (`LorePort`, §9.4).
+   */
+  plays?: string;
 }
 
 /**

@@ -2,7 +2,7 @@
 // read in full, searched, and what activated for this turn's prompt (§9.2). RPH's `lore_read` and
 // `lore_search` work over it; who may know an entry travels with it as data (§9.4).
 
-import type { Scope } from "./common";
+import type { AgentRef, Scope } from "./common";
 
 /**
  * Who may know an entry, as its source keeps it (§9.4): anyone; the named characters; or whoever
@@ -72,11 +72,17 @@ export interface LoreHit {
   how: "words" | "meaning";
 }
 
+/**
+ * Lore, as a reader may read it (§9.4). A reader that plays no character (`AgentRef.plays` absent:
+ * the lead, the GM) reads every entry, each marked with who may know it. A reader that plays a
+ * character, where the host keeps who may know an entry, is given only what that character may know:
+ * an entry it may not know is left out of a read and found by no search, as if the host had none.
+ */
 export interface LorePort {
-  /** The entries asked for, in full and in the order asked. An id the host does not know is left out. */
-  read(scope: Scope, ids: string[]): Promise<LoreEntry[]>;
-  /** Searches every source attached to the chat (§9.4). */
-  search(scope: Scope, query: LoreQuery): Promise<LoreHit[]>;
+  /** The entries asked for, in full and in the order asked, as `reader` may read them. An id the host does not know is left out. */
+  read(scope: Scope, ids: string[], reader: AgentRef): Promise<LoreEntry[]>;
+  /** Searches every source attached to the chat (§9.4) for what `reader` may read. */
+  search(scope: Scope, query: LoreQuery, reader: AgentRef): Promise<LoreHit[]>;
   /** The entries that activated for the prompt of `scope.turn` (§4.2); none when the scope names no turn. */
   activated(scope: Scope): Promise<ActivatedLore[]>;
 }

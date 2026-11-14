@@ -142,6 +142,27 @@ describe("folder host", () => {
     expect(anywhere).toEqual([]);
   });
 
+  test("lore is read as its reader may know it: a character reads what anyone may know, what it is named for, and what is behind a gate that holds", async () => {
+    const entry = (id: string, title: string, gate: string, open: boolean) =>
+      JSON.stringify({ id, source: "Kit World", title, keys: [], text: `${title}, of the lighthouse.`, knowing: { by: "gate", gate, open } });
+    await writeFile(join(place, "host", "lore", "w-8.json"), entry("w-8", "The Sealed Vault", "the key is found", false));
+    await writeFile(join(place, "host", "lore", "w-9.json"), entry("w-9", "The Open Stair", "the door is opened", true));
+    const lead: AgentRef = { id: "kit-lead", definition: "author" };
+    const wren: AgentRef = { id: "kit-wren", definition: "character", parent: "kit-lead", plays: "Wren Alder" };
+    const tamsin: AgentRef = { id: "kit-tamsin", definition: "character", parent: "kit-lead", plays: "Tamsin" };
+    const ids = ["e-101", "w-7", "w-8", "w-9"];
+    const read = async (reader: AgentRef) => (await host.lore.read(scope, ids, reader)).map((e) => e.id);
+    const found = async (text: string, reader: AgentRef) => (await host.lore.search(scope, { text }, reader)).map((h) => h.id);
+
+    expect(await read(lead)).toEqual(ids);
+    expect(await read(wren)).toEqual(["e-101", "w-7", "w-9"]);
+    expect(await read(tamsin)).toEqual(["e-101", "w-9"]);
+    expect(await found("bronze", wren)).toEqual(["w-7"]);
+    expect(await found("bronze", tamsin)).toEqual([]);
+    expect(await found("vault", lead)).toEqual(["w-8"]);
+    expect(await found("vault", wren)).toEqual([]);
+  });
+
   test("a prompt given for a turn is what its layout and its activated lore come from; where slices were found is kept", async () => {
     const turn = { ...scope, turn: "kit-turn-9" };
     await expect(host.prompt.layout(turn)).rejects.toThrow("no prompt");

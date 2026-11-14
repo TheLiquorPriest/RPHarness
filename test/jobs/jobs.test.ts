@@ -142,6 +142,57 @@ describe("a job an agent starts", () => {
     expect(second).toMatchObject({ usage: { calls: 0 }, limit: { limit: "calls", per: "job", max: 1, value: 1 } });
     expect(s.model.requests.filter((req) => req.messages.some((message) => message.role === "user" && textOf(message).includes(BRIEF)))).toHaveLength(1);
   });
+
+  test("a seventh job_start in one turn, past the player's jobs per run, is answered in the file's words and starts nothing", async () => {
+    const six: Reply = { pieces: Array.from({ length: 6 }, (_, at) => ({ call: "job_start", args: { agent: "keeper", brief: BRIEF }, id: `start-${at + 1}` })) };
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+      answers: routed([six, start("start-7"), reply("The tower is quiet.")], Array.from({ length: 6 }, () => ({ pieces: [{ text: "Fixture count: seven." }] }))),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+
+    expect(answerTo(s, "start-7")).toBe("No job was started: this turn has started 6 jobs, and the player allows 6.");
+    expect(new Set(toldJobs(s).map((job) => job.id)).size).toBe(6);
+  });
+
+  test("a job that passes the player's job tokens for the day is stopped at its next call and its record says so; a start after it is answered in the file's words and starts nothing", async () => {
+    const s = (open = await stage({
+      config: "jobs:\n  tokensPerDay: 100\n",
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+      answers: routed(
+        [start("start-1"), reply("The tower is quiet."), start("start-2"), reply("Still quiet.")],
+        [{ pieces: [{ text: "Counted three so far." }, { call: "todo", args: { items: [{ text: "count the rest" }] } }], usage: { input: 90, output: 30 } }],
+      ),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "day", max: 100, value: 120 } });
+
+    await s.turn(request("t2", { lead: "lead", parent: "t1" }));
+
+    expect(answerTo(s, "start-2")).toBe("No job was started: jobs have spent 120 tokens today, and the player allows 100.");
+    expect(new Set(toldJobs(s).map((job) => job.id)).size).toBe(1);
+  });
+
+  test("the day's job tokens hold across a restart: a harness made again over the same store starts no job past them", async () => {
+    const s = (open = await stage({
+      config: "jobs:\n  tokensPerDay: 100\n",
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+      answers: routed([start("start-1"), reply("The tower is quiet.")], [{ pieces: [{ text: "Fixture count: seven." }], usage: { input: 90, output: 30 } }]),
+    }));
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+    await s.harness.close();
+
+    const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
+    try {
+      await expect(again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: jobs have spent 120 tokens today, and the setting allows 100.");
+    } finally {
+      await again.close();
+    }
+  });
 });
 
 describe("who works in a job", () => {

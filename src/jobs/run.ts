@@ -46,6 +46,8 @@ export interface JobAsk {
   parent?: ParentCall;
   /** For a job an agent of another job started: that job's budget, which this one's calls and tokens count against too, so a chain of jobs spends no more than the first one may. */
   over?: Budget;
+  /** What all of the user's jobs have spent in the user's day, which this one's calls count into as they are made. */
+  spent: Usage;
 }
 
 /** How a job's run ended: its agent's outcome, what every agent of it spent, and a limit of the run's own it reached. */
@@ -55,13 +57,15 @@ export interface JobEnd {
   limit?: LimitHit;
 }
 
-/** A job's run, made and ready: the settings and connection its limits are read from, its trace, and what its agents spend. */
+/** A job's run, made and ready: the settings and connection its limits are read from, its trace, what its agents spend, and the user's day, held to its settings. */
 export interface PreparedJob {
   settings: Settings;
   connection: { id: string | null; name: string | null };
   agent: AgentRef;
   trace: RunTrace;
   budget: Budget;
+  /** What all of the user's jobs have spent today, held to this job's `jobs.tokensPerDay`: a call of any of its agents past it is not made. */
+  day: Budget;
   /** Runs it to its end. `onText` hears what its agent writes, call by call; the signal stops every agent of it. */
   run(signal: AbortSignal, onText: (text: string) => void): Promise<JobEnd>;
 }
@@ -86,7 +90,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
   const { time, ...counted } = settings.jobs.run;
-  const budget = new Budget("job", counted, ask.over);
+  // A job started by another job's agent spends from that job's run, which spends from the day; any other, from the day.
+  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, ask.spent);
+  const budget = new Budget("job", counted, ask.over ?? day);
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
   const keep = (agent: AgentRef): KeepRequest | undefined => {
@@ -181,7 +187,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     askAuthor(team, own.get("ask_author")),
     agentMessage(team, own.get("agent_message")),
     agentDrop(team, own.get("agent_drop")),
-    jobStart(core.jobs, own.get(JOB_START)),
+    jobStart(core.jobs, own.get(JOB_START), settings.jobs.perRun),
     ...baseTools({ env, guidance, texts: own, ids: () => core.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
     ...searchTools({
       reach: {
@@ -215,6 +221,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     agent: ref,
     trace,
     budget,
+    day,
     async run(signal, onText) {
       const startedAt = env.clock.now();
       core.hub.started({ run: ask.id, scope, what: "job", agents: [], started: startedAt });

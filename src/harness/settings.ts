@@ -62,6 +62,11 @@
 //     atOnce: 2                        jobs running at once, the user's across every chat; one started past it waits
 //                                      for a place
 //     perDay: ~                        jobs that may be started in the user's day; ~ for no limit
+//     perRun: 6                        jobs the agents of one run, a turn's or a job's, may start; 0 starts none;
+//                                      ~ for no limit
+//     tokensPerDay: 12000000           tokens, sent and written, that all of the user's jobs may spend in the
+//                                      user's day: past it no job is started, and a running job is stopped at its
+//                                      next call; ~ for no limit
 //     connections: { <connection>: { atOnce: 1, perDay: 20 } }
 //                                      the same for the jobs whose agent runs on one connection, by its name or id
 //     run:
@@ -146,11 +151,17 @@ export interface JobCounts {
 /**
  * The user's limits on jobs (§13.5, §10.11): how many run at once (one past it waits for a place)
  * and how many may be started in the user's day; the same for the jobs on one connection, by its
- * name or id; and what one job's run may spend across its agents (`time` in milliseconds).
+ * name or id; how many the agents of one run may start; the tokens all of the user's jobs may spend
+ * in the user's day; and what one job's run may spend across its agents (`time` in milliseconds).
+ * Each absent is no limit.
  */
 export interface JobSettings extends JobCounts {
   atOnce: number;
   connections: Readonly<Record<string, JobCounts>>;
+  /** Jobs the agents of one run (a turn's, or a job's) may start; 0 starts none. */
+  perRun?: number;
+  /** Tokens, sent and written, that all of the user's jobs may spend in the user's day. */
+  tokensPerDay?: number;
   run: { calls?: number; tokensIn?: number; tokensOut?: number; time?: number };
 }
 
@@ -201,9 +212,12 @@ export const DEFAULT_SETTINGS: Settings = {
   // they are, and records folded once they pass 6,000 tokens. §11: the lead gets one call with the
   // rule's text before anything is summarized.
   compaction: { reserve: 16_384, keepTurns: 3, records: 6_000, saveCalls: 1 },
-  // Today's build's own (LumiAH's `jobs.atOnce` and `jobs.budget`: 60 rounds of calls, 600,000
-  // tokens in, 60,000 out, 15 minutes), kept as §10.11 says. Today's build counted no jobs a day.
-  jobs: { atOnce: 2, connections: {}, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
+  // Today's build's own (LumiAH's `jobs.atOnce`, `jobs.perRun`, `jobs.tokensPerDay` and `jobs.budget`:
+  // two at once, six a turn, 12,000,000 tokens a day, and for each job 60 rounds of calls, 600,000
+  // tokens in, 60,000 out and 15 minutes), kept as §10.11 says. Today's build counted no jobs a day:
+  // it counted their tokens. It counted a token read again from a provider's cache as a tenth of one;
+  // RPH counts every token sent, as each of its token limits does.
+  jobs: { atOnce: 2, connections: {}, perRun: 6, tokensPerDay: 12_000_000, run: { calls: 60, tokensIn: 600_000, tokensOut: 60_000, time: 900_000 } },
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -357,6 +371,10 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const runOut = lifted("jobs.run.tokensOut", jobRun["tokensOut"], runDefaults.tokensOut);
   const runSeconds = lifted("jobs.run.time", jobRun["time"], runDefaults.time === undefined ? undefined : runDefaults.time / 1000);
   const jobsPerDay = lifted("jobs.perDay", jobsSection["perDay"], DEFAULT_SETTINGS.jobs.perDay);
+  // `perRun: 0` starts no job at all; `~` (null) lifts the limit.
+  const perRunValue = jobsSection["perRun"];
+  const jobsPerRun = perRunValue === null ? undefined : (whole("jobs.perRun", perRunValue) ?? DEFAULT_SETTINGS.jobs.perRun);
+  const jobTokensPerDay = lifted("jobs.tokensPerDay", jobsSection["tokensPerDay"], DEFAULT_SETTINGS.jobs.tokensPerDay);
   const judgeValue = rules["judge"];
   const judge = typeof judgeValue === "string" && judgeValue.trim() !== "" ? judgeValue.trim() : undefined;
   if (judgeValue !== undefined && judge === undefined) passed("rules.judge", judgeValue);
@@ -397,6 +415,8 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     jobs: {
       atOnce: count("jobs.atOnce", jobsSection["atOnce"]) ?? DEFAULT_SETTINGS.jobs.atOnce,
       ...(jobsPerDay !== undefined ? { perDay: jobsPerDay } : {}),
+      ...(jobsPerRun !== undefined ? { perRun: jobsPerRun } : {}),
+      ...(jobTokensPerDay !== undefined ? { tokensPerDay: jobTokensPerDay } : {}),
       connections: jobConnections,
       run: {
         ...(runCalls !== undefined ? { calls: runCalls } : {}),

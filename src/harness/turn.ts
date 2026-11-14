@@ -773,7 +773,7 @@ export class Turn {
       askAuthor(team, texts.get("ask_author")),
       agentMessage(team, texts.get("agent_message")),
       agentDrop(team, texts.get("agent_drop")),
-      jobStart(this.#c.jobs, texts.get(JOB_START)),
+      jobStart(this.#c.jobs, texts.get(JOB_START), this.#settings.jobs.perRun),
       ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
       promptTool({ prompt: async () => this.#prompt, guidance, texts, env }),
       promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env }),

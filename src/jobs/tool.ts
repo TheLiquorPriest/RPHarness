@@ -1,7 +1,8 @@
 // `job_start` (§13.5, §6.8): an agent that holds it starts background work, a run of its own that
 // outlives the turn's reply, with a definition and a brief as `delegate` takes them. It answers at
 // once, in the words of `.prompts/jobs.md`; how the job ends is told to the host. What it does is
-// the harness's jobs' (`JobsWork`).
+// the harness's jobs' (`JobsWork`). Each run, a turn's or a job's, makes its own `job_start`, which
+// counts the jobs that run's agents start against the user's `jobs.perRun`.
 import type { ToolCtx } from "../contract";
 import type { DelegateCall } from "../agents/tools";
 import type { LoopToolResult } from "../loop/types";
@@ -10,13 +11,21 @@ import { argumentsOf, fieldsOf, type OwnTool, text, type ToolText } from "../too
 /** The tool's name, whose file the harness reads with its other tools' (`.tools/job_start.md`). */
 export const JOB_START = "job_start";
 
-/** What `job_start` does: the harness's jobs. */
-export interface JobsWork {
-  /** Starts a job for an agent's call, tied to the caller's turn; answers with what became of it. */
-  startFor(call: DelegateCall, ctx: ToolCtx): Promise<LoopToolResult>;
+/** The jobs the agents of one run have started, and the most they may (the user's `jobs.perRun`); absent, no limit. */
+export interface RunJobs {
+  started: number;
+  max?: number;
 }
 
-export function jobStart(work: JobsWork, own: ToolText | undefined): OwnTool {
+/** What `job_start` does: the harness's jobs. */
+export interface JobsWork {
+  /** Starts a job for an agent's call, tied to the caller's turn and counted among `run`'s; answers with what became of it. */
+  startFor(call: DelegateCall, ctx: ToolCtx, run: RunJobs): Promise<LoopToolResult>;
+}
+
+/** `job_start` for one run: `max` is the most jobs its agents may start, from the run's settings. */
+export function jobStart(work: JobsWork, own: ToolText | undefined, max: number | undefined): OwnTool {
+  const run: RunJobs = { started: 0, ...(max !== undefined ? { max } : {}) };
   return {
     name: JOB_START,
     family: "jobs",
@@ -37,6 +46,7 @@ export function jobStart(work: JobsWork, own: ToolText | undefined): OwnTool {
           ...(returns !== undefined && returns.trim() !== "" ? { returns } : {}),
         },
         ctx,
+        run,
       );
     },
   };

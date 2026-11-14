@@ -105,8 +105,12 @@ export interface Release {
   withoutIntent?: true;
 }
 
-/** A limit the user sets (§10.11): model calls, tokens in and out, wall time, sub-agent depth and count, and jobs started in a day (§13.5). */
-export type LimitName = "calls" | "tokensIn" | "tokensOut" | "time" | "depth" | "agents" | "jobs";
+/**
+ * A limit the user sets (§10.11): model calls, tokens in and out, tokens sent and written together
+ * (`tokens`: the jobs' tokens in the user's day), wall time, sub-agent depth and count, and jobs
+ * started (§13.5) in the user's day, or by the agents of one turn's or one job's run.
+ */
+export type LimitName = "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs";
 
 /** A limit reached: which, over what (a turn, one agent, one job's run, or the user's day: the daily caps), the limit and the count. */
 export interface LimitHit {

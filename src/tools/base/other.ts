@@ -1,15 +1,36 @@
 // `skill_load` and `suggest` (§6.8, §5.1). `skill_load` gives a skill's text by its name, through the
-// guidance loader, from whichever level has it in force. `suggest` hands the user a proposed change
-// to one of their files or to lore, with its reason; the host keeps it for the user to accept, edit
-// or dismiss, and nothing is changed by it. A file is named as the agents' view has it.
+// guidance loader, from whichever level has it in force; `skillsIndex` lists the skills in force, by
+// name and description, for an agent that holds it (§5.4: only names and descriptions sit in the
+// prompt). `suggest` hands the user a proposed change to one of their files or to lore, with its
+// reason; the host keeps it for the user to accept, edit or dismiss, and nothing is changed by it. A
+// file is named as the agents' view has it.
 import type { Suggestion } from "../../contract";
+import type { Guidance } from "../../files/api";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text } from "../kit";
 import { type BaseToolsDeps, noticesOf, wordsOf } from "./deps";
 
+/** The tool that gives a skill's text by its name. */
+export const SKILL_LOAD = "skill_load";
+
+/** The part that lists the skills in force (`.prompts/skills.md`). */
+export const SKILLS_PART = "skills";
+
+/**
+ * The skills in force, each by its name and the description its header gives, laid out by the
+ * skills part, for an agent among whose tools is `skill_load`, which loads them by those names.
+ * Empty for an agent without it, while no skill is in force, or when the part is not a template.
+ */
+export async function skillsIndex(guidance: Pick<Guidance, "part" | "skills">, tools: readonly { name: string }[]): Promise<string> {
+  if (!tools.some((tool) => tool.name === SKILL_LOAD)) return "";
+  const [part, skills] = await Promise.all([guidance.part(SKILLS_PART), guidance.skills()]);
+  if (part?.format !== "template" || skills.length === 0) return "";
+  return part.render({ skills: skills.map(({ name, description }) => ({ name, description })) }).text;
+}
+
 export function skillLoad(deps: BaseToolsDeps): OwnTool {
-  const own = deps.texts.get("skill_load");
+  const own = deps.texts.get(SKILL_LOAD);
   return {
-    name: "skill_load",
+    name: SKILL_LOAD,
     family: "skills",
     tier: "read",
     description: own?.description ?? "",

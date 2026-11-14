@@ -67,14 +67,14 @@ export interface InvalidCall {
 
 /**
  * The fields of the tool answers' `invalid` line: the tool, what was sent, each argument that did
- * not fit and why as the check found them (`misfits`, each an `argument` and a `why`), and the
+ * not fit and whether the call left it out (`misfits`, each an `argument` and `missing`), and the
  * tool's whole schema (`parameters`) only where it is no longer than the user's `tools.schemaShown`.
  */
 export function invalidFields(call: InvalidCall, schemaShown: number): Fields {
   return {
     tool: call.tool,
     arguments: call.arguments,
-    ...(call.misfits.length > 0 ? { misfits: call.misfits.map(({ argument, why }) => ({ argument, why })) } : {}),
+    ...(call.misfits.length > 0 ? { misfits: call.misfits.map(({ argument, missing }) => ({ argument, missing })) } : {}),
     ...(call.parameters.length <= schemaShown ? { parameters: call.parameters } : {}),
   };
 }

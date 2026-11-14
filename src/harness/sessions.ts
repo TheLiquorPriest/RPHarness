@@ -12,10 +12,12 @@ import type { ReplyFormSetting } from "./settings";
 
 /** A lead's opening block (§10.2 block 1), as the session opened it. */
 export interface Opening {
-  /** Its text: the definition, the instruction stack, the reply contract and the tool guide. */
+  /** Its text: the definition, the instruction stack, the reply contract, the tool guide and the list of skills. */
   text: string;
   /** What the stack held, for the briefing's "files changed since this session opened". */
   snapshot: StackSnapshot;
+  /** The list of skills it holds, as the skills part laid it out (§5.4); absent when it holds none. The briefing says when the list as it stands is another. */
+  skills?: string;
   /** The tools its definition listed, and what it was given: the front of the cached prompt, fixed for the session (§6.8). */
   tools: string[];
   given: string[];

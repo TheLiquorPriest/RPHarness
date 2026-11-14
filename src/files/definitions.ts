@@ -1,10 +1,11 @@
 // Agent definitions (§5.4): a header that says what the agent runs on, holds, reads and is given,
 // and a body that is its instructions. A field the code cannot read is reported and left out; a
-// definition is broken (not used) only when its header or its body cannot be read at all.
+// definition is broken (not used) only when its header or its body cannot be read at all. A body
+// that names a field no run fills (`BODY_FIELDS`) is reported, and the field is put in empty.
 
 import type { Effort, FileText } from "../contract/index";
 import type { AgentDefinition, DefinitionLimits, Problem, Replaced } from "./api";
-import { DEFINITION_FIELDS } from "./api";
+import { BODY_FIELDS, DEFINITION_FIELDS } from "./api";
 import { fieldLine, isMapping, nameList, problemAt, splitHeader, unknownFields } from "./header";
 import { parseTemplate } from "./template";
 
@@ -76,6 +77,13 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
   const body = parseTemplate(split.body, { ...at, firstLine: split.bodyLine });
   problems.push(...body.problems);
   if (body.template === undefined) return { problems };
+  const bodyLines = split.body.split("\n");
+  for (const field of body.template.fields) {
+    const head = field.split(".")[0] ?? "";
+    if ((BODY_FIELDS as readonly string[]).includes(head)) continue;
+    const named = bodyLines.findIndex((text) => [...text.matchAll(/\{\{\s*[#^/]?\s*([^}]*?)\s*\}\}/g)].some((tag) => tag[1] === field));
+    problems.push(problemAt(at, split.bodyLine + Math.max(named, 0), `The body names {{${field}}}, which nothing fills: a body may name ${BODY_FIELDS.map((name) => `{{${name}}}`).join(", ")}. It is put in empty.`));
+  }
   return {
     definition: {
       name,

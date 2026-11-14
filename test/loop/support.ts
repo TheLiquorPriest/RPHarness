@@ -16,7 +16,7 @@ export const texts = {
   notFound: ({ tool }: { tool: string }) => `Fixture: no tool named ${tool}.`,
   invalid: ({ tool, arguments: sent }: { tool: string; arguments: string; parameters: string }) => `Fixture: ${tool} does not take ${sent}.`,
   cutShort: ({ tool }: { tool: string }) => `Fixture: ${tool} was cut short.`,
-  failed: ({ tool, error }: { tool: string; error: string }) => `Fixture: ${tool} failed: ${error}`,
+  failed: ({ tool }: { tool: string }) => `Fixture: ${tool} failed.`,
   unfinished: ({ tool }: { tool: string }) => `Fixture: ${tool} did not finish.`,
 };
 

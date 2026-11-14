@@ -45,12 +45,14 @@ export function gapCheck(deps: BaseToolsDeps): OwnTool {
       ];
       const settled = await Promise.allSettled(searches.map(async (one) => one.search()));
       const searched: GapSearch[] = [];
-      const failed: { where: string; error: string }[] = [];
+      const failed: { where: string }[] = [];
       for (const [at, outcome] of settled.entries()) {
         const where = searches[at]?.where ?? "";
-        // A place that could not be searched is not evidence of anything, so it is left out of what was searched.
-        if (outcome.status === "rejected") failed.push({ where, error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) });
-        else searched.push({ where, hits: outcome.value.slice(0, limit) });
+        // A place that could not be searched is not evidence of anything, so it is left out of what was searched. Its error's words are for whoever runs the host.
+        if (outcome.status === "rejected") {
+          failed.push({ where });
+          env.log.warn("A place a gap check looks in could not be searched.", { place: where, error: outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason) });
+        } else searched.push({ where, hits: outcome.value.slice(0, limit) });
       }
       const check: GapCheck = { id: deps.ids(), by: ctx.agent, topic, terms, searched };
 

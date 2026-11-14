@@ -43,8 +43,8 @@ export interface RunnerTexts {
   invalid?(fields: { tool: string; arguments: string; parameters: string; misfits: Misfit[] }): string | undefined;
   /** The answer to a call in a message that hit its length limit, whose arguments may be cut short. */
   cutShort?(fields: { tool: string }): string | undefined;
-  /** The answer to a call whose tool threw: the error's own words. */
-  failed?(fields: { tool: string; error: string }): string | undefined;
+  /** The answer to a call whose tool threw. The error's own words go to the trace, never to a model. */
+  failed?(fields: { tool: string }): string | undefined;
   /** The answer to a call the work stopped before it finished (a stop, or a limit), kept so the agent can be continued: it may have done its work, or not. */
   unfinished?(fields: { tool: string }): string | undefined;
 }
@@ -755,7 +755,7 @@ export class AgentRunner {
     return { answer: after.result, texts: reminders.map((fired) => fired.text.trimEnd()) };
   }
 
-  /** Runs the tool. One that throws is answered with the runner's text for it, the error's own words in it. */
+  /** Runs the tool. One that throws is answered with the runner's text for it; the error's own words are kept in the call's details, for the trace alone. */
   async #run(tool: LoopTool, call: GateCall, ctx: ToolCtx): Promise<LoopToolResult> {
     try {
       return await tool.run(call.args, ctx);
@@ -766,7 +766,7 @@ export class AgentRunner {
 
   #failed(tool: LoopTool, error: unknown): LoopToolResult {
     const words = error instanceof Error ? error.message : String(error);
-    const line = this.#o.texts.failed?.({ tool: tool.name, error: words });
+    const line = this.#o.texts.failed?.({ tool: tool.name });
     return { content: line === undefined ? [] : [{ type: "text", text: line }], error: true, details: { error: words } };
   }
 

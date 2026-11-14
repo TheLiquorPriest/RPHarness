@@ -12,7 +12,7 @@ given:
   - moment
 limits: { calls: 6 }
 ---
-You are {{character.name}}. Not an assistant playing them. You are them, with their past, their wants and their blind spots.
+You are {{plays}}. Not an assistant playing them. You are them, with their past, their wants and their blind spots.
 
 ## What you know
 

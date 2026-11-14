@@ -1,5 +1,6 @@
 // Counts model calls and tokens against the limits the user set (§10.11): one agent's, or a whole
-// turn's shared by all its agents. Limits are the only thing code holds an agent to.
+// turn's or job's shared by all its agents, and for a job another job's agents started, the starter's
+// too. Limits are the only thing code holds an agent to.
 import type { AgentRef, LimitHit, Usage } from "../contract";
 
 type Counted = "calls" | "tokensIn" | "tokensOut";
@@ -22,14 +23,17 @@ export class Budget {
   readonly per: LimitHit["per"];
   readonly used: Usage = emptyUsage();
   readonly #max: Readonly<Partial<Record<Counted, number>>>;
+  /** The budget whatever is counted here counts against too, and whose limits hold here as well. */
+  readonly #over: Budget | undefined;
 
   /** Each limit absent is no limit. */
-  constructor(per: LimitHit["per"], max: Readonly<Partial<Record<Counted, number>>>) {
+  constructor(per: LimitHit["per"], max: Readonly<Partial<Record<Counted, number>>>, over?: Budget) {
     this.per = per;
     this.#max = max;
+    this.#over = over;
   }
 
-  /** The limit a further call would pass, if one has been reached. */
+  /** The limit a further call would pass, if one has been reached: this budget's own, or one it counts against. */
   reached(agent: AgentRef): LimitHit | undefined {
     const counts: [Counted, number][] = [
       ["calls", this.used.calls],
@@ -40,10 +44,11 @@ export class Budget {
       const max = this.#max[limit];
       if (max !== undefined && value >= max) return { limit, per: this.per, max, value, ...(this.per === "agent" ? { agent } : {}) };
     }
-    return undefined;
+    return this.#over?.reached(agent);
   }
 
   count(usage: Usage): void {
     addUsage(this.used, usage);
+    this.#over?.count(usage);
   }
 }

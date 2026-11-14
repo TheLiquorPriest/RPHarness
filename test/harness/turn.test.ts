@@ -234,4 +234,18 @@ describe("limits", () => {
     expect(sink.errors).toEqual([{ code: "limit", limit: { limit: "calls", per: "turn", max: 2, value: 2 } }]);
     expect(s.told.at(-1)?.kind).toBe("ended");
   });
+
+  test("a limit an agent names for file_find is held to the player's most a call takes", async () => {
+    const notes = Object.fromEntries(["a", "b", "c", "d", "e"].map((name) => [`chats/wren-hale/lighthouse/persistent-workspace/${name}.md`, `Fixture note ${name}.`]));
+    const s = (open = await stage({
+      config: "tools:\n  perCall: 2\n",
+      files: { ".agents/chief.md": "---\nname: chief\ndescription: Fixture lead.\nmodel: default\ntools: [file_find]\ngiven: [prompt:*]\n---\nFixture chief.\n", ...notes },
+      answers: [{ pieces: [{ call: "file_find", args: { by: "list", path: "persistent-workspace", limit: 1000 }, id: "f-1" }] }, { pieces: [{ text: "<reply>Two notes.</reply>" }] }],
+    }));
+
+    await s.turn(request("t1", { lead: "chief" }));
+
+    const found = s.model.requests[1]!.messages.find((message) => message.role === "toolResult" && message.toolCallId === "f-1");
+    expect(textOf(found!).split("\n")).toHaveLength(2);
+  });
 });

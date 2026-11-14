@@ -11,13 +11,14 @@
 // Code holds a sub-agent to the user's limits on how deep and how many, and to nothing else. Every
 // word an agent is told comes from a file: the brief's frame, the question's, and the lines of
 // `.prompts/delegation.md`.
-import type { AgentRef, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
+import type { AgentRef, BodyFields, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
+import { skillsIndex } from "../tools/base";
 import { attach, joined, type Wanted } from "./attachments";
 import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
 
@@ -132,9 +133,10 @@ function template(part: PromptPart | undefined): TemplatePart | undefined {
   return part?.format === "template" ? part : undefined;
 }
 
-/** What every text about an agent is filled from: its handle, its definition, and the character it plays. */
-function fieldsOf(ref: AgentRef): Fields {
-  return { agent: ref.id, definition: ref.definition, ...(ref.plays !== undefined ? { plays: ref.plays } : {}) };
+/** What every text about an agent is filled from, its body among them: the contract's `BodyFields`, its handle, its definition, and the character it plays. */
+export function fieldsOf(ref: AgentRef): Fields {
+  const fields: BodyFields = { agent: ref.id, definition: ref.definition, ...(ref.plays !== undefined ? { plays: ref.plays } : {}) };
+  return { ...fields };
 }
 
 /** An answer of one text, or of none when it is empty. */
@@ -157,7 +159,8 @@ function questionFields(question: JsonValue | undefined): { question: string; fo
 /**
  * An agent's instructions, made as the lead's opening block is, without the reply contract: the
  * files of its stack's opening (its definition's body filled in), then the guide of each family of
- * tools it holds that has a file of its own (`.tools/<family>.md`).
+ * tools it holds that has a file of its own (`.tools/<family>.md`), then the skills in force when it
+ * holds `skill_load`.
  */
 async function instructionsOf(guidance: Guidance, definition: AgentDefinition, tools: readonly HeldTool[], isTool: (name: string) => boolean, fields: Fields, log: Log): Promise<string> {
   const stack = await guidance.stack(definition.name);
@@ -178,6 +181,7 @@ async function instructionsOf(guidance: Guidance, definition: AgentDefinition, t
     const guide = template(await guidance.tool(family))?.render().text;
     if (guide !== undefined) texts.push(guide);
   }
+  texts.push(await skillsIndex(guidance, tools));
   return joined(texts);
 }
 

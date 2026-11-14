@@ -268,7 +268,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
       const text = toolText(await guidance.tool(name));
       if (text !== undefined) own.set(name, text);
     }
-    const fileDeps: FileToolsDeps = { files: env.files, words, texts: own };
+    const fileDeps: FileToolsDeps = { files: env.files, words, texts: own, most: settings.perCall };
     registry = new Registry([fileRead(fileDeps), fileFind(fileDeps), fileWrite(fileDeps), delegate(team, own.get("delegate")), askAuthor(team, own.get("ask_author")), agentMessage(team, own.get("agent_message"))], await env.tools.all(scope));
 
     const leadDefinition = await guidance.definition("lead");

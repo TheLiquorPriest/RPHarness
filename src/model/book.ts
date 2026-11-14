@@ -22,9 +22,11 @@
 // What was stored for one server goes to no other. A connection's key, its headers' values and what
 // its server reported stay only while its provider and its address's origin do: a change of either,
 // saved or made by hand, keeps only what comes with it, and a connection that first appears by hand
-// takes nothing kept under its id for another. Where each connection's things were given for is known
-// from the first good read on: a change made before it, while the host was stopped, can't be told
-// from a save. A connection that signs in goes to its provider's own address, as does one of a
+// takes nothing kept under its id for another. The place a key and headers' values were given for is
+// kept beside them in the secrets, and every read compares with it, the first after a start too, so
+// a change made while the host was stopped is told from a save as one made while it runs is. Secrets
+// saved before places were kept take theirs from the first read, which writes them at once. A
+// connection that signs in goes to its provider's own address, as does one of a
 // provider whose calls can't go through the layer's own fetch (Google's, which would follow a
 // redirect elsewhere and take the key with it); an address holds no name or password. A save refuses
 // a key shorter than `SECRET_FLOOR`: what a server says back can't be cleaned of one so short
@@ -67,6 +69,8 @@ interface Secrets {
   keys: Record<string, string>;
   /** Each connection's header values, by its id, then by the header's name. */
   headers: Record<string, Record<string, string>>;
+  /** Where each connection's key and headers' values were given for, by its id (`placeOf`). */
+  places: Record<string, string>;
   signins: Record<string, SignInToken>;
   device?: string;
 }
@@ -264,6 +268,12 @@ function placeOf(provider: string, baseUrl: string | undefined): string {
   }
 }
 
+/** Whether two records of places name the same place for the same connections. */
+function samePlaces(a: Readonly<Record<string, string>>, b: Readonly<Record<string, string>>): boolean {
+  const ids = Object.keys(a);
+  return ids.length === Object.keys(b).length && ids.every((id) => Object.hasOwn(b, id) && b[id] === a[id]);
+}
+
 /** Each header's value: the one the document gives (saved the old way), else the one kept with the secrets, else none. */
 function valuesOf(given: Readonly<Record<string, string | null>>, kept: Readonly<Record<string, string>> | undefined): Record<string, string | null> {
   return Object.fromEntries(Object.entries(given).map(([name, value]) => [name, value ?? own(kept, name) ?? null]));
@@ -364,11 +374,11 @@ export class Book {
     } catch {
       return;
     }
-    if (raw !== null && raw !== undefined && !(isRecord(raw) && raw.v === FORMAT && isRecord(raw.keys) && isRecord(raw.signins) && (raw.headers === undefined || isRecord(raw.headers)))) {
+    if (raw !== null && raw !== undefined && !(isRecord(raw) && raw.v === FORMAT && isRecord(raw.keys) && isRecord(raw.signins) && (raw.headers === undefined || isRecord(raw.headers)) && (raw.places === undefined || isRecord(raw.places)))) {
       this.secretsTrouble = "The saved keys and sign-ins aren't in a form this build reads: fix or remove them, then start again.";
       return;
     }
-    const secrets: Secrets = { keys: {}, headers: {}, signins: {} };
+    const secrets: Secrets = { keys: {}, headers: {}, places: {}, signins: {} };
     if (isRecord(raw)) {
       if (isRecord(raw.keys)) for (const [id, key] of Object.entries(raw.keys)) if (typeof key === "string") secrets.keys[id] = key;
       if (isRecord(raw.headers)) {
@@ -378,6 +388,7 @@ export class Book {
           if (kept.length > 0) secrets.headers[id] = Object.fromEntries(kept);
         }
       }
+      if (isRecord(raw.places)) for (const [id, place] of Object.entries(raw.places)) if (typeof place === "string") secrets.places[id] = place;
       if (isRecord(raw.signins)) {
         for (const [provider, credential] of Object.entries(raw.signins)) {
           const token = tokenOf(credential);
@@ -412,8 +423,15 @@ export class Book {
       throw error;
     }
     this.trouble = undefined;
-    // The first good read takes the documents as they stand.
-    if (this.kept === undefined) for (const [id, place] of read.places) this.places.set(id, place);
+    // The first good read takes each connection's place from the secrets, where its key and headers' values were kept beside the place they were given for, and any other's from the document as it stands. Secrets kept before places were take the document's, and are written with them below.
+    let learned = false;
+    if (this.kept === undefined) {
+      for (const [id, place] of read.places) {
+        const given = own(this.secrets?.places, id);
+        this.places.set(id, given ?? place);
+        learned ||= given === undefined && this.secrets !== undefined && (Object.hasOwn(this.secrets.keys, id) || Object.hasOwn(this.secrets.headers, id));
+      }
+    }
     const secrets = this.secrets;
     const notes = [...read.notes];
     const moved: Connection[] = [];
@@ -449,9 +467,9 @@ export class Book {
     this.given = read.given;
     this.kept = { connections, default: read.given.default };
     if (moved.length > 0) {
-      await this.writeConnections(moved, [], read.given.default, undefined, taken);
+      await this.writeConnections(moved, [], read.given.default, undefined, taken || learned);
       for (const c of moved) this.places.set(c.id, placeOf(c.provider, c.baseUrl));
-    } else if (taken) await this.writeSecrets();
+    } else if (taken || learned) await this.writeSecrets();
     return notes;
   }
 
@@ -484,8 +502,9 @@ export class Book {
    * (after the rest, where it has none) and every entry of an id in `gone` taken out, `chosen` the
    * default: each header's name goes to the document and its value to the secrets, entries saved the
    * old way moved with them; everything else goes back as the host gave it. The secrets go first, when
-   * anything of them changed (`keys`, the keys to keep; `secretsChanged`, a change already made), so
-   * that no value leaves the document before it is kept; the book then holds what was written.
+   * anything of them changed (`keys`, the keys to keep; `secretsChanged`, a change already made; the
+   * place a connection's key and values are kept for), so that no value leaves the document before it
+   * is kept; the book then holds what was written.
    */
   private async writeConnections(put: readonly Connection[], gone: readonly string[], chosen: string | null, keys?: Record<string, string>, secretsChanged = false): Promise<void> {
     const secrets = this.secrets;
@@ -500,6 +519,8 @@ export class Book {
       if (JSON.stringify(own(values, id) ?? null) !== before) changed = true;
     };
     const entries: unknown[] = [];
+    /** The place of each connection whose values this write keeps, as written here. */
+    const placed = new Map<string, string>();
     for (const entry of this.given?.entries ?? []) {
       const id = isRecord(entry) && typeof entry.id === "string" ? entry.id : undefined;
       if (id !== undefined && gone.includes(id)) {
@@ -510,6 +531,8 @@ export class Book {
       if (secrets !== undefined && id !== undefined && isRecord(entry) && isHeaderRecord(entry.headers) && !put.some((c) => c.id === id)) {
         const inUse = this.kept?.connections.find((c) => c.id === id);
         keep(id, inUse !== undefined ? inUse.headers : valuesOf(entry.headers, own(values, id)));
+        const place = givenPlaceOf(entry);
+        if (place !== undefined) placed.set(id, place);
         entries.push({ ...entry, headers: Object.keys(entry.headers) });
         continue;
       }
@@ -517,13 +540,17 @@ export class Book {
     }
     for (const c of put) {
       keep(c.id, c.headers);
+      placed.set(c.id, placeOf(c.provider, c.baseUrl));
       const { headers, ...rest } = c;
       const kept: StoredConnection = { ...rest, ...(headers !== undefined ? { headers: Object.keys(headers) } : {}) };
       const at = entries.findIndex((e) => isRecord(e) && e.id === c.id);
       if (at === -1) entries.push(kept);
       else entries[at] = kept;
     }
-    if (secrets !== undefined && changed) await this.writeSecrets(keys, values);
+    if (secrets !== undefined) {
+      const places = this.placesFor(keys ?? secrets.keys, values, placed);
+      if (changed || !samePlaces(places, secrets.places)) await this.writeSecrets(keys, values, places);
+    }
     // An entry the book can't read goes back exactly as the host gave it, which the host keeps whole whatever it holds: a save changes nothing of the user's but its own change.
     const asGiven = entries as StoredConnection[];
     const doc: ConnectionsDoc = { v: FORMAT, default: chosen, connections: asGiven };
@@ -537,12 +564,20 @@ export class Book {
     this.kept = { connections: read.connections.map((c) => withValues(c, own(this.secrets?.headers, c.id))), default: chosen };
   }
 
-  /** Writes the secrets as the book holds them, with `keys` and `headers` in place of its own where given; the book holds those once they are written. */
-  private async writeSecrets(keys?: Record<string, string>, headers?: Record<string, Record<string, string>>): Promise<void> {
+  /** Writes the secrets as the book holds them, with `keys`, `headers` and `places` in place of its own where given; the book holds those once they are written. */
+  private async writeSecrets(keys?: Record<string, string>, headers?: Record<string, Record<string, string>>, places?: Record<string, string>): Promise<void> {
     const secrets = this.secrets;
     if (secrets === undefined) return;
     const next = { keys: keys ?? secrets.keys, headers: headers ?? secrets.headers };
-    const doc: SecretsDoc = { v: FORMAT, keys: next.keys, signins: secrets.signins, ...(secrets.device !== undefined ? { device: secrets.device } : {}), ...(Object.keys(next.headers).length > 0 ? { headers: next.headers } : {}) };
+    const at = places ?? this.placesFor(next.keys, next.headers);
+    const doc: SecretsDoc = {
+      v: FORMAT,
+      keys: next.keys,
+      signins: secrets.signins,
+      ...(secrets.device !== undefined ? { device: secrets.device } : {}),
+      ...(Object.keys(next.headers).length > 0 ? { headers: next.headers } : {}),
+      ...(Object.keys(at).length > 0 ? { places: at } : {}),
+    };
     try {
       await this.deps.store.saveSecrets(structuredClone(doc));
     } catch {
@@ -550,6 +585,17 @@ export class Book {
     }
     secrets.keys = next.keys;
     secrets.headers = next.headers;
+    secrets.places = at;
+  }
+
+  /** The place each connection that has a key or headers' values kept was given for, as the secrets keep it beside them: `placed` where it names one, else the book's own. */
+  private placesFor(keys: Readonly<Record<string, string>>, headers: Readonly<Record<string, unknown>>, placed?: ReadonlyMap<string, string>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const id of new Set([...Object.keys(keys), ...Object.keys(headers)])) {
+      const place = placed?.get(id) ?? this.places.get(id) ?? own(this.secrets?.places, id);
+      if (place !== undefined) out[id] = place;
+    }
+    return out;
   }
 
   /** The connections as last read well; rejects with the words of a document never read well. */

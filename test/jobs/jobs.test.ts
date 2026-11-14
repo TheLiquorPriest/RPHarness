@@ -123,6 +123,25 @@ describe("a job an agent starts", () => {
 
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
   });
+
+  test("a job an agent of another job starts spends from that job's run too: past the first job's limit, the second makes no call", async () => {
+    const keeper = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [job_start]\n---\nFixture keeper: you count what you are asked to count.\n";
+    const s = (open = await stage({
+      config: "jobs:\n  atOnce: 5\n  run:\n    calls: 1\n",
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": keeper },
+      answers: routed([start("start-1"), reply("The tower is quiet.")], [start("start-2"), { pieces: [{ text: "Fixture count: seven." }] }]),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done", 2);
+
+    const ends = toldJobs(s).filter((job) => job.state === "done");
+    expect(ends.map((job) => job.startedBy === "user" ? "user" : job.startedBy.definition).sort()).toEqual(["keeper", "lead"]);
+    // The first job's one call started the second; the second was held to what the first may spend, and made none.
+    const second = ends.find((job) => job.startedBy !== "user" && job.startedBy.definition === "keeper");
+    expect(second).toMatchObject({ usage: { calls: 0 }, limit: { limit: "calls", per: "job", max: 1, value: 1 } });
+    expect(s.model.requests.filter((req) => req.messages.some((message) => message.role === "user" && textOf(message).includes(BRIEF)))).toHaveLength(1);
+  });
 });
 
 describe("who works in a job", () => {

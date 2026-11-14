@@ -11,6 +11,8 @@ export interface FileToolsDeps {
   words: Words;
   /** Each tool's file, by tool name. */
   texts: ReadonlyMap<string, ToolText>;
+  /** The most hits one `file_find` asks for (the user's `tools.perCall`): a limit the agent names is held to it before the host is asked; with none, the host's own cap holds. Absent, as in a spike, nothing holds the agent's. */
+  most?: number;
   /** A write went through: for the intent record of the two-step form, which the lead writes itself (§10.7). */
   written?(scope: Scope, by: { id: string; definition: string }, done: Written): Promise<void>;
 }
@@ -69,7 +71,9 @@ export function fileFind(deps: FileToolsDeps): OwnTool {
       const by = text(given, "by");
       const path = text(given, "path");
       const pattern = text(given, "pattern");
-      const limit = whole(given, "limit");
+      // A limit the agent names is held to the user's; however deep a listing goes, it stops there.
+      const asked = whole(given, "limit");
+      const limit = asked === undefined ? undefined : Math.min(asked, deps.most ?? asked);
       const where = { ...(path !== undefined ? { path } : {}), ...(limit !== undefined ? { limit } : {}) };
       if (by !== "list" && pattern === undefined) return answer(deps.words("needs", { op: by ?? "", fields: ["pattern"] }), true);
       const depth = whole(given, "depth");

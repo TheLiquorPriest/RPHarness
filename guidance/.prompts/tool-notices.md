@@ -2,10 +2,10 @@
 description: The words an agent is told about its tool calls - what RPH's own tools answer, and what a call is answered with when it could not run or its tool failed. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)".
 format: lines
 ---
-failed: {{tool}} failed: {{error}}
+failed: {{tool}} failed.
 unfinished: {{tool}} was stopped before it finished. It may have done its work, or not.
 not_held: You hold no tool named {{tool}}.
-invalid: {{tool}} was not run: the arguments you sent do not fit what it takes.{{#misfits}} {{argument}}: {{why}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}
+invalid: {{tool}} was not run: the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}
 cut_short: {{tool}} was not run: your message reached its length limit, so its arguments may be cut short. Call it again.
 not_switched_on: {{tool}} was not run: {{name}} {{#waiting}}waits for the player to switch it on{{/waiting}}{{^waiting}}is switched off{{/waiting}}.
 never: {{tool}} was not run: it writes to {{lane}}, where the player allows no writes.

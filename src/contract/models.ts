@@ -68,7 +68,8 @@ export interface SignInToken {
 
 /**
  * The secrets document: each connection's key by connection id, each sign-in by provider, each
- * connection's header values, and this installation's id for the providers that ask for one.
+ * connection's header values, beside them the place they were given for, and this installation's id
+ * for the providers that ask for one.
  */
 export interface SecretsDoc {
   v: 1;
@@ -76,6 +77,12 @@ export interface SecretsDoc {
   signins: Record<string, SignInToken>;
   /** Each connection's header values: by the connection's id, then by the header's name. Absent when no connection has one. */
   headers?: Record<string, Record<string, string>>;
+  /**
+   * Where each connection's key and header values were given for, by the connection's id: its
+   * provider and its address's origin, in the layer's own form. A connection whose document now names
+   * another place keeps neither (§16). Absent when no connection has a key or a header's value.
+   */
+  places?: Record<string, string>;
   device?: string;
 }
 

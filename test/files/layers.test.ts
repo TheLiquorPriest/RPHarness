@@ -128,4 +128,16 @@ describe("levels", () => {
     const lines = (await g.problems()).map((p) => p.line);
     expect(lines.sort()).toEqual([2, 4, 6, 7]);
   });
+
+  test("a body that names a field no run fills is reported at its line with the fields a body may name, and the definition is used; one that names what a sub-agent is filled with is not reported", async () => {
+    b = await bench({
+      chat: {
+        "agents/scribe.md": "---\nname: scribe\ndescription: Scribe.\ntools: []\n---\nYou are {{plays}}, {{agent}} of {{definition}}.\n",
+        "agents/actor.md": "---\nname: actor\ndescription: Actor.\ntools: []\n---\nFirst line.\nYou are {{character.name}}.\n",
+      },
+    });
+    const g = loadGuidance(b.host.files, scope);
+    expect((await g.definition("actor"))?.instructions.render({ plays: "Wren Hale" }).text).toBe("First line.\nYou are .\n");
+    expect(await g.problems()).toEqual([expect.objectContaining({ path: "agents/actor.md", level: "chat", line: 7, message: "The body names {{character.name}}, which nothing fills: a body may name {{agent}}, {{definition}}, {{plays}}. It is put in empty." })]);
+  });
 });

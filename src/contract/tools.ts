@@ -81,7 +81,12 @@ export interface HostTool {
    * thing is on (§16); RPH asks before every call, so a tool pinned in a definition's list waits too.
    */
   switchable?: Switchable;
-  /** Runs it. A thrown error reaches the model as a failed call with the error's message. */
+  /**
+   * Runs it. A thrown error is answered to the model as a failed call, in the words of the `failed`
+   * line of `.prompts/tool-notices.md`; the error's own message goes to the trace (the call's
+   * details), never to a model. A tool whose failure the model should be told why returns a result
+   * marked `error` in words from its own files.
+   */
   run(args: JsonValue, ctx: ToolCtx): Promise<ToolResult>;
 }
 

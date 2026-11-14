@@ -206,6 +206,21 @@ export interface DefinitionView {
 }
 
 /**
+ * What an agent definition's body may name (§5.4). Its instructions are a template, and a sub-agent's
+ * run (one `delegate` starts, a job's agent, the writer `write_reply` starts) fills it with these
+ * fields and no others when it starts: `agent`, its handle this run (`gm-1`); `definition`, its
+ * definition's name; `plays`, the character it plays as the agent that started it named it
+ * (`delegate`'s `plays`, absent when it plays none). A body that names anything else is reported on
+ * the Files page and has it put in empty. A lead's body is filled with none of them: its opening
+ * block holds for the whole session, and its handle is new each turn.
+ */
+export interface BodyFields {
+  agent: string;
+  definition: string;
+  plays?: string;
+}
+
+/**
  * Why a part an agent's definition names is left out of its stack: no file at any level; switched
  * off; nothing in it but headings and comments; its header or text does not parse; or a file its
  * `needs:` names is not in force.
@@ -245,7 +260,12 @@ export interface Harness {
    * `TurnEvents.ended`. The signal stops every agent of the turn.
    */
   answer(req: TurnRequest, sink: ReplySink, signal: AbortSignal): Promise<TurnOutcome>;
-  /** The host: this turn is off the path (swiped away, deleted). Its work is cancelled, its jobs too, and a session it closed is open again (§11, §13.5). */
+  /**
+   * The host: this turn is off the path (swiped away, deleted, or dropped by the host because it kept
+   * nothing of it: a stop before the reply's first word, a failure). Its work is cancelled, its jobs
+   * too, and a session it closed is open again (§11, §13.5). Nothing else tells RPH a turn is gone: a
+   * turn's own end, stopped or failed, leaves its jobs running.
+   */
   turnLeft(scope: Scope): Promise<void>;
   /**
    * The host: this turn, an earlier attempt, is shown again (a swipe flipped back, on an earlier

@@ -14,6 +14,7 @@ import { archiveSearch, webSearch } from "./searches";
 export type { WebSearchPort } from "../../contract";
 export { BASE_PART, type BaseToolsDeps } from "./deps";
 export { GAP_HITS } from "./gap";
+export { SKILL_LOAD, SKILLS_PART, skillsIndex } from "./other";
 
 /** The names of these tools, whose files the harness reads with its other tools' (`.tools/<name>.md`). */
 export const BASE_TOOLS = ["chat_read", "chat_search", "lore_read", "lore_search", "gap_check", "skill_load", "suggest", "archive_search", "web_search"] as const;

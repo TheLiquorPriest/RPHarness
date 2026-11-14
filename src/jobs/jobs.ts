@@ -2,16 +2,17 @@
 // one but an agent's `job_start` or the user (`Harness.jobs.start`); code never does. Code holds
 // jobs to the user's settings and to nothing else: how many run at once (one past it waits for a
 // place), how many may be started in the user's day, the same for the jobs on one connection, and
-// what one job's run may spend. A job is tied to the turn that started it: the host saying that
-// turn left the path cancels it, and a stop of the turn does not. Each change of a job's state is
-// kept in the host's store, told to the host and traced, so a restart finds a job that was running
-// and lists it as interrupted, with what it had done.
+// what one job's run may spend. A job an agent of another job started spends from that job's run as
+// well as its own, so that a chain of jobs never spends more than its first may. A job is tied to the
+// turn that started it: the host saying that turn left the path cancels it, and a stop of the turn
+// does not. Each change of a job's state is kept in the host's store, told to the host and traced,
+// so a restart finds a job that was running and lists it as interrupted, with what it had done.
 import type { DelegateCall } from "../agents/tools";
 import type { AgentRef, JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx } from "../contract";
 import { loadGuidance } from "../files";
 import { lines } from "../harness/means";
 import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
-import { emptyUsage, type LoopToolResult, type ParentCall } from "../loop";
+import { type Budget, emptyUsage, type LoopToolResult, type ParentCall } from "../loop";
 import { answer } from "../tools";
 import { type JobCore, type PreparedJob, prepareJob } from "./run";
 import type { JobsWork } from "./tool";
@@ -85,11 +86,12 @@ export class Jobs implements JobsApi, JobsWork {
     this.#recovered = this.#recover();
   }
 
-  /** `job_start`: a job tied to the caller's turn, in a session of its own; the answer says what became of it. */
+  /** `job_start`: a job tied to the caller's turn, in a session of its own, and for a caller that is a job's agent, counted against that job's run too; the answer says what became of it. */
   async startFor(call: DelegateCall, ctx: ToolCtx): Promise<LoopToolResult> {
     const { scope } = ctx;
     const part = lines(await loadGuidance(this.#core.env.files, scope).part(LINES_PART));
-    const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, call, ctx.agent, { agent: ctx.agent.id, run: ctx.run, call: ctx.callId });
+    const starter = ctx.agent.job === undefined ? undefined : this.#live.get(ctx.agent.job);
+    const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, call, ctx.agent, { agent: ctx.agent.id, run: ctx.run, call: ctx.callId }, starter?.prepared.budget);
     if ("content" in begun) return begun;
     if ("hit" in begun) {
       const { hit } = begun;
@@ -124,7 +126,7 @@ export class Jobs implements JobsApi, JobsWork {
 
   /** The user starts a job, tied to no turn. It rejects when none can be started; the error says why, for the host. */
   async start(scope: Scope, start: JobStart): Promise<JobView> {
-    const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids() }, { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, undefined, undefined);
+    const begun = await this.#begin({ user: scope.user, chat: scope.chat, session: this.#core.ids() }, { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, undefined, undefined, undefined);
     if ("view" in begun) return { ...begun.view };
     if ("hit" in begun) throw new Error(`No job was started: ${begun.hit.value} jobs were started today${begun.hit.connection !== undefined ? ` on ${begun.hit.connection}` : ""}, and the setting allows ${begun.hit.max}.`);
     throw new Error(`No job was started: there is no agent definition named "${start.agent}", or no model for it to run on.`);
@@ -154,11 +156,11 @@ export class Jobs implements JobsApi, JobsWork {
 
   // ---------------------------------------------------------------- inside
 
-  /** Makes a job and counts it in the user's day: its view, the limit it would pass, or the answer that says why none can be made. */
-  async #begin(scope: Scope, call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined): Promise<{ view: JobView } | { hit: LimitHit } | LoopToolResult> {
+  /** Makes a job and counts it in the user's day: its view, the limit it would pass, or the answer that says why none can be made. `over` is the budget of the job whose agent started it. */
+  async #begin(scope: Scope, call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined, over: Budget | undefined): Promise<{ view: JobView } | { hit: LimitHit } | LoopToolResult> {
     const core = this.#core;
     const id = core.ids();
-    const prepared = await prepareJob({ ...core, jobs: this }, { id, scope, call, ...(by !== undefined ? { by } : {}), ...(parent !== undefined ? { parent } : {}) });
+    const prepared = await prepareJob({ ...core, jobs: this }, { id, scope, call, ...(by !== undefined ? { by } : {}), ...(parent !== undefined ? { parent } : {}), ...(over !== undefined ? { over } : {}) });
     if (!("run" in prepared)) return prepared;
     const own = jobCountsFor(prepared.settings, prepared.connection);
     const hit = await this.#count(scope.user, prepared.settings, own);

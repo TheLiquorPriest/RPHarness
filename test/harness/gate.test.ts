@@ -104,7 +104,7 @@ describe("rules on a tool call", () => {
 });
 
 describe("answers in a file's words", () => {
-  test("a tool that throws is answered with the file's line, holding the error's own words", async () => {
+  test("a tool that throws is answered with the file's line; the error's own words go to the trace, never to the model", async () => {
     const s = (open = await stage({
       drafted: true,
       tools: {
@@ -121,7 +121,8 @@ describe("answers in a file's words", () => {
 
     await s.turn(request("t1"));
 
-    expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe("world_query failed: Fixture: the ledger is locked.");
+    expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe("world_query failed.");
+    expect(s.trace.of("tool_ended")[0]?.event.result.details).toEqual({ error: "Fixture: the ledger is locked." });
   });
 
   test("a call to a tool the agent does not hold, arguments that do not fit, and arguments cut short by the length limit: never pi's own words", async () => {
@@ -138,11 +139,11 @@ describe("answers in a file's words", () => {
 
     const second = s.model.requests[1]!.messages;
     expect(answered(second, "call_1_1")).toBe("You hold no tool named fly_away.");
-    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: the arguments you sent do not fit what it takes. path: missing.");
+    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: the arguments you sent do not fit what it takes. path is missing.");
     expect(answered(s.model.requests[2]!.messages, "call_2_1")).toBe("todo was not run: your message reached its length limit, so its arguments may be cut short. Call it again.");
   });
 
-  test("a call that does not fit is told which arguments did not fit and why, as the check found them; the whole schema only for a tool whose schema is within the setting", async () => {
+  test("a call that does not fit is told which arguments did not fit and whether each was left out, never the check's own words; the whole schema only for a tool whose schema is within the setting", async () => {
     const s = (open = await stage({
       drafted: true,
       config: "tools:\n  schemaShown: 1500\n",
@@ -156,8 +157,8 @@ describe("answers in a file's words", () => {
     await s.turn(request("t1"));
 
     const second = s.model.requests[1]!.messages;
-    expect(answered(second, "call_1_1")).toStartWith("world_query was not run: the arguments you sent do not fit what it takes. day: expected integer, got string. It takes {");
-    expect(answered(second, "call_1_2")).toBe("world_apply was not run: the arguments you sent do not fit what it takes. note: missing.");
+    expect(answered(second, "call_1_1")).toStartWith("world_query was not run: the arguments you sent do not fit what it takes. day does not fit. It takes {");
+    expect(answered(second, "call_1_2")).toBe("world_apply was not run: the arguments you sent do not fit what it takes. note is missing.");
   });
 
   test("a long result reaches the model clipped to the setting, and its whole is kept in the turn's folder, where the line says", async () => {
@@ -219,7 +220,7 @@ describe("the bound on one answer", () => {
     const s = (open = await stage({
       drafted: true,
       config: "results:\n  clip: 20\n",
-      files: { ".prompts/tool-notices.md": "---\ndescription: Fixture - the notices with no line for a clipped answer.\nformat: lines\n---\nfailed: {{tool}} failed: {{error}}\n" },
+      files: { ".prompts/tool-notices.md": "---\ndescription: Fixture - the notices with no line for a clipped answer.\nformat: lines\n---\nfailed: {{tool}} failed.\n" },
       tools: { world_apply: { tier: "read", description: "Fixture: paints a floor.", run: async () => ({ content: [{ type: "text", text: DONE }], reports: OFF.slice(0, 1) }) } },
       answers: [{ pieces: [{ text: "<reply>The floor is painted.</reply>" }, { call: "world_apply", args: { closing: true } }] }, { pieces: [{ text: "Noted." }] }],
     }));

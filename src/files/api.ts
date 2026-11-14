@@ -17,7 +17,7 @@
 // The files, by kind (each kind's folder at each level is the host's, `Layer.folders`):
 // - Instruction files: plain markdown at a level's root, named by a definition's `reads`
 //   (`TURN` is `TURN.md`). No header. Never filled in.
-// - Agent definitions, `<agents>/<name>.md`: a header and a body (DEFINITION_FIELDS).
+// - Agent definitions, `<agents>/<name>.md`: a header (DEFINITION_FIELDS) and a body, a template that may name BODY_FIELDS.
 // - Skills, `<skills>/<name>/SKILL.md`: a header and a body (SKILL_FIELDS).
 // - Rules, `<rules>/<name>.md`: a header and a body (RULE_FIELDS). Under `<rules>/examples/` a rule is
 //   listed and never in force.
@@ -59,7 +59,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 
 // ---------------------------------------------------------------- where things come from
@@ -117,6 +117,9 @@ export interface Template {
 /** The header fields of an agent definition. Anything else in its header is reported. */
 export const DEFINITION_FIELDS = ["name", "description", "model", "effort", "tools", "out_of_reach", "reads", "given", "limits"] as const;
 
+/** The fields a definition's body may name, each a field of the contract's `BodyFields`. Anything else it names is reported. */
+export const BODY_FIELDS = ["agent", "definition", "plays"] as const satisfies readonly (keyof BodyFields)[];
+
 /** An agent's own limits from its definition (§10.11). Each absent is no limit of the definition's. */
 export interface DefinitionLimits {
   calls?: number;
@@ -143,7 +146,7 @@ export interface AgentDefinition {
   /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */
   given: string[];
   limits: DefinitionLimits;
-  /** Its body: the agent's instructions, a template (`You are {{character.name}}.`). */
+  /** Its body: the agent's instructions, a template a sub-agent's run fills with `BODY_FIELDS` (`You are {{plays}}.`). */
   instructions: Template;
   source: Source;
   replaces: Replaced[];

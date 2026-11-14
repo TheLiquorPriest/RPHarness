@@ -44,6 +44,8 @@ export interface JobAsk {
   call: DelegateCall;
   by?: AgentRef;
   parent?: ParentCall;
+  /** For a job an agent of another job started: that job's budget, which this one's calls and tokens count against too, so a chain of jobs spends no more than the first one may. */
+  over?: Budget;
 }
 
 /** How a job's run ended: its agent's outcome, what every agent of it spent, and a limit of the run's own it reached. */
@@ -53,12 +55,13 @@ export interface JobEnd {
   limit?: LimitHit;
 }
 
-/** A job's run, made and ready: the settings and connection its limits are read from, and its trace. */
+/** A job's run, made and ready: the settings and connection its limits are read from, its trace, and what its agents spend. */
 export interface PreparedJob {
   settings: Settings;
   connection: { id: string | null; name: string | null };
   agent: AgentRef;
   trace: RunTrace;
+  budget: Budget;
   /** Runs it to its end. `onText` hears what its agent writes, call by call; the signal stops every agent of it. */
   run(signal: AbortSignal, onText: (text: string) => void): Promise<JobEnd>;
 }
@@ -83,7 +86,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
   const { time, ...counted } = settings.jobs.run;
-  const budget = new Budget("job", counted);
+  const budget = new Budget("job", counted, ask.over);
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
   const keep = (agent: AgentRef): KeepRequest | undefined => {
@@ -170,9 +173,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     return Promise.resolve({ content: [], error: true });
   };
   const tools: OwnTool[] = [
-    fileRead({ files: env.files, words, texts: own }),
-    fileFind({ files: env.files, words, texts: own }),
-    fileWrite({ files: env.files, words, texts: own }),
+    fileRead({ files: env.files, words, texts: own, most: settings.perCall }),
+    fileFind({ files: env.files, words, texts: own, most: settings.perCall }),
+    fileWrite({ files: env.files, words, texts: own, most: settings.perCall }),
     todo({ lists: todos, words, text: own.get("todo"), changed: (agent, items) => trace.event(agent, undefined, { kind: "todo", items: [...items] }) }),
     delegate(team, own.get("delegate")),
     askAuthor(team, own.get("ask_author")),
@@ -211,6 +214,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     connection: { id: connection.id, name: connection.name },
     agent: ref,
     trace,
+    budget,
     async run(signal, onText) {
       const startedAt = env.clock.now();
       core.hub.started({ run: ask.id, scope, what: "job", agents: [], started: startedAt });

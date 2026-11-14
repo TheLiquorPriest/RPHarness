@@ -20,7 +20,7 @@ gap_head: Gap check {{id}}: {{topic}}{{#terms}}, with {{.}}{{/terms}}.
 gap_place: {{where}}: {{count}} found.
 gap_place_none: {{where}}: nothing found.
 gap_hit: - {{ref}} {{title}}: {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
-gap_failed: {{where}} could not be searched: {{error}}
+gap_failed: {{where}} could not be searched.
 gap_saved: What was searched and what came back is saved as {{path}}.
 gap_unsaved: What was searched and what came back is not saved: this work belongs to no turn.
 gap_no_topic: Name the topic to look for.

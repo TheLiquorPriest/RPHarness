@@ -37,10 +37,10 @@ describe("the drafted guidance", () => {
     expect((await g.definition("narrator"))?.tools).toEqual([]);
     expect((await g.definition("indexer"))?.reads).toEqual([]);
 
-    // The character's instructions are a template: its name is filled in when the agent starts.
+    // The character's instructions are a template: the character it plays is filled in when the agent starts.
     const character = await g.definition("character");
-    expect(character?.instructions.fields).toEqual(["character.name"]);
-    expect(character?.instructions.render({ character: { name: "Wren Hale" } }).text.startsWith("You are Wren Hale. Not an assistant playing them.")).toBe(true);
+    expect(character?.instructions.fields).toEqual(["plays"]);
+    expect(character?.instructions.render({ plays: "Wren Hale" }).text.startsWith("You are Wren Hale. Not an assistant playing them.")).toBe(true);
   });
 
   test("every skill is in the index by name and description, and its body is there when asked for", async () => {

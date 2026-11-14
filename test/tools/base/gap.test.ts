@@ -96,7 +96,8 @@ describe("gap_check", () => {
     const { extra } = host([broken]);
     const answer = textOf(await b.call("gap_check", { topic: "quillfeather" }, { extra }));
 
-    expect(answer).toContain("the state index is rebuilding");
+    expect(answer).toContain("state could not be searched.");
+    expect(answer).not.toContain("the state index is rebuilding");
     const saved = await evidence(answer);
     expect(saved.searched.map((s) => s.where)).toEqual(["chat", "lore"]);
   });

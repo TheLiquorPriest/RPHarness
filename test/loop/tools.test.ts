@@ -39,8 +39,8 @@ describe("around a tool call", () => {
     expect(scripted.requests).toHaveLength(2);
     const result = scripted.requests[1]!.messages.at(-1)!;
     expect(result.role).toBe("toolResult");
-    expect(textOf(result)).toContain("Fixture failure: the ledger is locked.");
-    expect(recorder.of("tool_ended")[0]!.event).toMatchObject({ clean: false, endedRun: false, result: { error: true } });
+    expect(textOf(result)).toBe("Fixture: broken failed.");
+    expect(recorder.of("tool_ended")[0]!.event).toMatchObject({ clean: false, endedRun: false, result: { error: true, details: { error: "Fixture failure: the ledger is locked." } } });
   });
 
   test("a closing call a rule holds does not end the run: the call does not run, and the agent reads the rule's text in its place", async () => {

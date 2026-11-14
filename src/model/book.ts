@@ -63,14 +63,6 @@ const LAST_READ_USED = "Until then, the connections as last read are used.";
  */
 export type Connection = Omit<StoredConnection, "headers"> & { headers?: Record<string, string | null> };
 
-/** A connection as its document keeps it: its headers by name alone. */
-type KeptConnection = Omit<StoredConnection, "headers"> & { headers?: string[] };
-
-/** The secrets document as this build writes it: each connection's header values, by its id and then by name, beside the rest. */
-interface SecretsDocument extends SecretsDoc {
-  headers?: Record<string, Record<string, string>>;
-}
-
 interface Secrets {
   keys: Record<string, string>;
   /** Each connection's header values, by its id, then by the header's name. */
@@ -526,7 +518,7 @@ export class Book {
     for (const c of put) {
       keep(c.id, c.headers);
       const { headers, ...rest } = c;
-      const kept: KeptConnection = { ...rest, ...(headers !== undefined ? { headers: Object.keys(headers) } : {}) };
+      const kept: StoredConnection = { ...rest, ...(headers !== undefined ? { headers: Object.keys(headers) } : {}) };
       const at = entries.findIndex((e) => isRecord(e) && e.id === c.id);
       if (at === -1) entries.push(kept);
       else entries[at] = kept;
@@ -550,7 +542,7 @@ export class Book {
     const secrets = this.secrets;
     if (secrets === undefined) return;
     const next = { keys: keys ?? secrets.keys, headers: headers ?? secrets.headers };
-    const doc: SecretsDocument = { v: FORMAT, keys: next.keys, signins: secrets.signins, ...(secrets.device !== undefined ? { device: secrets.device } : {}), ...(Object.keys(next.headers).length > 0 ? { headers: next.headers } : {}) };
+    const doc: SecretsDoc = { v: FORMAT, keys: next.keys, signins: secrets.signins, ...(secrets.device !== undefined ? { device: secrets.device } : {}), ...(Object.keys(next.headers).length > 0 ? { headers: next.headers } : {}) };
     try {
       await this.deps.store.saveSecrets(structuredClone(doc));
     } catch {

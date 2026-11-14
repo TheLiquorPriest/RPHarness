@@ -19,6 +19,8 @@
 //     heldSentences: 1                 sentences held back while a rule that interrupts covers the reply
 //     tailSentences: 3                 sentences of what was shown that go with the line an agent goes on under
 //     leadSampling: own                the lead's sampling: its own, or the preset's
+//     intentWait: 2                    seconds a tool or the reply waits, at most, for the host to take
+//                                      the intent record written before it; 0 waits for nothing
 //   progress:
 //     show: all                        all the progress lines, or least: only the line that keeps a silent turn alive
 //     silence: 60                      seconds of nothing shown before that line
@@ -33,6 +35,9 @@
 //     connections: { <connection>: high } the effort every agent on a connection thinks at, by the connection's
 //                                      name or its id, whatever its definition says: off, minimal, low,
 //                                      medium, high, xhigh or max; none by default
+//   trace:
+//     requests: first                  which calls' requests are kept in the turn's folder, each message
+//                                      as role and text: first (each agent's first call), all, or none
 
 import type { Effort, FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
@@ -40,6 +45,9 @@ import { REPLY_DEFAULTS } from "../reply/defaults";
 import { SEARCH_HITS } from "../tools/search";
 
 export type ReplyFormSetting = "tags" | "two-step";
+
+/** Which model calls have what they were sent kept in the turn's folder: each agent's first, every one, or none. */
+export type RequestsSetting = "first" | "all" | "none";
 
 /** Every effort a definition's `effort:` takes, which `effort.connections` takes too. */
 const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
@@ -64,6 +72,8 @@ export interface Settings {
   heldSentences: number;
   tailSentences: number;
   leadSampling: "own" | "preset";
+  /** How long, in milliseconds, a tool or the reply waits at most for the host to take the intent record. */
+  intentWaitMs: number;
   progress: "all" | "least";
   silenceMs: number;
   clipChars: number;
@@ -73,6 +83,8 @@ export interface Settings {
   ruleWindow: number;
   /** The effort agents on a connection think at, by the connection's name or id, over their definitions'. */
   efforts: Readonly<Record<string, Effort>>;
+  /** Which calls' requests are kept in the turn's folder. */
+  requests: RequestsSetting;
 }
 
 /** The defaults, where no level sets a value. */
@@ -87,6 +99,9 @@ export const DEFAULT_SETTINGS: Settings = {
   streamAnyway: [],
   heldSentences: REPLY_DEFAULTS.heldSentences,
   tailSentences: REPLY_DEFAULTS.tailSentences,
+  // The host takes an intent record in the same process, in milliseconds: this is room for a slow
+  // disk, and short enough that a host that stalls costs a reply no more than a moment.
+  intentWaitMs: 2_000,
   // Appendix D.1: the lead's sampling is its own.
   leadSampling: "own",
   // Appendix D.1: progress lines in the thinking block.
@@ -101,6 +116,8 @@ export const DEFAULT_SETTINGS: Settings = {
   ruleWindow: 500,
   // None: each agent thinks at the effort its definition gives, or its model's own.
   efforts: {},
+  // What the floor test and the Turn page read (§17.1: the Author's first request), at one file per agent a turn.
+  requests: "first",
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -208,12 +225,14 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const streamAnyway = Array.isArray(streamValue) ? streamValue.filter((name): name is string => typeof name === "string") : [];
   if (streamValue !== undefined && !Array.isArray(streamValue)) passed("reply.streamAnyway", streamValue);
   const heldSentences = whole("reply.heldSentences", reply["heldSentences"]) ?? DEFAULT_SETTINGS.heldSentences;
+  const intentWait = whole("reply.intentWait", reply["intentWait"]);
 
   const progress = section("progress");
   const silence = count("progress.silence", progress["silence"]);
   const results = section("results");
   const tools = section("tools");
   const rules = section("rules");
+  const trace = section("trace");
   // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
   const effort = section("effort");
   const efforts: Record<string, Effort> = {};
@@ -239,12 +258,14 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     heldSentences,
     tailSentences: count("reply.tailSentences", reply["tailSentences"]) ?? DEFAULT_SETTINGS.tailSentences,
     leadSampling: oneOf<"own" | "preset">("reply.leadSampling", reply["leadSampling"], ["own", "preset"]) ?? DEFAULT_SETTINGS.leadSampling,
+    intentWaitMs: intentWait !== undefined ? intentWait * 1000 : DEFAULT_SETTINGS.intentWaitMs,
     progress: oneOf<"all" | "least">("progress.show", progress["show"], ["all", "least"]) ?? DEFAULT_SETTINGS.progress,
     silenceMs: silence !== undefined ? silence * 1000 : DEFAULT_SETTINGS.silenceMs,
     clipChars: count("results.clip", results["clip"]) ?? DEFAULT_SETTINGS.clipChars,
     searchHits: count("tools.search", tools["search"]) ?? DEFAULT_SETTINGS.searchHits,
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
     efforts,
+    requests: oneOf<RequestsSetting>("trace.requests", trace["requests"], ["first", "all", "none"]) ?? DEFAULT_SETTINGS.requests,
   };
 }
 

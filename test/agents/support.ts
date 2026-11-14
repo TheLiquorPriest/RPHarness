@@ -246,6 +246,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
       models: source,
       connection: connectionOf,
       hold: (names) => registry?.hold(names) ?? { tools: [], missing: [...names] },
+      unregistered: (name, tools) => env.log.warn("Tools a sub-agent's definition lists are registered by nobody; it holds the rest.", { agent: name, tools: [...tools] }),
       gate: gateFor,
       texts: () => texts,
       rules: () => rules,

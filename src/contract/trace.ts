@@ -52,8 +52,14 @@ export type TraceEvent =
   | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] }
   /** The lead's intent record (§10.3), as it was written. */
   | { kind: "intent"; text: string }
-  /** A model call was sent: the agent's call number, from 1, and what it carried. */
-  | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number }
+  /**
+   * A model call was sent: the agent's call number, from 1, and what it carried. `request`: the file
+   * in the turn's folder that holds the call's messages, in order, as role and text, where the
+   * user's setting keeps them (`trace.requests`). `toolTokens` and `openingTokens`: the tokens of the
+   * tool list as sent and of the agent's opening block, by RPH's own estimate; RPH gives both on
+   * every call (absent only in records made before it did).
+   */
+  | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number }
   /** A model call's answer, whole: its text, its thinking where the provider gave it, its tool calls, why it stopped, its tokens, its time; or its failure. */
   | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string }
   /** A tool call began; `via` when it was reached through `tool_use`, and `closing` when the agent marked it so (§10.7). */

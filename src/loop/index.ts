@@ -5,4 +5,4 @@ export type { TextChannel } from "./channel";
 export type { Fired, RunEndMoment, RunEndRules, StreamFired, StreamRules, Written } from "./rules";
 export { AgentRunner, CLOSING, isClosing, type RunnerOptions, type RunnerTexts, type Work, type WorkInput, type WorkOptions } from "./runner";
 export { type ParentCall, RunTrace } from "./trace";
-export type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
+export type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";

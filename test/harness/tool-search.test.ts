@@ -120,3 +120,45 @@ test("a family the lead's definition keeps out of reach is neither found nor cal
   expect(answerTo(s, "use-1")).not.toBe("");
   expect(ran).toEqual([]);
 });
+
+const GM = "---\nname: gm\ndescription: Fixture game master.\nmodel: default\ntools: [file_write, tool_search, tool_use]\n---\nFixture game master: set the scene for the lead.\n";
+const LEAD = "---\nname: lead\ndescription: Fixture lead that hands work to a game master.\nmodel: default\ntools: [delegate, write_reply, reply_release]\ngiven:\n  - prompt:*\n  - briefing\n---\nFixture lead: answer the player.\n";
+
+test("the reply tools are reached only through an agent's own list: a sub-agent that holds tool_search and tool_use neither finds nor calls them, and the lead's reply is the one the player gets", async () => {
+  const s = (open = await stage({
+    files: { ".agents/gm.md": GM, ".agents/lead.md": LEAD },
+    answers: [
+      { pieces: [{ call: "delegate", args: { agent: "gm", brief: "Set the scene at the landing." } }] },
+      { pieces: [{ call: "file_write", args: { path: "sessions/s1/turns/t1/scratch/gm.md", op: "write", text: "The game master's own words.\n" } }] },
+      { pieces: [{ call: "tool_search", args: { words: "reply release write" }, id: "search-1" }, { call: "tool_use", args: { name: "reply_release", args: { path: "sessions/s1/turns/t1/scratch/gm.md" } }, id: "use-1" }, { call: "tool_use", args: { name: "write_reply", args: { brief: "Say it.", live: true } }, id: "use-2" }] },
+      { pieces: [{ text: "The landing is set." }] },
+      { pieces: [{ text: "<reply>Gulls wheel over the landing.</reply>" }] },
+    ],
+  }));
+
+  const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+  expect(outcome).toMatchObject({ status: "released", reply: "Gulls wheel over the landing.", form: "tags" });
+  expect(sink.text).toBe("Gulls wheel over the landing.");
+  expect(s.trace.of("released").map((record) => record.agent.definition)).toEqual(["lead"]);
+  for (const name of ["reply_release", "write_reply"]) expect(answerTo(s, "search-1")).not.toContain(name);
+  expect(answerTo(s, "use-1")).toBe("There is no tool named reply_release that you can use.");
+  expect(answerTo(s, "use-2")).toBe("There is no tool named write_reply that you can use.");
+});
+test("the tool list holds through a session when a tool's file changes: the change is declared from the next session on", async () => {
+  const s = (open = await stage({ answers: Array.from({ length: 3 }, () => ({ pieces: [{ text: "<reply>The tide turns.</reply>" }] })) }));
+  const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".tools", "chat_read.md")).text();
+  const edited = shipped.replace(/^Reads messages of the chat.*$/m, "Fixture: reads the chat, edited mid-session.");
+  expect(edited).not.toBe(shipped);
+  const described = (index: number): string | undefined => s.model.requests[index]!.tools.find((tool) => tool.name === "chat_read")?.description;
+
+  expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+  await Bun.write(join(s.dir, "files", ".tools", "chat_read.md"), edited);
+  expect((await s.turn(request("t2", { lead: "lead", parent: "t1" }))).outcome.status).toBe("released");
+  const other = request("u1", { lead: "lead" });
+  expect((await s.turn({ ...other, scope: { ...other.scope, session: "s2" } })).outcome.status).toBe("released");
+
+  expect(JSON.stringify(s.model.requests[1]!.tools)).toBe(JSON.stringify(s.model.requests[0]!.tools));
+  expect(described(1)).not.toContain("edited mid-session");
+  expect(described(2)).toBe("Fixture: reads the chat, edited mid-session.");
+});

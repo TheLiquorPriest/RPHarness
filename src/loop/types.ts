@@ -1,4 +1,5 @@
 // What the agent runner takes and gives, beyond the contract's own types.
+import type { Message } from "@earendil-works/pi-ai";
 import type { AgentRef, AgentStatus, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolCtx, ToolResult, Usage } from "../contract";
 import type { Fired } from "./rules";
 
@@ -84,6 +85,13 @@ export interface CallRequest {
   call: number;
   model: string;
 }
+
+/**
+ * Keeps what a call is sent, where the user's setting asks for it (`trace.requests`): given the
+ * call's number and its messages as sent, the path of the file they are kept in, which the call's
+ * `call_started` names; undefined when this call's are not kept.
+ */
+export type KeepRequest = (call: number, messages: readonly Message[]) => string | undefined;
 
 /** The limits a user sets for one agent's work (§10.11). Each absent is no limit. */
 export interface AgentLimits {

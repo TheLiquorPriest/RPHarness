@@ -5,6 +5,12 @@ import type { ToolCtx } from "../contract";
 import type { LoopToolResult } from "../loop/types";
 import { argumentsOf, fieldsOf, type OwnTool, text, type ToolText } from "./kit";
 
+/**
+ * The family of the reply tools, which `out_of_reach:` names. Only an agent whose own list names one
+ * of them reaches it: who releases the turn's one reply is the definitions' to say (§10.6).
+ */
+export const REPLY_FAMILY = "reply";
+
 /** What the reply tools do, which is the turn's: its writer, its desk, its sink. */
 export interface ReplyWork {
   /** The writer's call on the brief: a draft that comes back, or the reply live. */
@@ -16,7 +22,7 @@ export interface ReplyWork {
 export function writeReply(work: ReplyWork, own: ToolText | undefined): OwnTool {
   return {
     name: "write_reply",
-    family: "reply",
+    family: REPLY_FAMILY,
     tier: "read",
     description: own?.description ?? "",
     parameters: argumentsOf({ brief: { type: "string" }, live: { type: "boolean" } }, ["brief"], own),
@@ -32,7 +38,7 @@ export function writeReply(work: ReplyWork, own: ToolText | undefined): OwnTool 
 export function replyRelease(work: ReplyWork, own: ToolText | undefined): OwnTool {
   return {
     name: "reply_release",
-    family: "reply",
+    family: REPLY_FAMILY,
     tier: "read",
     description: own?.description ?? "",
     parameters: argumentsOf({ path: { type: "string" } }, [], own),

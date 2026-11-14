@@ -1,13 +1,14 @@
 // RPH's own tools for sub-agents (§10.5, §13.3, §13.4): `delegate` starts an agent on a brief with
 // what it is given; `ask_author` ends a sub-agent's work with its question for the agent that set
-// it going; `agent_message` goes on with one where it stopped. Each is described by its file in
-// `.tools/`; what they do is the turn's team's (`TeamWork`).
+// it going; `agent_message` goes on with one where it stopped; `agent_drop` drops what one wrote,
+// which the host staged under the turn. Each is described by its file in `.tools/`; what they do is
+// the turn's team's (`TeamWork`).
 import type { JsonValue, ToolCtx } from "../contract";
 import type { LoopToolResult } from "../loop/types";
 import { argumentsOf, fieldsOf, type OwnTool, text, type ToolText } from "../tools/kit";
 
 /** The names of these tools, whose files the harness reads with its other tools' (`.tools/<name>.md`). */
-export const AGENT_TOOLS = ["delegate", "ask_author", "agent_message"] as const;
+export const AGENT_TOOLS = ["delegate", "ask_author", "agent_message", "agent_drop"] as const;
 
 /** A `delegate` call: which definition, the brief, what it is given by name, the character it plays, and what to send back. */
 export interface DelegateCall {
@@ -38,11 +39,17 @@ export interface MessageCall {
   consent?: ConsentArgument;
 }
 
-/** What the three tools do, which is the turn's team's. */
+/** An `agent_drop` call: the agent, by its handle, whose writes this turn are dropped. */
+export interface DropCall {
+  agent: string;
+}
+
+/** What the tools do, which is the turn's team's. */
 export interface TeamWork {
   delegate(call: DelegateCall, ctx: ToolCtx): Promise<LoopToolResult>;
   ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult>;
   message(call: MessageCall, ctx: ToolCtx): Promise<LoopToolResult>;
+  drop(call: DropCall, ctx: ToolCtx): Promise<LoopToolResult>;
 }
 
 /** A text argument with something in it. */
@@ -112,5 +119,16 @@ export function agentMessage(work: TeamWork, own: ToolText | undefined): OwnTool
         ctx,
       );
     },
+  };
+}
+
+export function agentDrop(work: TeamWork, own: ToolText | undefined): OwnTool {
+  return {
+    name: "agent_drop",
+    family: "agents",
+    tier: "read",
+    description: own?.description ?? "",
+    parameters: argumentsOf({ agent: { type: "string" } }, ["agent"], own),
+    run: (args, ctx) => work.drop({ agent: text(fieldsOf(args), "agent") ?? "" }, ctx),
   };
 }

@@ -84,6 +84,39 @@ test("a message to a name no agent goes by, and a question from the run's own fi
 
   expect(outcome).toMatchObject({ status: "done", text: "Settled." });
   const results = s.models["lead-model"]!.requests[1]!.messages.filter((message) => message.role === "toolResult").map(textOf);
-  expect(results).toEqual(["No agent started this turn goes by gm-4.", "There is no one above you to ask."]);
+  expect(results).toEqual(["No agent you started this turn goes by gm-4.", "There is no one above you to ask."]);
   expect(s.models["gm-model"]!.requests).toHaveLength(0);
+});
+
+const KEEPER = definition("keeper", { model: "keeper-model", tools: ["agent_message"] }, "Fixture keeper: keep the lighthouse's records.");
+
+test("only the agent that started a sub-agent answers or continues it: another agent's message, consent and all, is answered as a handle it does not hold", async () => {
+  const s = (open = await stage({
+    files: { ".agents/lead.md": LEAD, ".agents/gm.md": GM, ".agents/keeper.md": KEEPER },
+    models: {
+      "lead-model": [
+        { pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule on the jump to the far ledge." }, id: "d-1" }] },
+        { pieces: [{ call: "delegate", args: { agent: "keeper", brief: "Note the jump in the log." }, id: "d-2" }] },
+        { pieces: [{ call: "agent_message", args: { agent: "gm-1", message: "Twenty feet." }, id: "m-1" }] },
+        { pieces: [{ text: "Settled." }] },
+      ],
+      "gm-model": [{ pieces: [{ call: "ask_author", args: { question: "How wide is the gap?", searched: "the scene notes" }, id: "a-1" }] }, { pieces: [{ text: "At twenty feet the jump fails." }] }],
+      "keeper-model": [
+        { pieces: [{ call: "agent_message", args: { agent: "gm-1", message: "Forty feet, and the rail is sound.", consent: { topic: "the rail" } }, id: "k-1" }] },
+        { pieces: [{ text: "Noted." }] },
+      ],
+    },
+  }));
+
+  const outcome = await (await s.play("She leaps for the far ledge.")).done;
+
+  expect(outcome).toMatchObject({ status: "done", text: "Settled." });
+  expect(lastResult(s.models["keeper-model"]!.requests[1]!.messages)).toBe("No agent you started this turn goes by gm-1.");
+  expect(s.told.filter((item) => item.kind === "consent")).toEqual([]);
+  // The question was answered by the lead's message alone, under the lead's call.
+  const gm = s.models["gm-model"]!.requests;
+  expect(gm).toHaveLength(2);
+  expect(lastResult(gm[1]!.messages)).toBe("Twenty feet.");
+  const stretches = s.trace.records.filter((record) => record.agent.id === "gm-1" && record.event.kind === "agent_started");
+  expect(stretches.map((record) => record.parent?.call)).toEqual(["d-1", "m-1"]);
 });

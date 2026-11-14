@@ -144,7 +144,7 @@ test("every text sent to the lead and its sub-agents is a file, the request, the
     "gm-1 stopped to ask before going on:",
     "gm-1 answered:",
     "gm-1 was not given lore:e-999: it could not be found.",
-    "No agent started this turn goes by gm-9.",
+    "No agent you started this turn goes by gm-9.",
     "There is no agent definition named nobody.",
     "gm was not started: it would stand 2 deep, and the player allows 1.",
     "Wrote persistent-workspace/outcome.md",

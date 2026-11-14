@@ -15,11 +15,11 @@ import type { AgentRef, ConsentGrant, Environment, JsonValue, LimitHit, Log, Mod
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
 import type { AgentSettings } from "../harness/settings";
-import { type AgentOutcome, AgentRunner, type Budget, type LoopToolResult, type ParentCall, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { attach, joined, type Wanted } from "./attachments";
-import type { AskCall, ConsentArgument, DelegateCall, MessageCall, TeamWork } from "./tools";
+import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
 
 /** The frame every brief is laid out by (`.prompts/delegate-brief.md`). */
 const BRIEF_PART = "delegate-brief";
@@ -45,6 +45,8 @@ export interface TeamDeps {
   connection(definition: AgentDefinition): Promise<{ choice: AgentChoice; label: string }>;
   /** The tools an agent whose definition lists `names` holds: the turn's registry, which holds these three tools too. */
   hold(names: readonly string[]): Held;
+  /** Tools a sub-agent's definition lists that nobody registered: the turn says so, once in its session. */
+  unregistered(definition: string, tools: readonly string[]): void;
   /** What runs around each of an agent's tool calls, made for that agent as the lead's is made for the lead. */
   gate(agent: AgentRef, parent: ParentCall, tools: readonly HeldTool[]): ToolGate;
   /** The texts the turn's runners send a model. */
@@ -63,6 +65,8 @@ export interface TeamDeps {
   progress?(name: string, fields: Fields): void;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map. Without it, such a name is not found. */
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
+  /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); none keeps nothing. */
+  keep?(agent: AgentRef): KeepRequest | undefined;
 }
 
 interface Member {
@@ -72,6 +76,8 @@ interface Member {
   level: number;
   /** The call its latest work hangs under. */
   parent: ParentCall;
+  /** Hears how each stretch of its work that a message set going ended. */
+  ended?(outcome: AgentOutcome): void;
 }
 
 /** A sub-agent made and ready to start: itself, its first message, what it was given by name, what nobody could give, and its model's room. */
@@ -217,7 +223,7 @@ export class Team implements TeamWork {
     const parent: ParentCall = { agent: ctx.agent.id, run: ctx.run, call: ctx.callId };
     const fields = fieldsOf(ref);
     const held = d.hold(definition.tools);
-    if (held.missing.length > 0) d.env.log.warn("Tools a sub-agent's definition lists are registered by nobody; it holds the rest.", { agent: definition.name, tools: held.missing });
+    if (held.missing.length > 0) d.unregistered(definition.name, held.missing);
     const instructions = await instructionsOf(d.guidance, definition, held.tools, (name) => d.hold([name]).tools.length > 0, fields, d.env.log);
     const wanted: Wanted[] = [...definition.given.map((name) => ({ ref: name, from: "definition" as const })), ...call.attach.map((name) => ({ ref: name, from: "delegate" as const }))];
     const slice = d.slice?.bind(d);
@@ -226,6 +232,7 @@ export class Team implements TeamWork {
     // Without the frame, the brief and what it is given go as they are, one after another.
     const brief = loaded.brief?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
     const rules = d.rules();
+    const keep = d.keep?.(ref);
     const runner = new AgentRunner({
       agent: ref,
       trace: d.trace,
@@ -242,6 +249,7 @@ export class Team implements TeamWork {
       stream: rules.stream(ref),
       runEnd: rules.runEnd,
       gate: d.gate(ref, parent, held.tools),
+      ...(keep !== undefined ? { keep } : {}),
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     return { member: { ref, runner, level, parent }, first: joined([brief]), given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
@@ -256,13 +264,31 @@ export class Team implements TeamWork {
   async message(call: MessageCall, ctx: ToolCtx): Promise<LoopToolResult> {
     const loaded = await this.#load();
     const member = this.#members.get(call.agent);
-    if (member === undefined) return answer(loaded.words("no_handle", { agent: call.agent }), true);
+    // A handle is held by the agent that started it (§10.5, §13.4): no other answers, continues or grants it consent.
+    if (member === undefined || member.ref.parent !== ctx.agent.id) return answer(loaded.words("no_handle", { agent: call.agent }), true);
     // Nothing is awaited between this and the start, so two messages to one agent cannot both begin.
     if (member.runner.working) return answer(loaded.words("busy", fieldsOf(member.ref)), true);
     if (ctx.signal.aborted) return said("");
     const work = this.#begin(member, { message: call.message }, { parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId } }, ctx);
     if (call.consent !== undefined) await this.#consent(member, call.consent, ctx);
     return this.#end(member, work, ctx, [], loaded);
+  }
+
+  /** Drops what an agent the caller started wrote this turn, which the host staged under the turn (§13.4); the host says what that undoes. */
+  async drop(call: DropCall, ctx: ToolCtx): Promise<LoopToolResult> {
+    const d = this.#d;
+    const { words } = await this.#load();
+    const member = this.#members.get(call.agent);
+    if (member === undefined || member.ref.parent !== ctx.agent.id) return answer(words("no_handle", { agent: call.agent }), true);
+    // What it writes while it works would come after the drop.
+    if (member.runner.working) return answer(words("busy", fieldsOf(member.ref)), true);
+    try {
+      await d.env.events.dropStaged(d.trace.scope, member.ref);
+    } catch (error) {
+      d.env.log.error("The host could not drop a sub-agent's writes.", { agent: member.ref.id, error: error instanceof Error ? error.message : String(error) });
+      return answer(words("not_dropped", fieldsOf(member.ref)), true);
+    }
+    return answer(words("dropped", fieldsOf(member.ref)));
   }
 
   #load(): Promise<Loaded> {
@@ -298,9 +324,37 @@ export class Team implements TeamWork {
       begun.untrack();
       ctx.signal.removeEventListener("abort", begun.stop);
     }
+    member.ended?.(outcome);
     if (outcome.status === "asked") this.#d.progress?.("question", fieldsOf(member.ref));
     if (outcome.status === "failed") this.#d.env.log.warn("A sub-agent's work failed.", { agent: member.ref.id, failure: outcome.failure ?? "harness", error: outcome.error ?? "" });
     return this.#result(member.ref, outcome, missing, loaded);
+  }
+
+  /**
+   * Takes the writer `write_reply` starts into the team (§10.6), as `delegate` takes a sub-agent: one
+   * deeper than the agent that called, and counted among the turn's agents, so the user's limits hold
+   * for it and for whatever it starts, and it may ask the agent that called, which answers it with
+   * `agent_message`. `ended` hears how each later stretch of its work ended. Gives the answer that
+   * says why it cannot start, or undefined once it is a member.
+   */
+  async enlist(ref: AgentRef, runner: AgentRunner, parent: ParentCall, ctx: ToolCtx, ended?: (outcome: AgentOutcome) => void): Promise<LoopToolResult | undefined> {
+    const level = (this.#members.get(ctx.agent.id)?.level ?? 0) + 1;
+    const { depth, agents } = this.#d.settings();
+    // Its place is taken before anything is awaited, as a delegate's is.
+    const hit: LimitHit | undefined = level > depth ? { limit: "depth", per: "turn", max: depth, value: level } : agents !== undefined && this.#started >= agents ? { limit: "agents", per: "turn", max: agents, value: this.#started } : undefined;
+    if (hit === undefined) {
+      this.#started += 1;
+      this.#members.set(ref.id, { ref, runner, level, parent, ...(ended !== undefined ? { ended } : {}) });
+      return undefined;
+    }
+    const { words } = await this.#load();
+    return this.#limited(ctx, hit, words(hit.limit, { agent: ref.definition, max: hit.max, value: hit.value }));
+  }
+
+  /** A member's work that ended on a question, as the answer to the call that started it: the question laid out by its part, and marked (§10.5). */
+  async asked(ref: AgentRef, outcome: AgentOutcome): Promise<LoopToolResult> {
+    this.#d.progress?.("question", fieldsOf(ref));
+    return this.#result(ref, outcome, [], await this.#load());
   }
 
   /** How a stretch of a sub-agent's work came back: its answer, or its question, or why it ended without one; then each attachment nobody could give. */

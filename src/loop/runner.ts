@@ -11,13 +11,14 @@
 // the length limit, a tool that threw), the call is answered with the runner's texts instead, which
 // the harness reads from files. A text the file does not have leaves the answer empty.
 import { Agent, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, getCurrentTools, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import { DEFAULT_CHARS_PER_TOKEN, tokensOf } from "../model/tokens";
 import { addUsage, Budget, emptyUsage } from "./budget";
 import type { TextChannel } from "./channel";
 import type { Fired, RunEndRules, StreamFired, StreamRules } from "./rules";
 import type { ParentCall, RunTrace } from "./trace";
-import type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateCall, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
+import type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
 
 /** The argument RPH adds to every tool (§10.7, Appendix A): the agent marks a call that needs no answer. */
 export const CLOSING = "closing";
@@ -73,6 +74,8 @@ export interface RunnerOptions {
   gate?: ToolGate;
   /** Where its text goes as it streams, when it writes the reply. */
   channel?: TextChannel;
+  /** Keeps what its calls are sent, where the user's setting asks for it; none keeps nothing. */
+  keep?: KeepRequest;
 }
 
 export type WorkInput =
@@ -343,6 +346,7 @@ export class AgentRunner {
     stint.callFrom = this.#pi.state.messages.length;
     stint.calling = true;
     this.#o.channel?.begin();
+    const request = this.#o.keep?.(this.#calls, context.messages);
     this.#emit(stint, {
       kind: "call_started",
       call: this.#calls,
@@ -352,6 +356,10 @@ export class AgentRunner {
       ...(settings.maxTokens !== undefined ? { maxTokens: settings.maxTokens } : {}),
       messages: context.messages.length,
       tools: this.#pi.state.tools.length,
+      ...(request !== undefined ? { request } : {}),
+      // The model layer's own estimate, so these weigh as its counts of a whole request do.
+      toolTokens: tokensOf(JSON.stringify(getCurrentTools(context.messages)), DEFAULT_CHARS_PER_TOKEN),
+      openingTokens: tokensOf(this.#o.instructions ?? "", DEFAULT_CHARS_PER_TOKEN),
     });
     let source: Promise<AssistantMessageEventStream>;
     try {

@@ -1,9 +1,9 @@
 // A whole turn on the folder host, under the drafted guidance (§10.2, §10.3, §10.7, §10.11): one
 // model call for a simple turn, with the lead's context in its blocks and the prompt's messages in
 // the order sent; the intent record told to the host before any tool runs; the reply streamed as it
-// is written; a tool nobody registered left out and reported; and the turn's call limit. Under RPH's
-// own guidance: the reply contract shown again in the briefing where its template puts it, and only
-// when its template says so.
+// is written; a tool nobody registered left out and reported, once in a session; and the turn's
+// call limit. Under RPH's own guidance: the reply contract shown again in the briefing where its
+// template puts it, and only when its template says so.
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { TurnRequest } from "../../src/contract";
@@ -202,6 +202,19 @@ describe("the lead's tools", () => {
     expect(reported?.fields?.["tools"]).toEqual(expect.arrayContaining(["archive_search", "web_search"]));
     expect(reported?.fields?.["tools"]).not.toContain("delegate");
     expect(reported?.fields?.["tools"]).not.toContain("world_query");
+  });
+
+  test("a tool nobody registered is reported once, when the session opens: not again on its later turns, and again for another session", async () => {
+    const s = (open = await stage({ answers: Array.from({ length: 3 }, () => ({ pieces: [{ text: "<reply>Calm, for now.</reply>" }] })) }));
+    const warnings = (): unknown[] => s.logged.filter((line) => line.level === "warn" && line.message.startsWith("Tools the lead's definition lists are registered by nobody")).map((line) => line.fields?.["tools"]);
+
+    for (const req of [request("t1", { lead: "lead" }), request("t2", { lead: "lead", parent: "t1" })]) expect((await s.turn(req)).outcome.status).toBe("released");
+    // RPH's own lead names the searches of the host's other stores and of the web, which the folder host does not offer.
+    expect(warnings()).toEqual([["archive_search", "web_search"]]);
+
+    const other = request("u1", { lead: "lead" });
+    expect((await s.turn({ ...other, scope: { ...other.scope, session: "s2" } })).outcome.status).toBe("released");
+    expect(warnings()).toEqual([["archive_search", "web_search"], ["archive_search", "web_search"]]);
   });
 });
 

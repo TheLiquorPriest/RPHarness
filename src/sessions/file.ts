@@ -256,12 +256,14 @@ export class SessionLog {
   }
 
   /**
-   * Where a turn hangs that follows `follows`: the newest entry of that turn when it is one of this
-   * session's; otherwise, for the first turn of a session and every swipe of it, where the session
-   * began (the entry it was opened with, or nothing).
+   * Where a turn hangs that follows `follows`, as the request names it (`TurnRequest.parent`): left
+   * out, the session's latest turn, where its path ends now; a turn of this session, that turn's
+   * newest entry; `null`, or a turn that is not this session's, where the session began (the entry
+   * it was opened with, or nothing).
    */
-  anchor(follows: string | undefined): string | null {
-    const tip = follows === undefined ? undefined : this.#tips.get(follows);
+  anchor(follows: string | null | undefined): string | null {
+    if (follows === undefined) return this.#leaf;
+    const tip = follows === null ? undefined : this.#tips.get(follows);
     return tip ?? this.#opened?.id ?? null;
   }
 

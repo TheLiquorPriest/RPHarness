@@ -50,8 +50,12 @@ export interface SinceItem {
 export interface TurnRequest {
   /** Where the turn is played; `turn` is the turn being answered, made by the host before it asks (§10.1 step 4). */
   scope: Scope & { turn: string };
-  /** The turn this one follows; where the session forks for a swipe (§10.10). */
-  parent?: string;
+  /**
+   * The turn this one follows; where the session forks for a swipe (§10.10). Left out: the host
+   * keeps no tree, and the turn follows the session's latest turn. `null`: the turn follows no turn
+   * of the session, as the first turn and every swipe of it do.
+   */
+  parent?: string | null;
   kind: TurnKind;
   /** Who the reply speaks as, in a group chat (§10.10). */
   speaker?: string;
@@ -92,6 +96,11 @@ export interface Release {
   path?: string;
   /** The reply's length, in UTF-16 code units. */
   length: number;
+  /**
+   * The reply went out with no intent record of the turn taken before it (§10.3): none was written,
+   * or the host had not taken it when the user's bound on that wait (`reply.intentWait`) ran out.
+   */
+  withoutIntent?: true;
 }
 
 /** A limit the user sets (§10.11): model calls, tokens in and out, wall time, sub-agent depth and count. */

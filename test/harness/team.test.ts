@@ -134,3 +134,68 @@ test("a sub-agent stopped at its time limit while a tool ran: when the lead's me
   expect(unfinished === undefined ? "" : textOf(unfinished)).not.toBe("");
   expect(unfinished === undefined ? "" : textOf(unfinished)).not.toContain("too late");
 });
+
+const SCRIBE = "---\nname: scribe\ndescription: Fixture lead that hands the reply to a writer.\nmodel: default\ntools: [write_reply, reply_release, agent_message]\ngiven: [prompt:*]\n---\nFixture scribe: you run the turn.\n";
+const NARRATOR = "---\nname: narrator\ndescription: Fixture writer.\nmodel: default\ntools: [delegate, ask_author]\n---\nFixture narrator: tell what you are briefed to tell.\n";
+
+test("the writer stands in the team as a sub-agent does: what it starts is held to the depth the player allows, and its question comes back to the agent that called write_reply, which answers it", async () => {
+  const s = (open = await stage({
+    config: "limits:\n  turn:\n    depth: 1\n",
+    files: { ...FILES, ".agents/scribe.md": SCRIBE, ".agents/narrator.md": NARRATOR },
+    answers: [
+      { pieces: [{ call: "write_reply", args: { brief: "Tell the leap and how it ends." }, id: "w-1" }] },
+      { pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule on the jump." }, id: "d-1" }, { call: "ask_author", args: { question: "Does she make the far ledge?", searched: "the brief" }, id: "a-1" }] },
+      // The scribe answers the writer by the handle its question came back under.
+      (req) => ({ pieces: [{ call: "agent_message", args: { agent: lastResult(req.messages).split(" ")[0]!, message: "She falls short." }, id: "m-1" }] }),
+      { pieces: [{ text: "She falls short of the far ledge." }] },
+      { pieces: [{ call: "reply_release", args: {}, id: "r-1" }] },
+      { pieces: [{ text: "Done." }] },
+    ],
+  }));
+
+  const { outcome, sink } = await s.turn(request("t1", { lead: "scribe" }));
+
+  expect(outcome).toMatchObject({ status: "released", form: "narrator", reply: "She falls short of the far ledge." });
+  expect(sink.text).toBe("She falls short of the far ledge.");
+  // What the writer started would stand two deep, past the one the player allows.
+  expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "depth", per: "turn", max: 1, value: 2 }]);
+  expect(answerTo(s, "d-1")).toBe("gm was not started: it would stand 2 deep, and the player allows 1.");
+  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "narrator", "narrator"]);
+  // Its question came back as write_reply's answer, marked, and the scribe's message went on with it.
+  expect(answerTo(s, "w-1")).toContain("Does she make the far ledge?");
+  expect(s.trace.of("tool_ended").find((record) => record.event.callId === "w-1")?.event.result.marks).toEqual(["question"]);
+  expect(answerTo(s, "m-1")).toContain("She falls short of the far ledge.");
+});
+
+/** The answer a call got, as the model read it in a later request. */
+function answerTo(s: Stage, callId: string): string {
+  for (const req of s.model.requests) {
+    const found = req.messages.find((message) => message.role === "toolResult" && message.toolCallId === callId);
+    if (found !== undefined) return textOf(found);
+  }
+  return "";
+}
+
+const KEEPER = "---\nname: keeper\ndescription: Fixture keeper of records.\nmodel: default\ntools: [file_write]\n---\nFixture keeper: keep the lighthouse log.\n";
+const WARDEN = "---\nname: warden\ndescription: Fixture lead that can drop what its sub-agents wrote.\nmodel: default\ntools: [delegate, agent_drop]\ngiven: [prompt:*]\n---\nFixture warden: you run the turn.\n";
+
+test("the agent that started a sub-agent drops what it wrote: the host is told, the writes are gone, and the call is answered in the file's words", async () => {
+  const s = (open = await stage({
+    files: { ".agents/keeper.md": KEEPER, ".agents/warden.md": WARDEN },
+    answers: [
+      { pieces: [{ call: "delegate", args: { agent: "keeper", brief: "Log the storm." }, id: "d-1" }] },
+      { pieces: [{ call: "file_write", args: { path: "persistent-workspace/log.md", op: "write", text: "The storm broke at nine.\n" } }] },
+      { pieces: [{ text: "Logged." }] },
+      { pieces: [{ call: "agent_drop", args: { agent: "keeper-1" }, id: "x-1" }, { call: "agent_drop", args: { agent: "keeper-9" }, id: "x-2" }] },
+      { pieces: [{ text: "<reply>The log stays blank.</reply>" }] },
+    ],
+  }));
+
+  const { outcome } = await s.turn(request("t1", { lead: "warden" }));
+
+  expect(outcome.status).toBe("released");
+  expect(s.told.filter((told) => told.kind === "dropStaged").map((told) => told.payload)).toEqual([{ id: "keeper-1", definition: "keeper", parent: expect.any(String) }]);
+  expect(await s.env.files.read(request("t1").scope, "persistent-workspace/log.md")).toMatchObject({ status: "missing" });
+  expect(answerTo(s, "x-1")).toBe("What keeper-1 wrote this turn was dropped.");
+  expect(answerTo(s, "x-2")).toBe("No agent you started this turn goes by keeper-9.");
+});

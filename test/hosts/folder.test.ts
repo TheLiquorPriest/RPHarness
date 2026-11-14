@@ -150,7 +150,7 @@ describe("folder host", () => {
         { role: "system", content: [{ type: "text", text: "Keep it short." }, { type: "image", data: "aGk=", mimeType: "image/png" }] },
         { role: "user", content: "Row out.", kind: "history", source: { id: "kit-m4", index: 4 } },
       ],
-      activated: [{ id: "kit-w-7", source: "Kit World", title: "The Drowned Bell" }],
+      activated: [{ id: "w-7", source: "Kit World", title: "The Drowned Bell" }],
     });
     const layout = await host.prompt.layout(turn);
     expect(layout.messages.map((m) => [m.length, m.images, m.parts[0]?.kind])).toEqual([
@@ -158,7 +158,7 @@ describe("folder host", () => {
       [8, undefined, "history"],
     ]);
     expect(layout).toMatchObject({ blocks: [], blocksFrom: null, preset: KIT_SEED.preset, complete: true });
-    expect(await host.lore.activated(turn)).toEqual([{ id: "kit-w-7", source: "Kit World", title: "The Drowned Bell" }]);
+    expect(await host.lore.activated(turn)).toEqual([{ id: "w-7", source: "Kit World", title: "The Drowned Bell" }]);
     await expect(host.givePrompt(turn, { messages: [{ role: "narrator" as "system", content: "x" }] })).rejects.toThrow('"role"');
 
     const located = { preset: KIT_SEED.preset, slices: [], unclaimed: [{ message: 0, start: 0, end: 14 }], notices: [{ kind: "unmapped" as const }], front: { length: 0 } };

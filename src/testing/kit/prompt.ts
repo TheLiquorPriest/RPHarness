@@ -12,7 +12,7 @@ function textOf(m: PromptMessage): string {
   return typeof m.content === "string" ? m.content : m.content.map((p) => (p.type === "text" ? p.text : "")).join("");
 }
 
-export function promptCases(ctx: KitContext): void {
+export function promptCases(ctx: KitContext<"prompt">): void {
   const turn = (n: 0 | 1 | 2) => ({ ...ctx.scope, turn: ctx.seed.prompts[n].turn });
 
   test("the layout is the prompt's facts: each message's role, length, hash and parts, the blocks, the preset", async () => {

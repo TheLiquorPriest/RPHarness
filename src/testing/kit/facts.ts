@@ -67,7 +67,7 @@ export function factProblems(defs: readonly FactDef[], values: Readonly<Record<s
   return out;
 }
 
-export function factCases(ctx: KitContext): void {
+export function factCases(ctx: KitContext<"facts">): void {
   test("every fact is declared once, with a line on what it counts, and the list holds", () => {
     const defs = ctx.env.facts.defs();
     const names = defs.map((d) => d.name);
@@ -96,7 +96,7 @@ function described(t: HostTool): Omit<HostTool, "run"> {
   return rest;
 }
 
-export function toolCases(ctx: KitContext): void {
+export function toolCases(ctx: KitContext<"tools">): void {
   test("tools have unique names apart from RPH's own, a tier, and parameters that are an object JSON Schema", async () => {
     const tools = await ctx.env.tools.all(ctx.scope);
     const names = tools.map((t) => t.name);

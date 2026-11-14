@@ -12,7 +12,7 @@ const ORDER: LayerLevel[] = ["shipped", "global", "character", "chat"];
 /** The agent the kit writes as: a sub-agent of the turn's lead. */
 export const KIT_AGENT: AgentRef = { id: "kit-agent-1", definition: "kit-scribe", parent: "kit-lead" };
 
-export function fileCases(ctx: KitContext): void {
+export function fileCases(ctx: KitContext<"files">): void {
   test("the levels come farthest first, the chat's at the agents' root, each reading its own files", async () => {
     const layers = await ctx.env.files.layers(ctx.scope);
     const levels = layers.map((l) => l.level);
@@ -135,7 +135,7 @@ export function fileCases(ctx: KitContext): void {
   test("a write outside where agents may write is refused, and changes nothing", async () => {
     const layers = await ctx.env.files.layers(ctx.scope);
     const places = await ctx.env.files.places(ctx.scope);
-    const before = await viewPicture(ctx.env, ctx.scope);
+    const before = await viewPicture(ctx.env.files, ctx.scope);
     const cases: { path: string; reason: string; by?: "harness" }[] = [
       { path: "AGENTS.md", reason: "yours" },
       { path: "WORLD.md", reason: "yours" },
@@ -159,7 +159,7 @@ export function fileCases(ctx: KitContext): void {
         if (result.status === "refused") expect(result.writable).toEqual(c.by === "harness" ? [...places.writable, places.session] : places.writable);
       }
     }
-    expect(await viewPicture(ctx.env, ctx.scope)).toEqual(before);
+    expect(await viewPicture(ctx.env.files, ctx.scope)).toEqual(before);
   });
 
   test("a path that leaves the view is refused, for reads, finds and writes, and nothing lands outside", async () => {

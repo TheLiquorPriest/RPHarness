@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import type { AgentRef, JsonValue, Scope, TraceEvent, TraceKind, TraceRecord, Usage } from "../../contract/index";
 import type { KitContext } from "./context";
 
-export function storeCases(ctx: KitContext): void {
+export function storeCases(ctx: KitContext<"store">): void {
   test("a value is kept whole, and a key with none gives undefined", async () => {
     const value: JsonValue = { jobs: [{ id: "kit-job-1", state: "running", spent: { calls: 3 } }], note: null, ok: true };
     await ctx.env.store.set("kit/jobs/kit-job-1", value);
@@ -34,16 +34,16 @@ export function storeCases(ctx: KitContext): void {
     expect(await ctx.env.store.list("kit/approvals/")).toEqual(["kit/approvals/b"]);
   });
 
-  test("a value survives a new host over the same place", async () => {
+  test("a value survives a new instance over the same place", async () => {
     const place = await mkdtemp(join(tmpdir(), "rph-kit-store-"));
     try {
       const first = await ctx.make(ctx.seed, place);
-      await first.env.store.set("kit/survives", { turn: "kit-turn-1", calls: 4 });
-      await first.env.store.update("kit/count", () => 1);
+      await first.store.set("kit/survives", { turn: "kit-turn-1", calls: 4 });
+      await first.store.update("kit/count", () => 1);
       await first.close();
       const second = await ctx.make(ctx.seed, place);
-      expect(await second.env.store.get("kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
-      expect(await second.env.store.get("kit/count")).toBe(1);
+      expect(await second.store.get("kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
+      expect(await second.store.get("kit/count")).toBe(1);
       await second.close();
     } finally {
       await rm(place, { recursive: true, force: true });
@@ -81,7 +81,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
   };
 }
 
-export function traceCases(ctx: KitContext): void {
+export function traceCases(ctx: KitContext<"trace">): void {
   test("the trace takes an event of every kind, and streaming text, and keeps them", async () => {
     const lead: AgentRef = { id: "kit-lead", definition: "author" };
     const scope: Scope = ctx.scope;

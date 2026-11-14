@@ -1,10 +1,10 @@
-// What the kit's cases share: the host under test, the seed it holds, the place it keeps its
+// What the kit's cases share: the ports under test, the seed they hold, the place they keep their
 // state, and a few measures the cases take (hashes, a picture of every file in the view).
 
 import { createHash } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Environment, FileHit, Layer, LayerLevel, Refused, Scope } from "../../contract/index";
+import type { Environment, FileHit, FilesPort, Layer, LayerLevel, Refused, Scope } from "../../contract/index";
 import type { KitSeed } from "./seed";
 
 /** A host made for the kit. */
@@ -20,14 +20,33 @@ export interface KitHost {
  */
 export type KitFactory = (seed: KitSeed, place: string) => Promise<KitHost>;
 
-/** What every case reads once the kit's host is made. */
-export interface KitContext {
+/** The areas of the kit, in the order a whole host runs them. Each is named for the one port of `Environment` it runs against. */
+export const KIT_AREAS = ["files", "chat", "lore", "prompt", "facts", "tools", "store", "trace", "models"] as const;
+
+export type KitArea = (typeof KIT_AREAS)[number];
+
+/** The one port an area runs against (`{ lore: LorePort }` for `lore`), and how to end it. */
+export type KitPorts<A extends KitArea> = Pick<Environment, A> & {
+  /** Ends the port: everything it keeps is written, so one made again over the same place sees it. */
+  close(): Promise<void>;
+};
+
+/**
+ * Makes the port one area runs against over `place`, an empty folder the kit made, holding the
+ * parts of `seed` that area reads (`seed.ts` says which). Everything the port keeps lives under
+ * `place`. Called again with the same place, it opens what is there.
+ */
+export type KitPartFactory<A extends KitArea> = (seed: KitSeed, place: string) => Promise<KitPorts<A>>;
+
+/** What the cases of the areas `A` read once their ports are made. */
+export interface KitContext<A extends KitArea> {
   seed: KitSeed;
-  make: KitFactory;
-  place: string;
-  host: KitHost;
-  env: Environment;
   scope: Scope & { turn: string };
+  /** The folder the ports keep everything under. */
+  place: string;
+  env: Pick<Environment, A>;
+  /** Makes the ports again, over another place: for the cases that open a second instance. */
+  make: KitPartFactory<A>;
 }
 
 /** SHA-256 of a text's UTF-8, lower-case hex. */
@@ -54,12 +73,12 @@ export function hitsOf(found: FileHit[] | Refused): FileHit[] {
 }
 
 /** Every file in the view, at every level, with its hash: what a refused write must leave as it was. */
-export async function viewPicture(env: Environment, scope: Scope): Promise<Record<string, string>> {
+export async function viewPicture(files: FilesPort, scope: Scope): Promise<Record<string, string>> {
   const picture: Record<string, string> = {};
-  for (const layer of await env.files.layers(scope)) {
-    for (const hit of hitsOf(await env.files.find(scope, { by: "glob", pattern: "**/*", path: layer.mount, limit: 10_000 }))) {
+  for (const layer of await files.layers(scope)) {
+    for (const hit of hitsOf(await files.find(scope, { by: "glob", pattern: "**/*", path: layer.mount, limit: 10_000 }))) {
       if (hit.type !== "file") continue;
-      const read = await env.files.read(scope, hit.path);
+      const read = await files.read(scope, hit.path);
       picture[hit.path] = read.status === "read" ? read.hash : read.status;
     }
   }

@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import type { KitContext } from "./context";
 
-export function chatCases(ctx: KitContext): void {
+export function chatCases(ctx: KitContext<"chat">): void {
   test("the chat's length, its setting on hidden messages, and the stretches it names", async () => {
     expect(await ctx.env.chat.info(ctx.scope)).toEqual({ length: ctx.seed.messages.length, hiddenReadable: ctx.seed.hiddenReadable, ranges: ctx.seed.ranges });
   });
@@ -39,18 +39,18 @@ export function chatCases(ctx: KitContext): void {
   });
 }
 
-export function loreCases(ctx: KitContext): void {
+export function loreCases(ctx: KitContext<"lore">): void {
   test("a read gives entries in full, in the order asked, and leaves out ids the host does not know", async () => {
     const [bookEntry, , worldEntry] = ctx.seed.lore;
-    const read = await ctx.env.lore.read(ctx.scope, [worldEntry?.id ?? "", "kit-no-such-entry", bookEntry?.id ?? ""]);
+    const read = await ctx.env.lore.read(ctx.scope, [worldEntry?.id ?? "", "e-999", bookEntry?.id ?? ""]);
     expect(read).toEqual([expect.objectContaining(worldEntry), expect.objectContaining(bookEntry)]);
   });
 
   test("a search finds entries by title, key and text, within the sources asked", async () => {
-    expect((await ctx.env.lore.search(ctx.scope, { text: "saltglass" }))[0]?.id).toBe("kit-e-101");
-    expect((await ctx.env.lore.search(ctx.scope, { text: "bronze" })).map((h) => h.id)).toEqual(["kit-w-7"]);
+    expect((await ctx.env.lore.search(ctx.scope, { text: "saltglass" }))[0]?.id).toBe("e-101");
+    expect((await ctx.env.lore.search(ctx.scope, { text: "bronze" })).map((h) => h.id)).toEqual(["w-7"]);
     const inBook = await ctx.env.lore.search(ctx.scope, { text: "bell", sources: ["Kit Coast Book"] });
-    expect(inBook.map((h) => h.id)).toEqual(["kit-e-102"]);
+    expect(inBook.map((h) => h.id)).toEqual(["e-102"]);
     expect(await ctx.env.lore.search(ctx.scope, { text: "quillfeather" })).toEqual([]);
   });
 

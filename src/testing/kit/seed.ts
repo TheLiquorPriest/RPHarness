@@ -2,6 +2,11 @@
 // level, its messages (one hidden, one summarized), its lore, and the prompts it received for three
 // turns (two the same, one with a changed message). A host's kit factory lays this in its own
 // storage. Every name and text is invented.
+//
+// Which area reads what: `files` the files (and `character`); `chat` the messages, `hiddenReadable`
+// and `ranges`; `lore` the lore and each prompt's `activated`; `prompt` the prompts and `preset`.
+// The `tools`, `facts`, `store`, `trace` and `models` areas read nothing from it: a host gives them
+// its own tools and facts, and the others start empty.
 
 import type { ActivatedLore, ChatRole, HistoryRange, LayerLevel, LoreEntry, PresetRef, PromptMessage, RawBlock, Scope } from "../../contract/index";
 
@@ -73,7 +78,7 @@ function prompt(turn: string, card: string): KitPrompt {
       { role: "user", content: "Then we row out at dawn.", name: "Tamsin", kind: "history", source: { id: "kit-m4", index: 4 } },
     ],
     blocks: [{ name: "Main Prompt", type: "instruction", role: "system", text: MAIN_PROMPT }],
-    activated: [{ id: "kit-e-101", source: "Kit Coast Book", title: "The Saltglass Lighthouse", how: "keyword" }],
+    activated: [{ id: "e-101", source: "Kit Coast Book", title: "The Saltglass Lighthouse", how: "keyword" }],
   };
 }
 
@@ -107,10 +112,10 @@ export const KIT_SEED: KitSeed = {
   hiddenReadable: false,
   ranges: { scene: { from: 2, to: 6 } },
   lore: [
-    { id: "kit-e-101", source: "Kit Coast Book", title: "The Saltglass Lighthouse", keys: ["lighthouse", "saltglass"], text: "A tower of green glass on the cliffs above Vell. Its lamp burns whale oil." },
-    { id: "kit-e-102", source: "Kit Coast Book", title: "Harbor of Vell", keys: ["vell", "harbor"], text: "A fishing harbor whose oldest families still talk of the drowned bell." },
+    { id: "e-101", source: "Kit Coast Book", title: "The Saltglass Lighthouse", keys: ["lighthouse", "saltglass"], text: "A tower of green glass on the cliffs above Vell. Its lamp burns whale oil." },
+    { id: "e-102", source: "Kit Coast Book", title: "Harbor of Vell", keys: ["vell", "harbor"], text: "A fishing harbor whose oldest families still talk of the drowned bell." },
     {
-      id: "kit-w-7",
+      id: "w-7",
       source: "Kit World",
       title: "The Drowned Bell",
       keys: ["bell"],

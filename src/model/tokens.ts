@@ -1,11 +1,9 @@
 // Token counts per model call: what a call sent (and how much of it the provider read from its cache,
-// and wrote to it), what it wrote (and how much of that was reasoning), and what it cost, read from
-// the usage pi-ai reports for the answer. A count the provider never reports is an estimate, from
-// the call's text at a number of characters per token, flagged as one. What a call wrote to the
-// cache is no estimate: it is there only where the provider reports writes (Anthropic's API always
-// does, any other when it wrote some). The cost is the provider's own bill where it sent one
-// (OpenRouter's); else what the model's published price in pi's catalogue makes of the counts,
-// which is no bill and is flagged as an estimate; else unknown.
+// and wrote to it), and what it wrote (and how much of that was reasoning), read from the usage pi-ai
+// reports for the answer. A count the provider never reports is an estimate, from the call's text at
+// a number of characters per token, flagged as one. What a call wrote to the cache is no estimate: it
+// is there only where the provider reports writes (Anthropic's API always does, any other when it
+// wrote some). Calls are counted in tokens alone: nothing here prices them.
 //
 // pi-ai's `input` leaves out what was read from the cache and written to it, and its `output` holds
 // the reasoning; a call's tokens in here are the whole of what was sent.
@@ -64,9 +62,9 @@ export function estimateOf(sent: readonly Message[], answer: AssistantMessage, c
   return { in: promptTokens(sent, charsPerToken), out: tokensOf(text, charsPerToken), reasoningOut: tokensOf(reasoning, charsPerToken) };
 }
 
-export type UsageField = "in" | "cachedIn" | "out" | "reasoningOut" | "cost";
+export type UsageField = "in" | "cachedIn" | "out" | "reasoningOut";
 
-/** One call's tokens: `in` (of which `cachedIn` read from the cache, `cacheWrite` written to it) and `out` (of which `reasoningOut` reasoning), and its cost in US dollars where the provider said or a published price gives it. */
+/** One call's tokens: `in` (of which `cachedIn` read from the cache, `cacheWrite` written to it) and `out` (of which `reasoningOut` reasoning). */
 export interface CallUsage {
   in: number;
   cachedIn: number;
@@ -75,36 +73,30 @@ export interface CallUsage {
   reasoningOut: number;
   /** The counts the provider didn't report, which hold the estimate. */
   estimated: UsageField[];
-  cost?: number;
 }
 
 /**
- * A call's usage from pi-ai's report of its answer, by the model it went to (see the head of this
- * file); `estimate` fills each count the provider didn't report, listed in `estimated`. An answer
- * whose usage is all nought had none reported at all (a server that sends no usage): its counts are
- * all the estimate's, and its cost unknown unless billed, since a price makes nothing of no counts.
+ * A call's tokens from pi-ai's report of its answer, by the API it went through (see the head of
+ * this file); `estimate` fills each count the provider didn't report, listed in `estimated`. An
+ * answer whose usage is all nought had none reported at all (a server that sends no usage): its
+ * counts are all the estimate's.
  */
-export function callUsage(answer: AssistantMessage, model: Pick<Model<Api>, "api" | "cost">, estimate: UsageEstimate): CallUsage {
+export function callUsage(answer: AssistantMessage, model: Pick<Model<Api>, "api">, estimate: UsageEstimate): CallUsage {
   const { usage } = answer;
   const estimated: UsageField[] = [];
   const guess = (field: UsageField, value: number): number => {
     estimated.push(field);
     return value;
   };
-  const billed = usage.cost.totalFromProvider === true;
   if (usage.input + usage.output + usage.cacheRead + usage.cacheWrite === 0) {
-    const counts = { in: guess("in", estimate.in), cachedIn: guess("cachedIn", 0), out: guess("out", estimate.out + estimate.reasoningOut), reasoningOut: guess("reasoningOut", estimate.reasoningOut) };
-    return { ...counts, estimated, ...(billed ? { cost: usage.cost.total } : {}) };
+    return { in: guess("in", estimate.in), cachedIn: guess("cachedIn", 0), out: guess("out", estimate.out + estimate.reasoningOut), reasoningOut: guess("reasoningOut", estimate.reasoningOut), estimated };
   }
-  const counts = {
+  return {
     in: usage.input + usage.cacheRead + usage.cacheWrite,
     cachedIn: usage.cacheRead,
     ...(model.api === "anthropic-messages" || usage.cacheWrite > 0 ? { cacheWrite: usage.cacheWrite } : {}),
     out: usage.output,
     reasoningOut: usage.reasoning ?? guess("reasoningOut", estimate.reasoningOut),
+    estimated,
   };
-  if (billed) return { ...counts, estimated, cost: usage.cost.total };
-  const { input, output, cacheRead, cacheWrite } = model.cost;
-  if (input > 0 || output > 0 || cacheRead > 0 || cacheWrite > 0) return { ...counts, estimated: [...estimated, "cost"], cost: usage.cost.total };
-  return { ...counts, estimated };
 }

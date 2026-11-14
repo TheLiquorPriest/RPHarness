@@ -19,16 +19,18 @@
 //
 // What leaves with a call goes only where its connection says: the call follows no redirect, since
 // its key and headers would go with it to an address nobody gave them for, and neither a key nor a
-// header the loop passes in its options is sent. A stream that goes silent once its answer has
-// begun is ended after a wait (`silenceWatch`), in words that say so.
+// header the loop passes in its options is sent. Google's calls are the one kind that can't go out
+// through the layer's own fetch, so a Google connection takes no address but Google's own (book.ts).
+// A stream that goes silent once its answer has begun is ended after a wait (`silenceWatch`), in
+// words that say so.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS, clampReasoning } from "@earendil-works/pi-ai/api/simple-options";
 import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
-import type { JsonObject, ModelLimits, StoredConnection } from "../contract";
-import type { Book } from "./book";
+import type { JsonObject, ModelLimits } from "../contract";
+import type { Book, Connection } from "./book";
 import { sentHeaders } from "./book";
 import { isRecord, isTokenCount, own } from "./json";
 import type { ProviderKind, Sampling, SamplingName } from "./kinds";
@@ -56,7 +58,7 @@ export interface CallDeps {
 
 /** What a call goes to and how its model is asked to think, known before anything is sent. */
 export interface CallShape {
-  connection: StoredConnection;
+  connection: Connection;
   kind: ProviderKind;
   /** The model with what pi-ai knows of it, at the address the connection gives, with its limits as resolved. */
   model: Model<Api>;
@@ -93,7 +95,7 @@ export interface CallAsk {
 const NO_KEY = "none";
 
 /** The way a call on a connection signs: its key, the sign-in (read by pi-ai), or the key-shaped nothing of a keyless server. */
-export async function keyOf(book: Book, connection: StoredConnection, kind: ProviderKind): Promise<string | undefined> {
+export async function keyOf(book: Book, connection: Connection, kind: ProviderKind): Promise<string | undefined> {
   if (connection.auth === "none") return NO_KEY;
   if (connection.auth === "signin") {
     if ((await book.signin(kind.id)) === undefined) throw new Error(`There is no sign-in to ${kind.name}, which the connection "${connection.name}" uses: sign in on the Connections page.`);
@@ -108,10 +110,10 @@ export async function keyOf(book: Book, connection: StoredConnection, kind: Prov
  * The model a call goes to: its provider's catalogue entry where it lists the model, at the address
  * the connection gives where it gives one. A compatible server's model borrows how it reasons, what
  * it takes in and its limits from the catalogue that lists it under the same name (a proxy serves
- * another provider's models), but not its price, which is the server's own; nobody's is a model of
- * unknown limits. `listed` is pi's entry, where pi lists the model.
+ * another provider's models); nobody's is a model of unknown limits. `listed` is pi's entry, where
+ * pi lists the model.
  */
-function modelFor(pi: MutableModels, kind: ProviderKind, connection: StoredConnection, id: string): { model: Model<Api>; listed: Model<Api> | undefined } {
+function modelFor(pi: MutableModels, kind: ProviderKind, connection: Connection, id: string): { model: Model<Api>; listed: Model<Api> | undefined } {
   if (kind.needsBaseUrl) {
     const api = connection.api ?? kind.apis[0];
     const baseUrl = connection.baseUrl ?? "";
@@ -119,7 +121,7 @@ function modelFor(pi: MutableModels, kind: ProviderKind, connection: StoredConne
     if (lent === undefined) return { model: unlistedModel(id, api, kind.id, baseUrl), listed: undefined };
     const { compat, ...rest } = lent;
     // A definition's compatibility flags belong to its API: a server speaking another keeps its own.
-    return { model: { ...rest, ...(lent.api === api && compat !== undefined ? { compat } : {}), api, provider: kind.id, baseUrl, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, listed: lent };
+    return { model: { ...rest, ...(lent.api === api && compat !== undefined ? { compat } : {}), api, provider: kind.id, baseUrl }, listed: lent };
   }
   const listed = pi.getModel(kind.id, id);
   const model = listed ?? unlistedModel(id, kind.apis[0], kind.id, pi.getProvider(kind.id)?.baseUrl ?? "");
@@ -127,7 +129,7 @@ function modelFor(pi: MutableModels, kind: ProviderKind, connection: StoredConne
 }
 
 /** An effort as the level asked of the model; null: the provider's own default. `auto` and `inherit` are the connection's own effort. */
-function askedLevel(effort: ModelEffort | undefined, connection: StoredConnection): ModelThinkingLevel | null {
+function askedLevel(effort: ModelEffort | undefined, connection: Connection): ModelThinkingLevel | null {
   if (effort === undefined || effort === "inherit" || effort === "auto") return connection.effort ?? null;
   return effort;
 }
@@ -375,7 +377,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const options: SimpleStreamOptions = {
       ...ask.carried,
       signal: ended,
-      // Google's client takes no fetch but the process's own (pi-ai refuses another): only pi-ai's events tell of its life.
+      // Google's client takes no fetch but the process's own (pi-ai refuses another), which is why its connections take no address of their own: only pi-ai's events tell of its life.
       ...(model.api === "google-generative-ai" ? {} : { fetch: callFetch(deps.fetch, wire, watching.alive) }),
       ...budget,
       ...(reasoning !== undefined ? { reasoning } : {}),

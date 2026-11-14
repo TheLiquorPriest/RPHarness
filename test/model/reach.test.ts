@@ -1,12 +1,14 @@
 // What leaves with a call goes where its connection says, and nowhere else: no variable of the
 // environment signs it, steers it or adds to it; no redirect takes its key or its headers to another
-// address; and a stream that goes silent once its answer has begun is ended in words that say so,
-// while a model slow to begin is left to begin. Every wait runs on the rig's clock.
+// address, on any provider (one whose calls can't go through the layer's own fetch takes no address
+// but its provider's own); and a stream that goes silent once its answer has begun is ended in words
+// that say so, while a model slow to begin is left to begin. Every wait runs on the rig's clock.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AssistantMessageEvent, Message } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, normalizeContext } from "@earendil-works/pi-ai";
 import type { AgentModel } from "../../src/model";
+import { KINDS } from "../../src/model/kinds";
 import type { Rig } from "./support";
 import { anthropicStream, anthropicTurn, call, failed, rig } from "./support";
 
@@ -83,21 +85,41 @@ describe("the environment", () => {
 });
 
 describe("redirects", () => {
-  test("neither a call nor a list of models follows one: the key and the headers stay with the address they were given for", async () => {
+  test("no call of any provider that takes an address follows one, nor a list of models: the key and the headers stay with the address they were given for", async () => {
     const reached: string[] = [];
+    /** How many requests the server that moved has been sent. */
+    let asked = 0;
     const away = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => (reached.push(`${req.method} ${new URL(req.url).pathname}`), new Response("{}")) });
-    const mover = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => new Response(null, { status: 307, headers: { location: `http://127.0.0.1:${away.port}${new URL(req.url).pathname}` } }) });
+    const mover = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: (req) => ((asked += 1), new Response(null, { status: 307, headers: { location: `http://127.0.0.1:${away.port}${new URL(req.url).pathname}` } })) });
     after.push(() => {
       away.stop(true);
       mover.stop(true);
     });
     const made = rig({ fetch: globalThis.fetch });
     r = made;
-    const saved = await made.layer.api.save({ name: "Moved", provider: "openai-compatible", auth: "key", baseUrl: `http://127.0.0.1:${mover.port}/v1`, model: "served-model", headers: { "x-gateway-token": GATEWAY } }, SERVER_KEY);
+    const moved = { baseUrl: `http://127.0.0.1:${mover.port}/v1`, model: "served-model", headers: { "x-gateway-token": GATEWAY }, limits: { "served-model": { contextWindow: 100_000, maxTokens: 4_096 } } };
+    const listing = await made.layer.api.save({ name: "Moved", provider: "openai-compatible", auth: "key", ...moved }, SERVER_KEY);
     const redirected = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.";
-    await expect(made.layer.api.models(saved.id)).rejects.toThrow(`The server didn't list its models: ${redirected}`);
-    expect((await call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK)).errorMessage).toBe(`The call wasn't made: ${redirected}`);
+    await expect(made.layer.api.models(listing.id)).rejects.toThrow(`The server didn't list its models: ${redirected}`);
+    expect((await call(await made.layer.agentModel({ connectionId: listing.id, model: null, effort: "off" }), ASK)).errorMessage).toBe(`The call wasn't made: ${redirected}`);
+    const offered = KINDS.filter((kind) => kind.ownAddress !== true);
+    expect(offered.map((kind) => kind.id)).toEqual(["anthropic", "openai", "openrouter", "deepseek", "xai", "groq", "mistral", "openai-compatible", "anthropic-compatible"]);
+    for (const kind of offered) {
+      const saved = await made.layer.api.save({ name: kind.name, provider: kind.id, auth: "key", ...moved }, SERVER_KEY);
+      const before = asked;
+      const answer = await call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK);
+      // The call went out, met the redirect, and went no further.
+      expect([kind.id, answer.stopReason, asked - before]).toEqual([kind.id, "error", 1]);
+    }
     expect(reached).toEqual([]);
+  });
+
+  test("a provider whose calls can't go through the layer's own fetch, which would follow one, takes no address but its own", async () => {
+    r = rig();
+    await expect(r.layer.api.save({ name: "Gemini", provider: "google", auth: "key", baseUrl: "https://proxy.example.com/v1beta", model: "gemini-2.5-flash" }, SERVER_KEY)).rejects.toThrow(
+      "A Google Gemini connection goes to its provider's own address: its calls can't be kept from following a redirect, which would take its key elsewhere. Leave the address out.",
+    );
+    expect(r.store.writes).toEqual([]);
   });
 });
 

@@ -1,13 +1,15 @@
-// The connections as the Connections page keeps them, through the host's two documents: a key kept
-// apart from its connection and never shown, only whether it is set and its last four characters;
-// what can't be saved said in words; what was stored for one server never going to another; a
-// sign-in's token only to its provider's own address; and documents a hand edit broke never written
-// over.
+// The connections as the Connections page keeps them, through the host's two documents: a key and its
+// headers' values kept with the secrets, apart from the connection, and never shown, only whether
+// each is set (and a key's last four characters); what can't be saved said in words; what was stored
+// for one server never going to another, whether a save or a hand edit moved its connection; a
+// sign-in's token only to its provider's own address; a hand edit made while the layer runs used from
+// the next turn and kept by the next save; and a document a hand edit broke said in words and never
+// written over.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { ConnectionInput } from "../../src/contract";
 import type { Rig } from "./support";
-import { MemoryStore, anthropicStream, anthropicTurn, call, eventStream, failed, json, rig } from "./support";
+import { MemoryStore, anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, json, rig } from "./support";
 
 const KEY = "sk-ant-api03-Ilse0123456789abcdefWXYZ";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -118,7 +120,7 @@ describe("the connections", () => {
     const store = new MemoryStore();
     store.connectionsDoc = { version: "another app's", connections: [] };
     r = rig({ store });
-    await expect(r.layer.api.list()).rejects.toThrow("The saved connections aren't a list this build reads: fix or remove them, then start again.");
+    await expect(r.layer.api.list()).rejects.toThrow("The saved connections aren't a list this build reads: fix or remove them.");
     await expect(r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key" }, KEY)).rejects.toThrow("aren't a list this build reads");
     await expect(r.layer.agentModel({ connectionId: null, model: null })).rejects.toThrow("aren't a list this build reads");
     expect(store.writes).toEqual([]);
@@ -195,5 +197,202 @@ describe("a connection's headers", () => {
     // A name left out is taken away, and null takes them all.
     expect((await r.layer.api.save({ ...fields, id: saved.id, headers: { "x-team": null } })).headers).toEqual([{ name: "x-team", set: true }]);
     expect((await r.layer.api.save({ ...fields, id: saved.id, headers: null })).headers).toBeUndefined();
+  });
+});
+
+describe("headers' values are kept with the secrets", () => {
+  test("the connections document keeps each header's name, the secrets its value, under the connection's id; a call sends both", async () => {
+    r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "At the quay." }))) });
+    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", headers: { "x-gateway-token": GATEWAY, "x-team": "harbour" } }, KEY);
+    expect(r.store.connectionsDoc).toEqual({ v: 1, default: saved.id, connections: [{ id: saved.id, name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", headers: ["x-gateway-token", "x-team"] }] });
+    expect(r.store.secretsDoc).toEqual({ v: 1, keys: { [saved.id]: KEY }, signins: {}, headers: { [saved.id]: { "x-gateway-token": GATEWAY, "x-team": "harbour" } } });
+    await call(await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK);
+    expect([r.sent[0]?.headers["x-gateway-token"], r.sent[0]?.headers["x-team"]]).toEqual([GATEWAY, "harbour"]);
+    // They go with their connection.
+    await r.layer.api.remove(saved.id);
+    expect(r.store.secretsDoc).toEqual({ v: 1, keys: {}, signins: {} });
+  });
+
+  test("a document saved the old way, the values in it, is read as it is and moved on its next save, an entry the layer can't read with it", async () => {
+    const store = new MemoryStore();
+    const typo = "gw-typo-0123456789abcdef";
+    store.connectionsDoc = {
+      v: 1,
+      default: "c1",
+      connections: [
+        { id: "c1", name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", headers: { "x-gateway-token": GATEWAY, "x-team": null } },
+        { id: "c2", name: "Typo", provider: "openai-compatible", auth: "key", effort: "medium-high", headers: { "x-gateway-token": typo } },
+      ],
+    };
+    store.secretsDoc = { v: 1, keys: { c1: SERVER_KEY }, signins: {} };
+    r = rig({ store, script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
+    const agent = await r.layer.agentModel({ connectionId: "c1", model: null, effort: "off" });
+    await call(agent, ASK);
+    expect(store.writes).toEqual([]);
+    await r.layer.api.setDefault("c1");
+    expect(store.connectionsDoc).toEqual({
+      v: 1,
+      default: "c1",
+      connections: [
+        { id: "c1", name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", headers: ["x-gateway-token", "x-team"] },
+        { id: "c2", name: "Typo", provider: "openai-compatible", auth: "key", effort: "medium-high", headers: ["x-gateway-token"] },
+      ],
+    });
+    expect(store.secretsDoc).toEqual({ v: 1, keys: { c1: SERVER_KEY }, signins: {}, headers: { c1: { "x-gateway-token": GATEWAY }, c2: { "x-gateway-token": typo } } });
+    // The values went to the secrets before they left the document.
+    expect(store.writes).toEqual(["secrets", "connections"]);
+    await call(agent, ASK);
+    expect(r.sent.map((s) => s.headers["x-gateway-token"])).toEqual([GATEWAY, GATEWAY]);
+  });
+});
+
+/** A connections document as a person edits it by hand. */
+interface HandDoc {
+  v: number;
+  default: string | null;
+  connections: Record<string, unknown>[];
+}
+
+/** Changes the connections document behind the layer's back, as a person editing the host's config file does. */
+function handEdit(store: MemoryStore, change: (doc: HandDoc) => void): void {
+  // The document the layer last wrote, which each test here knows the shape of.
+  const doc = structuredClone(store.connectionsDoc) as HandDoc;
+  change(doc);
+  store.connectionsDoc = doc;
+}
+
+/** The document's entry at `index`. */
+function entryAt(doc: HandDoc, index: number): Record<string, unknown> {
+  const entry = doc.connections[index];
+  if (entry === undefined) throw new Error(`the document has no entry ${index}`);
+  return entry;
+}
+
+describe("a hand edit of the connections, made while the layer runs", () => {
+  const answered = (): Response => eventStream(anthropicStream(anthropicTurn({ text: "At the quay." })));
+
+  test("is used from the next turn's first call, the key going with it while the connection goes to the same place", async () => {
+    r = rig({ script: answered });
+    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    handEdit(r.store, (doc) => {
+      entryAt(doc, 0).model = "claude-opus-4-7";
+    });
+    // Until a turn starts, the connections as they were read.
+    await call(agent, ASK);
+    expect(await r.layer.turnStarting()).toEqual([]);
+    await call(agent, ASK);
+    expect(r.sent.map((s) => [bodyOf(s).model, s.headers["x-api-key"]])).toEqual([
+      ["claude-sonnet-4-5", KEY],
+      ["claude-opus-4-7", KEY],
+    ]);
+  });
+
+  test("a save after it writes the hand edit with its own change; an entry the layer can't read goes back as it came", async () => {
+    r = rig();
+    const claude = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const local = await r.layer.api.save({ name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    const byHand = { id: "by-hand", name: "Groq", provider: "groq", auth: "key", model: "llama-3.3-70b-versatile" };
+    const typo = { id: "typo", name: "Typo", provider: "anthropic", auth: "key", effort: "medium-high" };
+    handEdit(r.store, (doc) => {
+      entryAt(doc, 1).model = "other-model";
+      doc.connections.push(byHand, typo);
+    });
+    await r.layer.api.save({ id: claude.id, name: "Claude", provider: "anthropic", auth: "key", model: "claude-opus-4-7" });
+    expect(r.store.connectionsDoc).toEqual({
+      v: 1,
+      default: claude.id,
+      connections: [
+        { id: claude.id, name: "Claude", provider: "anthropic", auth: "key", model: "claude-opus-4-7" },
+        { id: local.id, name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "other-model" },
+        byHand,
+        typo,
+      ],
+    });
+    await r.layer.api.setDefault("by-hand");
+    expect(r.store.connectionsDoc).toMatchObject({ default: "by-hand", connections: [{ model: "claude-opus-4-7" }, { model: "other-model" }, byHand, typo] });
+    expect((await r.layer.api.list()).connections.map((c) => [c.id, c.key])).toEqual([
+      [claude.id, { set: true, last4: "WXYZ" }],
+      [local.id, null],
+      ["by-hand", { set: false, last4: null }],
+    ]);
+    expect(r.logs).toEqual(["left out a saved connection this build can't read"]);
+  });
+
+  test("a document that no longer parses is said in words, once in the log; the connections last read stay in use, and nothing is written over it", async () => {
+    r = rig({ script: answered });
+    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const good = structuredClone(r.store.connectionsDoc);
+    r.store.connectionsDoc = { v: 1, connections: "Claude, Local" };
+    const words = "The saved connections aren't a list this build reads: fix or remove them. Until then, the connections as last read are used.";
+    expect(await r.layer.turnStarting()).toEqual([words]);
+    expect(await r.layer.turnStarting()).toEqual([words]);
+    expect(r.logs).toEqual([words]);
+    expect((await call(agent, ASK)).stopReason).toBe("stop");
+    const writes = r.store.writes.length;
+    await expect(r.layer.api.save({ name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1" })).rejects.toThrow("The saved connections aren't a list this build reads: fix or remove them.");
+    await expect(r.layer.api.setDefault(null)).rejects.toThrow("aren't a list this build reads");
+    expect([r.store.connectionsDoc, r.store.writes.length]).toEqual([{ v: 1, connections: "Claude, Local" }, writes]);
+    // Mended, with a change of the user's own: the next turn takes it.
+    r.store.connectionsDoc = good;
+    handEdit(r.store, (doc) => {
+      entryAt(doc, 0).model = "claude-opus-4-7";
+    });
+    expect(await r.layer.turnStarting()).toEqual([]);
+    await call(agent, ASK);
+    expect(r.sent.map((s) => bodyOf(s).model)).toEqual(["claude-sonnet-4-5", "claude-opus-4-7"]);
+  });
+
+  test("a host that can't give the document is said so in the layer's own words, never the host's", async () => {
+    class Unreadable extends MemoryStore {
+      broken = false;
+      override async loadConnections(): Promise<unknown> {
+        if (this.broken) throw new Error(`EACCES: permission denied, open 'models.yml' near x-gateway-token: ${GATEWAY}`);
+        return super.loadConnections();
+      }
+    }
+    const store = new Unreadable();
+    r = rig({ store });
+    await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    store.broken = true;
+    expect(await r.layer.turnStarting()).toEqual(["The saved connections couldn't be read: fix what keeps them. Until then, the connections as last read are used."]);
+    expect((await r.layer.api.list()).connections.map((c) => c.name)).toEqual(["Claude"]);
+    expect(JSON.stringify(r.logs)).not.toContain(GATEWAY);
+  });
+
+  test("a connection moved by hand to another provider or address goes there without its key or its headers' values, which are taken out of what is kept", async () => {
+    r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
+    const fields = { name: "Proxy", provider: "openai-compatible", auth: "key", model: "served-model" } as const;
+    const saved = await r.layer.api.save({ ...fields, baseUrl: "https://proxy.example.com/v1", headers: { "x-gateway-token": GATEWAY } }, SERVER_KEY);
+    handEdit(r.store, (doc) => {
+      entryAt(doc, 0).baseUrl = "https://elsewhere.example/v1";
+    });
+    expect(await r.layer.turnStarting()).toEqual([`took away the key and headers' values of the saved connection "Proxy": it now goes to another provider or address than they were given for; give them again on the Connections page`]);
+    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    expect((await call(agent, ASK)).errorMessage).toBe('The connection "Proxy" has no key: add one on the Connections page.');
+    expect(r.sent).toEqual([]);
+    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(SERVER_KEY);
+    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(GATEWAY);
+    expect((await r.layer.api.list()).connections[0]).toMatchObject({ baseUrl: "https://elsewhere.example/v1", headers: [{ name: "x-gateway-token", set: false }], key: { set: false, last4: null } });
+    // Given again for the new address, they go there.
+    await r.layer.api.save({ ...fields, id: saved.id, baseUrl: "https://elsewhere.example/v1", headers: { "x-gateway-token": "gw-token-elsewhere-0123" } }, "sk-elsewhere-0123456789abcdef");
+    await call(agent, ASK);
+    expect([r.sent[0]?.url, r.sent[0]?.headers.authorization, r.sent[0]?.headers["x-gateway-token"]]).toEqual(["https://elsewhere.example/v1/chat/completions", "Bearer sk-elsewhere-0123456789abcdef", "gw-token-elsewhere-0123"]);
+  });
+
+  test("a connection that first appears by hand takes nothing kept under its id for another", async () => {
+    const store = new MemoryStore();
+    store.connectionsDoc = { v: 1, default: null, connections: [] };
+    store.secretsDoc = { v: 1, keys: { c9: SERVER_KEY }, signins: {}, headers: { c9: { "x-gateway-token": GATEWAY } } };
+    r = rig({ store });
+    // The first read is done before the edit.
+    await r.layer.api.list();
+    handEdit(store, (doc) => {
+      doc.connections.push({ id: "c9", name: "Copied", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model", headers: ["x-gateway-token"] });
+    });
+    expect(await r.layer.turnStarting()).toEqual([`took away the key and headers' values kept under the id of the saved connection "Copied", which is new: they were given for another connection; give this one its own on the Connections page`]);
+    expect((await r.layer.api.list()).connections[0]).toMatchObject({ id: "c9", headers: [{ name: "x-gateway-token", set: false }], key: { set: false, last4: null } });
+    expect(store.secretsDoc).toEqual({ v: 1, keys: {}, signins: {} });
   });
 });

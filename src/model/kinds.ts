@@ -59,6 +59,12 @@ export interface ProviderKind {
   sampling: readonly SamplingName[];
   /** The catalogue a compatible server's model is looked up in, for how it reasons, what it takes in and its limits: a proxy serves another provider's models under their own names. */
   borrows?: string;
+  /**
+   * Its calls go to the provider's own address alone: pi-ai's client for its API takes no fetch but
+   * the process's own, which follows redirects, so the layer can't keep a call's key from going
+   * wherever another address would redirect it.
+   */
+  ownAddress?: true;
 }
 
 export const SAMPLING_NAMES: readonly SamplingName[] = ["temperature", "top_p", "top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty", "seed", "stop"];
@@ -72,7 +78,7 @@ export const SAMPLING_NAMES: readonly SamplingName[] = ["temperature", "top_p", 
 export const KINDS: readonly ProviderKind[] = [
   { id: "anthropic", name: "Anthropic", auth: ["key", "signin"], apis: ["anthropic-messages"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "stop"] },
   { id: "openai", name: "OpenAI", auth: ["key", "signin"], apis: ["openai-responses"], needsBaseUrl: false, sampling: ["temperature", "top_p"] },
-  { id: "google", name: "Google Gemini", auth: ["key"], apis: ["google-generative-ai"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "seed", "stop"] },
+  { id: "google", name: "Google Gemini", auth: ["key"], apis: ["google-generative-ai"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "seed", "stop"], ownAddress: true },
   { id: "openrouter", name: "OpenRouter", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false, sampling: SAMPLING_NAMES },
   { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false, sampling: ["temperature", "top_p", "frequency_penalty", "presence_penalty", "stop"] },
   { id: "xai", name: "xAI", auth: ["key"], apis: ["openai-responses"], needsBaseUrl: false, sampling: ["temperature", "top_p"] },

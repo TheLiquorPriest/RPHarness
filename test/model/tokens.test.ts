@@ -1,13 +1,10 @@
 // A call's tokens, as Build 1 counted them: what was sent (with what of it the provider read from its
-// cache and wrote to it), what was written and how much of that was reasoning, and the cost: the
-// provider's own bill where it sent one, else what pi's published price for the model makes of the
-// counts, which is an estimate, never a bill; else unknown. What the provider didn't report is the
-// call's own estimate, from its text at a number of characters per token, and is flagged as one.
+// cache and wrote to it), and what was written and how much of that was reasoning. What the provider
+// didn't report is the call's own estimate, from its text at a number of characters per token, and is
+// flagged as one. Calls are counted in tokens alone: no price, published or billed, makes a cost.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Api, AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
-import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
-import { deepseekProvider } from "@earendil-works/pi-ai/providers/deepseek";
 import type { ConnectionInput } from "../../src/contract";
 import { callUsage, estimateOf, promptTokens, tokensOf } from "../../src/model";
 import type { Rig, Script } from "./support";
@@ -22,13 +19,6 @@ afterEach(async () => {
   await r?.done();
   r = undefined;
 });
-
-/** The published price of a model in a provider's catalogue, per million tokens. */
-function priceOf(models: readonly Model<Api>[], id: string): Model<Api>["cost"] {
-  const model = models.find((m) => m.id === id);
-  if (model === undefined) throw new Error(`pi lists no ${id}`);
-  return model.cost;
-}
 
 /** The answer a call on `connection` gets when its provider answers as `script` does, and the model it went to. */
 async function answered(script: Script, connection: ConnectionInput, key?: string): Promise<{ answer: AssistantMessage; model: Model<Api> }> {
@@ -46,17 +36,13 @@ function chatWithUsage(usage: Record<string, unknown>): Script {
 }
 
 describe("a call's tokens, from what its provider reported", () => {
-  test("Anthropic: everything sent, the cache's reads and writes, what was written, and the published price as an estimate", async () => {
+  test("Anthropic: everything sent, the cache's reads and writes, and what was written; a model with a published price is given no cost", async () => {
     const { answer, model } = await answered(() => eventStream(anthropicStream(anthropicTurn({ text: "At the quay.", usage: { input: 100, output: 40, cacheRead: 900, cacheWrite: 50 } }))), { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
-    const usage = callUsage(answer, model, GUESS);
-    const price = priceOf(anthropicProvider().getModels(), "claude-sonnet-4-5");
-    expect(usage).toMatchObject({ in: 1050, cachedIn: 900, cacheWrite: 50, out: 40, reasoningOut: 1 });
-    // Anthropic reported no reasoning count, so that one is the estimate; the published price is no bill.
-    expect(usage.estimated).toEqual(["reasoningOut", "cost"]);
-    expect(usage.cost).toBeCloseTo((100 * price.input + 40 * price.output + 900 * price.cacheRead + 50 * price.cacheWrite) / 1_000_000, 12);
+    // Anthropic reported no reasoning count, so that one is the estimate.
+    expect(callUsage(answer, model, GUESS)).toEqual({ in: 1050, cachedIn: 900, cacheWrite: 50, out: 40, reasoningOut: 1, estimated: ["reasoningOut"] });
   });
 
-  test("an OpenAI-compatible server: everything sent, its cache's reads, what was written and its reasoning; no price, so no cost", async () => {
+  test("an OpenAI-compatible server: everything sent, its cache's reads, what was written and its reasoning", async () => {
     const { answer, model } = await answered(chatWithUsage({ prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200, prompt_tokens_details: { cached_tokens: 600 }, completion_tokens_details: { reasoning_tokens: 50 } }), {
       name: "Local",
       provider: "openai-compatible",
@@ -67,28 +53,24 @@ describe("a call's tokens, from what its provider reported", () => {
     expect(callUsage(answer, model, GUESS)).toEqual({ in: 1000, cachedIn: 600, out: 200, reasoningOut: 50, estimated: [] });
   });
 
-  test("DeepSeek: its cache's reads under its own name, and the published price as an estimate", async () => {
+  test("DeepSeek: its cache's reads under its own name, and no cost", async () => {
     const { answer, model } = await answered(chatWithUsage({ prompt_tokens: 2000, completion_tokens: 100, total_tokens: 2100, prompt_cache_hit_tokens: 1500 }), { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-pro" }, "sk-deepseek-0123456789abcdef");
-    const usage = callUsage(answer, model, GUESS);
-    const price = priceOf(deepseekProvider().getModels(), "deepseek-v4-pro");
-    expect(usage).toMatchObject({ in: 2000, cachedIn: 1500, out: 100, estimated: ["cost"] });
-    expect(usage.cost).toBeCloseTo((500 * price.input + 100 * price.output + 1500 * price.cacheRead) / 1_000_000, 12);
+    expect(callUsage(answer, model, GUESS)).toEqual({ in: 2000, cachedIn: 1500, out: 100, reasoningOut: 0, estimated: [] });
   });
 
-  test("OpenRouter: the bill it sent is the cost, whatever the published price says", async () => {
+  test("OpenRouter: the bill it sends with the counts is not taken up", async () => {
     const { answer, model } = await answered(chatWithUsage({ prompt_tokens: 10, completion_tokens: 10, total_tokens: 20, cost: 0.0042, is_byok: false }), { name: "Router", provider: "openrouter", auth: "key", model: "deepseek/deepseek-v4-flash" }, "sk-or-v1-0123456789abcdefghijklmn");
-    expect(callUsage(answer, model, GUESS)).toMatchObject({ in: 10, out: 10, cost: 0.0042, estimated: [] });
+    expect(callUsage(answer, model, GUESS)).toEqual({ in: 10, cachedIn: 0, out: 10, reasoningOut: 0, estimated: [] });
   });
 });
 
 describe("a call's tokens its provider didn't report", () => {
   const usage = (fields: Partial<Usage>): Usage => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }, ...fields });
   const answer = (u: Usage, content: AssistantMessage["content"] = []): AssistantMessage => ({ role: "assistant", content, api: "openai-completions", provider: "x", model: "m", usage: u, stopReason: "stop", timestamp: 1 });
-  const priced = { api: "openai-completions" as const, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 0 } };
 
-  test("a server that sends no usage at all: every count is the estimate, and the cost is unknown, since a price makes nothing of no counts", () => {
+  test("a server that sends no usage at all: every count is the estimate", () => {
     const estimate = { in: 120, out: 30, reasoningOut: 10 };
-    expect(callUsage(answer(usage({})), priced, estimate)).toEqual({ in: 120, cachedIn: 0, out: 40, reasoningOut: 10, estimated: ["in", "cachedIn", "out", "reasoningOut"] });
+    expect(callUsage(answer(usage({})), { api: "openai-completions" }, estimate)).toEqual({ in: 120, cachedIn: 0, out: 40, reasoningOut: 10, estimated: ["in", "cachedIn", "out", "reasoningOut"] });
   });
 
   test("the estimate is the call's text at the characters per token given, each message's rounded up, the tools its system messages add counted in", () => {

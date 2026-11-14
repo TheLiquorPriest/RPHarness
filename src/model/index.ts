@@ -8,7 +8,9 @@
 // - the host's way in (the contract's `ModelsApi`): the connections as the Connections page keeps
 //   them, a connection's test call and its models, each model's limits, the sign-ins to Anthropic
 //   and OpenAI, and requests passed through;
-// - the end of an agent session's prompt cache (`ended`).
+// - the end of an agent session's prompt cache (`ended`);
+// - a turn's start (`turnStarting`): the connections are read again through the host, so that a hand
+//   edit made since holds from the turn's first call.
 //
 // What the layer is handed (`ModelLayerDeps`) is everything it reaches the world through: where the
 // host keeps the connections and their secrets, the clock, ids, timers, `fetch`, the log, the
@@ -22,7 +24,8 @@ import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { cleanupSessionResources, createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, StoredConnection } from "../contract";
+import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort } from "../contract";
+import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
 import { makeCall, shapeOf, streamFunction } from "./call";
@@ -83,6 +86,14 @@ export interface ModelLayer extends ModelSource {
   api: ModelsApi;
   /** An agent session ended: what pi-ai keeps for its prompt cache (Anthropic's message threads) is let go. */
   ended(sessionId: string): void;
+  /**
+   * A turn starts: the connections are read again through the host (book.ts), so that a hand edit
+   * made since holds from this turn's first call. Resolves with what that read had to say, in words,
+   * each also in the log once: a document that can't be read (the connections read before it stay in
+   * use), a saved connection left out, a key or headers' values taken from a connection that now goes
+   * elsewhere. Never rejects.
+   */
+  turnStarting(): Promise<readonly string[]>;
   /** Ends open sign-ins and waits for the documents to be written. */
   close(): Promise<void>;
 }
@@ -194,7 +205,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     return { signal: stop.signal, clear: () => deps.clearTimeout(timer) };
   };
 
-  const viewOf = async (c: StoredConnection, chosen: string | null): Promise<ConnectionView> => {
+  const viewOf = async (c: Connection, chosen: string | null): Promise<ConnectionView> => {
     const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const { headers, ...shown } = c;
     return {
@@ -211,7 +222,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
    * it says of each one's limits: no redirect followed, since its key and headers would go with it,
    * and no more of it read than `LIST_MAX`.
    */
-  const serverModels = async (c: StoredConnection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
+  const serverModels = async (c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
     const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const anthropic = api === "anthropic-messages";
     const signs: Record<string, string> = key === undefined ? {} : anthropic ? { "x-api-key": key } : { authorization: `Bearer ${key}` };
@@ -281,7 +292,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       if (!kind.needsBaseUrl) return pi.getModels(kind.id).map((m) => ({ id: m.id, name: m.name }));
       const listed = await serverModels(c, c.api ?? kind.apis[0]);
       // What the server says of each model's limits is kept with the connection, for a model pi doesn't know.
-      await book.noteReported(c.id, Object.fromEntries(listed.filter((m) => Object.keys(m.reported).length > 0).map((m) => [m.id, m.reported])));
+      await book.noteReported(c, Object.fromEntries(listed.filter((m) => Object.keys(m.reported).length > 0).map((m) => [m.id, m.reported])));
       return listed.map(({ id, name }) => ({ id, name }));
     },
     async limits(connectionId, model) {
@@ -304,6 +315,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     ended(sessionId) {
       cleanupSessionResources(sessionId);
     },
+    turnStarting: () => book.refresh(),
     async close() {
       signIn.close();
       await book.settled();

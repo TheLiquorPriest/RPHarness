@@ -1,9 +1,10 @@
 // The harness a host builds over its environment (Appendix A `createHarness`): it answers turns,
-// cancels a turn's work when the turn leaves the path, keeps each session's file (§11) and opens
-// and closes sessions when the host says so, and gives the pages their ways in: the live view,
-// usage, definitions, rules and models. It has no way to talk with an agent outside a turn, no
-// jobs, and does not compact. What a session holds in memory besides its file (each lead's opening
-// block, what the rules remembered) is gone after a restart; the file is read again.
+// cancels a turn's work when the turn leaves the path, keeps each session's file (§11), opens and
+// closes sessions when the host says so, and compacts one at a turn's start when the lead's first
+// call would not fit or the host asked; and it gives the pages their ways in: the live view, usage,
+// definitions, rules and models. It has no way to talk with an agent outside a turn, and no jobs.
+// What a session holds in memory besides its file (each lead's opening block, what the rules
+// remembered) is gone after a restart; the file is read again.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Template } from "../files/api";
@@ -13,6 +14,7 @@ import { sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { Sessions } from "./sessions";
+import { readSettings } from "./settings";
 import { shippedTemplate } from "./shipped";
 import { Turn, type TurnCore } from "./turn";
 import { UsageBook } from "./usage";
@@ -86,14 +88,20 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     async turnLeft(scope) {
       turns.get(turnKey(scope))?.stop();
       // The session file keeps the turn's entries, and marks it off the path: a session it closed is open again (§11).
-      if (scope.turn === undefined) return;
-      const file = await book.of(scope);
-      const tip = file.log.tip(scope.turn);
-      if (tip !== undefined) file.add({ type: "left", parent: tip, turn: scope.turn });
-      await file.settled();
+      const turn = scope.turn;
+      if (turn === undefined) return;
+      await book.with(scope, async (file) => {
+        const tip = file.log.tip(turn);
+        if (tip !== undefined) file.add({ type: "left", parent: tip, turn });
+        await file.settled();
+      });
     },
 
-    sessions: sessionsApi(book, { files: env.files, now: () => env.clock.now() }),
+    sessions: sessionsApi(book, {
+      files: env.files,
+      now: () => env.clock.now(),
+      keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).compaction.keepTurns,
+    }),
 
     rules: {
       list: (scope) => loadGuidance(env.files, scope).rules(),

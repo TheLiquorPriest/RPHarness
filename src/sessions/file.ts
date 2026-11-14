@@ -96,7 +96,26 @@ export interface LeftEntry extends EntryBase {
   turn: string;
 }
 
-export type SessionEntry = OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry;
+/**
+ * The session's earlier turns were summarized (§11), as the work of `turn`, at its start: the summary
+ * stands for every turn on the path before `kept`, the turn entry of the first turn kept as it was.
+ * The turns it stands for stay in the file, and a path that does not pass through it has them all.
+ */
+export interface CompactedEntry extends EntryBase {
+  type: "compacted";
+  turn: string;
+  summary: string;
+  kept: string;
+}
+
+/** The host asked for a compaction (§11): the session's next turn compacts at its start. A mark that holds until a compaction is written after it. */
+export interface CompactEntry extends EntryBase {
+  type: "compact";
+  /** It belongs to no turn: the host's word, like a closing that names none. */
+  turn?: undefined;
+}
+
+export type SessionEntry = OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | CompactedEntry | CompactEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -133,6 +152,10 @@ function isEntry(v: Record<string, unknown>): boolean {
       return optional(v["turn"], str);
     case "left":
       return str(v["turn"]);
+    case "compacted":
+      return str(v["turn"]) && str(v["summary"]) && str(v["kept"]);
+    case "compact":
+      return v["turn"] === undefined;
     default:
       return false;
   }
@@ -179,7 +202,9 @@ export function parseSession(text: string): ParsedSession {
  *   still at work after a newer one began goes on in its own branch);
  * - a turn the host said left the path is off it, its entries with it, wherever it stands on a
  *   path, until a later turn names it as the turn it follows (a swipe shown again); when the leaf
- *   is in that turn, the leaf goes back to where the turn began.
+ *   is in that turn, the leaf goes back to where the turn began;
+ * - a compaction the host asked for is waiting from its mark until a compaction is written after it,
+ *   in the order of the file, wherever either stands.
  */
 export class SessionLog {
   readonly entries: SessionEntry[] = [];
@@ -192,6 +217,8 @@ export class SessionLog {
   #leaf: string | null = null;
   /** The entry the host opened the session with. */
   #opened: OpenedEntry | undefined;
+  /** The host's mark asking for a compaction, while no compaction has been written after it. */
+  #asked: CompactEntry | undefined;
 
   constructor(entries: readonly SessionEntry[] = []) {
     for (const entry of entries) this.add(entry);
@@ -220,6 +247,8 @@ export class SessionLog {
         return;
       }
       default: {
+        if (entry.type === "compact") this.#asked = entry;
+        if (entry.type === "compacted") this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
         if (this.#leaf === entry.parent) this.#leaf = entry.id;
         return;
@@ -238,6 +267,11 @@ export class SessionLog {
 
   get opened(): OpenedEntry | undefined {
     return this.#opened;
+  }
+
+  /** The host's mark asking for a compaction, while none has been written since. */
+  get asked(): CompactEntry | undefined {
+    return this.#asked;
   }
 
   /** A turn's first entry. */

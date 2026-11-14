@@ -68,6 +68,8 @@ export interface SessionView {
   from?: { chat: string; session: string; turn: string };
   /** Turns played in it. */
   turns: number;
+  /** A compaction the host asked for (`compact`), waiting for the session's next turn. */
+  compactAsked?: true;
 }
 
 export interface SessionsApi {
@@ -80,8 +82,8 @@ export interface SessionsApi {
   close(scope: Scope): Promise<SessionView>;
   /** A branch (§10.10): `to` starts as `from` stood at `from.turn`. */
   fork(from: Scope & { turn: string }, to: Scope): Promise<SessionView>;
-  /** Compacts it now, on the user's word (§11); absent until the harness compacts. */
-  compact?(scope: Scope, signal?: AbortSignal): Promise<SessionView>;
+  /** Compacts it at the start of its next turn, on the user's word (§11). */
+  compact(scope: Scope, signal?: AbortSignal): Promise<SessionView>;
   get(scope: Scope): Promise<SessionView | undefined>;
   list(user: string, chat: string): Promise<SessionView[]>;
 }

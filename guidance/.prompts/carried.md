@@ -1,5 +1,5 @@
 ---
-description: How what a session carries from its earlier turns is laid out for the lead, as text after the assembled prompt. It asks for nothing. Its header's `record` names the file, in each turn's folder, that holds the lead's own record of that turn, which is what the records mode carries.
+description: How what a session carries from its earlier turns is laid out for the lead, as text after the assembled prompt, and how the turns a compaction summarizes are laid out for its call. It asks for nothing. `summary` is the newest summary of the session's earlier turns, or the one it opened with. Its header's `record` names the file, in each turn's folder, that holds the lead's own record of that turn, which is what the records mode carries.
 record: output/record.md
 ---
 # Carried from earlier in this scene
@@ -18,7 +18,7 @@ Your records of this scene's earlier turns, oldest first.
 {{/summary}}
 {{#turns}}
 
-## Turn {{n}}{{#story_time}}, {{story_time}}{{/story_time}}
+## Turn {{n}}
 {{#text}}
 
 {{text}}

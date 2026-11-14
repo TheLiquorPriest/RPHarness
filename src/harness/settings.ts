@@ -42,6 +42,12 @@
 //   trace:
 //     requests: first                  which calls' requests are kept in the turn's folder, each message
 //                                      as role and text: first (each agent's first call), all, or none
+//   compaction:
+//     reserve: 16384                   tokens kept free for the answer: a session's earlier turns are summarized
+//                                      when the lead's first call of a turn would not fit its model's window less this
+//     keepTurns: 3                     the newest of a session's earlier turns that a summary never stands for
+//     records: 6000                    tokens of records the records mode carries before they are folded into
+//                                      the summary by a compaction
 
 import type { Effort, FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
@@ -94,6 +100,12 @@ export interface Settings {
   efforts: Readonly<Record<string, Effort>>;
   /** Which calls' requests are kept in the turn's folder. */
   requests: RequestsSetting;
+  /**
+   * When a session's earlier turns are summarized (§11): the tokens kept free for the answer, how
+   * many of the newest turns are kept as they were, and the tokens of carried records past which
+   * the records mode folds them into the summary.
+   */
+  compaction: { reserve: number; keepTurns: number; records: number };
 }
 
 /** The defaults, where no level sets a value. */
@@ -133,6 +145,9 @@ export const DEFAULT_SETTINGS: Settings = {
   efforts: {},
   // What the floor test and the Turn page read (§17.1: the Author's first request), at one file per agent a turn.
   requests: "first",
+  // Appendix D.1: the reserve pi's coding agent keeps (16,384 tokens), the newest 3 turns kept as
+  // they are, and records folded once they pass 6,000 tokens.
+  compaction: { reserve: 16_384, keepTurns: 3, records: 6_000 },
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -248,6 +263,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const tools = section("tools");
   const rules = section("rules");
   const trace = section("trace");
+  const compaction = section("compaction");
   // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
   const effort = section("effort");
   const efforts: Record<string, Effort> = {};
@@ -283,6 +299,11 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
     efforts,
     requests: oneOf<RequestsSetting>("trace.requests", trace["requests"], ["first", "all", "none"]) ?? DEFAULT_SETTINGS.requests,
+    compaction: {
+      reserve: whole("compaction.reserve", compaction["reserve"]) ?? DEFAULT_SETTINGS.compaction.reserve,
+      keepTurns: whole("compaction.keepTurns", compaction["keepTurns"]) ?? DEFAULT_SETTINGS.compaction.keepTurns,
+      records: count("compaction.records", compaction["records"]) ?? DEFAULT_SETTINGS.compaction.records,
+    },
   };
 }
 

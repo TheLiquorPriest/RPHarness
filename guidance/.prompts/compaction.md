@@ -1,5 +1,5 @@
 ---
-description: What a compaction's summary keeps and drops. This is the text a summary of a session's earlier turns is written from, and the one home of what it keeps.
+description: What a compaction's summary keeps and drops. This is the text a summary of a session's earlier turns is written from, and the one home of what it keeps. It is the whole of the summary call's instructions; what the lead carried from the turns being summarized follows it, laid out by the carried part.
 ---
 Write what the lead must still have after the detail is gone, and nothing else:
 

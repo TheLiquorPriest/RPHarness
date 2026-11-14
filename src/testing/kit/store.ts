@@ -1,0 +1,98 @@
+// The kit's cases for the small durable store and the trace.
+
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { expect, test } from "bun:test";
+import type { AgentRef, JsonValue, Scope, TraceEvent, TraceKind, TraceRecord, Usage } from "../../contract/index";
+import type { KitContext } from "./context";
+
+export function storeCases(ctx: KitContext): void {
+  test("a value is kept whole, and a key with none gives undefined", async () => {
+    const value: JsonValue = { jobs: [{ id: "kit-job-1", state: "running", spent: { calls: 3 } }], note: null, ok: true };
+    await ctx.env.store.set("kit/jobs/kit-job-1", value);
+    expect(await ctx.env.store.get("kit/jobs/kit-job-1")).toEqual(value);
+    await ctx.env.store.set("kit/jobs/kit-job-1", 7);
+    expect(await ctx.env.store.get("kit/jobs/kit-job-1")).toBe(7);
+    expect(await ctx.env.store.get("kit/jobs/kit-no-such-job")).toBeUndefined();
+  });
+
+  test("changes to one key run one at a time, so counts made at once add up", async () => {
+    await Promise.all(Array.from({ length: 25 }, () => ctx.env.store.update("kit/usage/day", (n) => (typeof n === "number" ? n : 0) + 1)));
+    expect(await ctx.env.store.get("kit/usage/day")).toBe(25);
+    expect(await ctx.env.store.update("kit/usage/day", () => undefined)).toBeUndefined();
+    expect(await ctx.env.store.get("kit/usage/day")).toBeUndefined();
+  });
+
+  test("keys list by prefix, and a deleted key is gone", async () => {
+    await ctx.env.store.set("kit/approvals/a", 1);
+    await ctx.env.store.set("kit/approvals/b", 2);
+    await ctx.env.store.set("kit/other", 3);
+    expect((await ctx.env.store.list("kit/approvals/")).sort()).toEqual(["kit/approvals/a", "kit/approvals/b"]);
+    await ctx.env.store.delete("kit/approvals/a");
+    await ctx.env.store.delete("kit/approvals/never-set");
+    expect(await ctx.env.store.list("kit/approvals/")).toEqual(["kit/approvals/b"]);
+  });
+
+  test("a value survives a new host over the same place", async () => {
+    const place = await mkdtemp(join(tmpdir(), "rph-kit-store-"));
+    try {
+      const first = await ctx.make(ctx.seed, place);
+      await first.env.store.set("kit/survives", { turn: "kit-turn-1", calls: 4 });
+      await first.env.store.update("kit/count", () => 1);
+      await first.close();
+      const second = await ctx.make(ctx.seed, place);
+      expect(await second.env.store.get("kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
+      expect(await second.env.store.get("kit/count")).toBe(1);
+      await second.close();
+    } finally {
+      await rm(place, { recursive: true, force: true });
+    }
+  });
+}
+
+const NO_USAGE: Usage = { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 };
+
+/** One event of every kind: the compiler holds this list to every kind there is. */
+function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { kind: K }> } {
+  const outcome = { status: "released" as const, released: true, usage: NO_USAGE };
+  return {
+    run_started: { kind: "run_started", run: "turn", turn: "new", lead: "author" },
+    agent_started: { kind: "agent_started", definition: agent.definition, connection: "kit-connection", model: "kit-model", effort: "low", session: "kit-session", given: ["prompt:persona"] },
+    intent: { kind: "intent", text: "Wants: a quiet answer." },
+    call_started: { kind: "call_started", call: 1, connection: "kit-connection", model: "kit-model", sampling: { temperature: 0.7 }, maxTokens: 512, messages: 6, tools: 3 },
+    call_ended: { kind: "call_ended", call: 1, model: "kit-model", text: "Wren nods.", toolCalls: [{ id: "kit-call-1", name: "kit_tally", args: { numbers: [1, 2] } }], stop: "tool_calls", usage: { ...NO_USAGE, calls: 1, input: 900, output: 40 }, ms: 812 },
+    tool_started: { kind: "tool_started", callId: "kit-call-1", tool: "kit_tally", args: { numbers: [1, 2] }, closing: true },
+    tool_update: { kind: "tool_update", callId: "kit-call-1", tool: "kit_tally", partial: { content: [{ type: "text", text: "counting" }] } },
+    tool_ended: { kind: "tool_ended", callId: "kit-call-1", tool: "kit_tally", result: { content: [{ type: "text", text: "3" }] }, clean: true, endedRun: true, ms: 2 },
+    rule_fired: { kind: "rule_fired", firing: { rule: "kit-quiet", path: ".rules/kit-quiet.md", level: "global", moment: "run-end", agent, action: "follow-up" } },
+    hook: { kind: "hook", hook: "kit-hook", on: "before-tool", outcome: "ok", ms: 5 },
+    approval_asked: { kind: "approval_asked", callId: "kit-call-2", tool: "kit_tally", lane: "engine" },
+    approval_answered: { kind: "approval_answered", callId: "kit-call-2", tool: "kit_tally", lane: "engine", answer: { go: false, reason: "Not now." } },
+    prompt_notices: { kind: "prompt_notices", notices: [{ kind: "gone", marker: "card" }] },
+    todo: { kind: "todo", items: [{ text: "Answer Tamsin.", done: false }] },
+    limit: { kind: "limit", hit: { limit: "calls", per: "turn", max: 40, value: 40 } },
+    released: { kind: "released", release: { by: agent, form: "tags", length: 10 } },
+    compacted: { kind: "compacted", session: "kit-session", before: 90_000, after: 12_000, keptTurns: 3 },
+    session: { kind: "session", session: "kit-session", change: "opened" },
+    job: { kind: "job", job: { id: "kit-job-1", agent: "indexer", brief: "Index the lore.", state: "running", scope: { user: "kit-user", chat: "kit-chat", session: "kit-job-session", turn: "kit-turn-1" }, startedBy: agent, started: 0, usage: NO_USAGE } },
+    agent_ended: { kind: "agent_ended", status: "done", usage: NO_USAGE },
+    run_ended: { kind: "run_ended", outcome },
+  };
+}
+
+export function traceCases(ctx: KitContext): void {
+  test("the trace takes an event of every kind, and streaming text, and keeps them", async () => {
+    const lead: AgentRef = { id: "kit-lead", definition: "author" };
+    const scope: Scope = ctx.scope;
+    const events = Object.values(everyKind(lead));
+    for (const [i, event] of events.entries()) {
+      const record: TraceRecord = { seq: i + 1, run: ctx.scope.turn, scope, at: 1_000 + i, agent: lead, event };
+      expect(() => ctx.env.trace.event(record)).not.toThrow();
+    }
+    const sub: TraceRecord = { seq: events.length + 1, run: ctx.scope.turn, scope, at: 2_000, agent: { id: "kit-gm-1", definition: "gm", parent: "kit-lead" }, parent: { agent: "kit-lead", run: ctx.scope.turn, call: "kit-call-3" }, event: { kind: "agent_started", definition: "gm", connection: "kit-connection", model: "kit-model", session: "kit-gm-session", given: [] } };
+    expect(() => ctx.env.trace.event(sub)).not.toThrow();
+    expect(() => ctx.env.trace.delta({ run: ctx.scope.turn, agent: "kit-lead", call: 1, text: "Wren", thinking: "quietly", at: 1_500 })).not.toThrow();
+    await ctx.env.trace.flush();
+  });
+}

@@ -2,8 +2,11 @@
 // joins the stack of the agents it names. Triggered: it adds what makes it fire (a pattern with
 // where to look, a question, a moment with or without a fact, or a count of turns), how often it
 // may (`repeat:`), and for a pattern whether it stops the call (`interrupt:`) or holds the tool
-// (`hold:`). A rule that cannot be read whole is broken and is not in force: guessing at half of
-// one would put words in front of an agent that the user did not ask for.
+// (`hold:`), and whether the case of its letters counts (`case: ignore` finds `A testament to` as
+// well as `a testament to`; left out, it counts). A rule that cannot be read whole is broken and is
+// not in force: guessing at half of one would put words in front of an agent that the user did not
+// ask for. So is a pattern that could take time without end on some text (`patternRisk`): every
+// user's turns run in one process, and a running pattern cannot be stopped.
 
 import type { FileText, RuleTrigger } from "../contract/index";
 import type { Problem, Replaced, Template } from "./api";
@@ -53,8 +56,8 @@ export interface Rule {
   level: FileText["level"];
   hash: string;
   replaces: Replaced[];
-  /** The file's lines of its `fact:`, its `needs:` and its body's start, for problems found later. */
-  lines: { fact?: number; needs?: number; body: number };
+  /** The file's lines of its `fact:`, its `needs:`, its `question:` and its body's start, for problems found later. */
+  lines: { fact?: number; needs?: number; question?: number; body: number };
 }
 
 /** A rule file read: the rule, or what the Rules page can still show of a broken one. */
@@ -68,6 +71,93 @@ export interface ReadRule {
 
 const SCOPE_FORM = "`scope:` says where to look: text, thinking, reply, arguments or result, and for a tool's `arguments:<tool>` or `result:<tool>` (`result:*` for any tool)";
 const REPEAT_FORM = "`repeat:` is `once per turn` (what it is when left out), `once per session`, `after 6 turns` or `always`";
+
+/**
+ * How many repeats with no bound (`*`, `+`, `{2,}`) a pattern may hold. Each one more lets the time
+ * a pattern takes on a text grow by the text's length once more. Measured on Bun 1.4.0, over 500
+ * characters it cannot match: `.*.*z` 27 ms, `.*.*.*z` 2.6 s.
+ */
+const MOST_OPEN_REPEATS = 2;
+
+/** The repeat that starts at `at` in a pattern, if one does: its length (a lazy `?` after it included), whether it may match more than once, and whether it has no bound. */
+function repeatAt(source: string, at: number): { length: number; many: boolean; open: boolean } | undefined {
+  const c = source[at];
+  let length: number;
+  let max: number;
+  if (c === "*" || c === "+") {
+    length = 1;
+    max = Number.POSITIVE_INFINITY;
+  } else if (c === "?") {
+    length = 1;
+    max = 1;
+  } else if (c === "{") {
+    const m = /^\{(\d+)(,(\d*))?\}/.exec(source.slice(at));
+    if (m === null) return undefined;
+    length = m[0].length;
+    max = m[2] === undefined ? Number(m[1]) : m[3] === "" ? Number.POSITIVE_INFINITY : Number(m[3]);
+  } else return undefined;
+  if (source[at + length] === "?") length += 1;
+  return { length, many: max > 1, open: max === Number.POSITIVE_INFINITY };
+}
+
+/**
+ * Why a pattern could take time without end on some text, or undefined when it cannot: it refers
+ * back to a group it matched; it repeats a group that holds a repeat or alternatives of its own
+ * (`(a+)+`, `(a|ab)*`), which takes twice as long for each character more; or it holds more than
+ * `MOST_OPEN_REPEATS` repeats with no bound.
+ */
+export function patternRisk(source: string): string | undefined {
+  /** Each group open at this point, innermost last: whether it holds a repeat, and alternatives. */
+  const groups: { repeats: boolean; alternatives: boolean }[] = [];
+  let open = 0;
+  let inClass = false;
+  /** The group that closed just before this character, which a repeat here would repeat. */
+  let closed: { repeats: boolean; alternatives: boolean } | undefined;
+  for (let at = 0; at < source.length; at += 1) {
+    const c = source[at];
+    const before = closed;
+    closed = undefined;
+    if (c === "\\") {
+      const next = source[at + 1] ?? "";
+      if (!inClass && (/[1-9]/.test(next) || (next === "k" && source[at + 2] === "<"))) return "The pattern refers back to a group it matched (`\\1`, `\\k<name>`). Such a pattern can take time without end on some text, so the rule is not in force.";
+      at += 1;
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") inClass = false;
+      continue;
+    }
+    if (c === "[") inClass = true;
+    else if (c === "(") {
+      groups.push({ repeats: false, alternatives: false });
+      // `(?:`, `(?=`, `(?!`, `(?<=`, `(?<!` and `(?<name>` say what kind of group it is; none of it is a repeat.
+      if (source[at + 1] === "?") at = source[at + 2] !== "<" ? at + 2 : source[at + 3] === "=" || source[at + 3] === "!" ? at + 3 : Math.max(at, source.indexOf(">", at));
+    } else if (c === ")") {
+      const group = groups.pop();
+      const outer = groups.at(-1);
+      if (group !== undefined && outer !== undefined) {
+        outer.repeats ||= group.repeats;
+        outer.alternatives ||= group.alternatives;
+      }
+      closed = group;
+    } else if (c === "|") {
+      const group = groups.at(-1);
+      if (group !== undefined) group.alternatives = true;
+    } else {
+      const repeat = repeatAt(source, at);
+      if (repeat === undefined) continue;
+      at += repeat.length - 1;
+      if (!repeat.many) continue;
+      if (before !== undefined && (before.repeats || before.alternatives))
+        return "The pattern repeats a group that holds a repeat or alternatives of its own, as `(a+)+` and `(a|ab)*` do. Such a pattern can take time without end on some text, so the rule is not in force. Repeat what is inside the group instead: `a+`, `(a|ab)`.";
+      if (repeat.open && (open += 1) > MOST_OPEN_REPEATS)
+        return `The pattern repeats things with no bound more than ${MOST_OPEN_REPEATS} times (\`*\`, \`+\`, \`{2,}\`). Each such repeat makes the time it can take on a long text grow by the text's length again, so the rule is not in force. Give the others a bound: \`.{0,40}\` in place of \`.*\`.`;
+      const group = groups.at(-1);
+      if (group !== undefined) group.repeats = true;
+    }
+  }
+  return undefined;
+}
 
 function parseScope(value: unknown, allowed: readonly RuleScope["watch"][]): RuleScope[] | undefined {
   const items = nameList(value);
@@ -142,12 +232,18 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
   if (trigger === "condition") {
     read.trigger = "pattern";
     let pattern: RegExp | undefined;
+    const ignoreCase = h.case === undefined || h.case === null || h.case === "exact" ? false : h.case === "ignore" ? true : undefined;
+    if (ignoreCase === undefined) fail("case", "`case:` is `ignore` to find the pattern whatever the case of its letters, so that `a testament to` finds `A testament to` too; left out, the case counts.");
     if (typeof h.condition !== "string" || h.condition === "") fail("condition", "`condition:` is a pattern to look for, in quotes: `condition: 'a testament to'`.");
     else {
-      try {
-        pattern = new RegExp(h.condition);
-      } catch (error) {
-        fail("condition", `The pattern cannot be read (${error instanceof Error ? error.message : String(error)}). It is a JavaScript regular expression; to look for a character such as ( or ? itself, put \\ before it.`);
+      const risk = patternRisk(h.condition);
+      if (risk !== undefined) fail("condition", risk);
+      else {
+        try {
+          pattern = new RegExp(h.condition, ignoreCase === true ? "i" : "");
+        } catch (error) {
+          fail("condition", `The pattern cannot be read (${error instanceof Error ? error.message : String(error)}). It is a JavaScript regular expression; to look for a character such as ( or ? itself, put \\ before it.`);
+        }
       }
     }
     const scope = parseScope(h.scope, ["text", "thinking", "reply", "arguments", "result"]);
@@ -178,6 +274,7 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
   if (Object.hasOwn(h, "fact") && trigger !== "at" && trigger !== "every") fail("fact", "`fact:` is tested at a moment: give the rule `at:` (turn-start, run-end or before-compaction) or `every:`.");
   if (trigger !== "condition" && trigger !== "question" && h.scope !== undefined) problem("scope", "`scope:` goes with `condition:` or `question:`, and is not read here.");
   if (trigger !== "condition" && (h.interrupt !== undefined || h.hold !== undefined)) problem(h.interrupt !== undefined ? "interrupt" : "hold", "`interrupt:` and `hold:` go with `condition:`, and are not read here.");
+  if (trigger !== "condition" && h.case !== undefined) problem("case", "`case:` goes with `condition:`, and is not read here.");
 
   const turns = nameList(h.turns);
   if (turns === undefined) fail("turns", "`turns:` names the kinds of turn an always-on rule is for: `turns: [swipe, regenerate]`.");
@@ -205,6 +302,7 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     lines: {
       ...(fact !== undefined ? { fact: fieldLine(split.lines, "fact") ?? 2 } : {}),
       ...(needs.length > 0 ? { needs: fieldLine(split.lines, "needs") ?? 2 } : {}),
+      ...(trigger === "question" ? { question: fieldLine(split.lines, "question") ?? 2 } : {}),
       body: split.bodyLine,
     },
   };

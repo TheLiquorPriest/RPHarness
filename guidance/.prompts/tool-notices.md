@@ -3,6 +3,7 @@ description: The words an agent is told about its tool calls - what RPH's own to
 format: lines
 ---
 failed: {{tool}} failed: {{error}}
+unfinished: {{tool}} was stopped before it finished. It may have done its work, or not.
 not_held: You hold no tool named {{tool}}.
 invalid: {{tool}} was not run: its arguments do not fit what it takes. You sent {{arguments}}. It takes {{parameters}}.
 cut_short: {{tool}} was not run: your message reached its length limit, so its arguments may be cut short. Call it again.
@@ -13,7 +14,7 @@ missing: There is no file at {{path}}.
 folder: {{path}} is a folder. List what is in it with file_find.
 empty: {{path}} is empty.
 past_end: {{path}} has {{lines}} lines.
-refused_yours: {{path}} is one of the player's own files: agents read those and never write them. You may write in {{writable}}.
+refused_yours: Agents do not write at {{path}}. Outside {{writable}}, the files are the player's own: agents read them and never write them. You may write in {{writable}}.
 refused_generated: {{path}} is kept by the system for agents to read. You may write in {{writable}}.
 refused_mounted: {{path}} is in a shared level of files, which agents read and never write. You may write in {{writable}}.
 refused_outside: {{path}} is outside the files you can see.
@@ -38,4 +39,4 @@ no_writer: There is no agent definition named {{writer}} to write the reply.
 no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
 released: The reply went out.
-not_written: {{writer}} gave no reply ({{why}}).
+not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached one of its limits{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.

@@ -8,17 +8,19 @@
 //   1. the opening block, fixed when the session opened: its definition and instruction stack, the
 //      reply contract, the tool guide (the system prompt, with its tools declared);
 //   2. the assembled prompt exactly as the request carries it, introduced by the frame part;
-//   3. what the session carries, as text (nothing yet: the other modes come with sessions);
+//   3. what the session carries, as text: nothing, in every mode the request names;
 //   4. the briefing, laid out by its template from the host's parts and RPH's own.
 // Blocks 2 to 4 are placed when the lead's definition is given them (`prompt:*`, `session:carry`,
 // `briefing`).
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import { AGENT_TOOLS, agentMessage, askAuthor, delegate, Team, type TeamWork } from "../agents";
 import type { AgentRef, Environment, ModelsApi, Places, PromptNotice, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
+import { SilentReply } from "../reply/silent";
 import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type HeldTool, type OwnTool, Registry, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { TurnGate } from "./gate";
 import type { LiveHub } from "./live";
@@ -27,8 +29,8 @@ import type { Opening, Sessions } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release"] as const;
+/** RPH's own tools, each described by its file in `.tools/`; the sub-agents' among them. */
+const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS] as const;
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
@@ -227,7 +229,10 @@ export class Turn {
 
     const session = this.#c.sessions.of(scope);
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
-    const rules = await guidance.ruleRun({ facts, ...(session.memory !== undefined ? { memory: session.memory } : {}) });
+    // A turn goes on from what the rules remembered as its parent left them, so a swipe starts where the attempt it replaces did.
+    const from = req.parent ?? session.latest;
+    const memory = from === undefined ? undefined : session.memories.get(from);
+    const rules = await guidance.ruleRun({ facts, window: settings.ruleWindow, ...(memory !== undefined ? { memory } : {}) });
     this.#rules = rules;
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
 
@@ -240,7 +245,27 @@ export class Turn {
     const writerPart = template(ownParts.find(([name]) => name === "write_reply")?.[1]);
     const writer = writerPart?.header["writer"];
     this.#writer = typeof writer === "string" ? writer : undefined;
-    const registry = new Registry(this.#ownTools(ownTexts), await env.tools.all(scope));
+    const team = new Team({
+      env,
+      trace: this.#trace,
+      guidance,
+      ids: () => this.#c.ids(),
+      models: this.#c.models,
+      connection: (definition) => this.#connection(definition),
+      hold: (names) => this.#registry?.hold(names) ?? { tools: [], missing: [...names] },
+      gate: (agent, parent, tools) => this.#gate(agent, parent, tools),
+      texts: () => this.#texts,
+      rules: () => this.#rulesRun(),
+      budget: () => this.#budget,
+      settings: () => this.#settings.subAgents,
+      track: (entry) => {
+        this.#working.add(entry);
+        return () => this.#working.delete(entry);
+      },
+      gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
+      progress: (name, fields) => this.#say(name, fields),
+    });
+    const registry = new Registry(this.#ownTools(ownTexts, team), await env.tools.all(scope));
     this.#registry = registry;
     if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
 
@@ -260,6 +285,7 @@ export class Turn {
       invalid: (fields) => this.#words("invalid", fields),
       cutShort: (fields) => this.#words("cut_short", fields),
       failed: (fields) => this.#words("failed", fields),
+      unfinished: (fields) => this.#words("unfinished", fields),
     };
 
     let model: AgentModel;
@@ -287,13 +313,13 @@ export class Turn {
       if (prompt.picturesLeft > 0) env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.run, pictures: prompt.picturesLeft });
       messages.push(...prompt.messages);
     }
-    if (opening.given.includes("session:carry") && req.carry !== "nothing") env.log.info("The session carries nothing yet: its continuing and records modes come with sessions.", { turn: this.run, carry: req.carry });
+    if (opening.given.includes("session:carry") && req.carry !== "nothing") env.log.info("The request asks the session to carry its turns, and this harness carries nothing from one turn to the next.", { turn: this.run, carry: req.carry });
     if (opening.given.includes("briefing")) {
       const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), promptNotices, lines(notices), places);
       if (text !== undefined) messages.push(systemMessage(joined([text]), at));
     }
     const unplaced = opening.given.filter((ref) => !ref.startsWith("prompt:*") && ref !== "session:carry" && ref !== "briefing");
-    if (unplaced.length > 0) env.log.info("Things the lead is given by name that this build does not place yet.", { agent: req.lead, given: unplaced });
+    if (unplaced.length > 0) env.log.info("Things the lead is given by name that this harness does not place; it is given none of them.", { agent: req.lead, given: unplaced });
 
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
@@ -340,13 +366,15 @@ export class Turn {
       gate: this.#gate(this.#lead, undefined, held.tools),
       channel,
     });
+    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
     if (this.#stopped) return this.#outcome({ status: "stopped" });
     const work = runner.start({ messages }, { given: opening.given });
     const entry = { runner, work };
     this.#working.add(entry);
     const outcome = await work.done;
     this.#working.delete(entry);
-    session.memory = rules.memory();
+    session.memories.set(scope.turn, rules.memory());
+    session.latest = scope.turn;
     return this.#outcomeOf(outcome);
   }
 
@@ -439,7 +467,7 @@ export class Turn {
     return text.trim() === "" ? undefined : text;
   }
 
-  /** What changed in the prompt's shape that this build can tell: no map yet for its preset, or text that could not be told apart (§4.8). Finding slices comes with the prompt map. */
+  /** What changed in the prompt's shape that this harness can tell: no map for its preset, or text that could not be told apart (§4.8). */
   async #promptNotices(): Promise<PromptNotice[]> {
     const { env } = this.#c;
     const notices: PromptNotice[] = [];
@@ -474,7 +502,7 @@ export class Turn {
     };
   }
 
-  #ownTools(texts: ReadonlyMap<string, ToolText>): OwnTool[] {
+  #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork): OwnTool[] {
     const { env } = this.#c;
     const fileDeps: FileToolsDeps = { files: env.files, words: (name, fields) => this.#words(name, fields), texts, written: (_scope, by, done) => this.#written(by, done.path) };
     const work: ReplyWork = { write: (brief, live, ctx) => this.#write(brief, live, ctx), release: (path, ctx) => this.#releaseReply(path, ctx) };
@@ -485,6 +513,9 @@ export class Turn {
       todo({ lists: this.#todos, words: (name, fields) => this.#words(name, fields), text: texts.get("todo"), changed: (agent, items) => this.#trace.event(agent, this.#parents.get(agent.id), { kind: "todo", items: [...items] }) }),
       writeReply(work, texts.get("write_reply")),
       replyRelease(work, texts.get("reply_release")),
+      delegate(team, texts.get("delegate")),
+      askAuthor(team, texts.get("ask_author")),
+      agentMessage(team, texts.get("agent_message")),
     ];
   }
 
@@ -575,6 +606,9 @@ export class Turn {
     const instructions = joined(stack.entries.flatMap((entry) => (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined ? [] : [entry.kind === "definition" ? this.#instructions(definition) : entry.text])));
     const connection = await this.#connection(definition);
     const model = await this.#c.models.agentModel(connection.choice);
+    // A stop that came while the writer was being made fired before any listener was on it: from here
+    // on nothing is awaited until the writer's work is tracked and listening, so this is the last look.
+    if (ctx.signal.aborted || this.#stopped) return { content: [] };
     const ref: AgentRef = { id: this.#c.ids(), definition: writer, parent: ctx.agent.id };
     const parent: ParentCall = { agent: ctx.agent.id, run: this.run, call: ctx.callId };
     this.#parents.set(ref.id, parent);
@@ -594,7 +628,7 @@ export class Turn {
     const rules = this.#rulesRun();
     const streamRules = rules.stream(ref);
     const second = words("second_reply");
-    const channel = live
+    const shown = live
       ? new MessageReply({
           sink: this.#keep?.sink ?? this.#sink,
           stream: true,
@@ -606,6 +640,8 @@ export class Turn {
           onReleased: (text) => this.#release(text, "narrator-live", ref),
         })
       : undefined;
+    // A draft shows nothing, and the rules on the reply look at it as it is written all the same.
+    const channel: TextChannel = shown ?? new SilentReply();
     if (!live) this.#say("writing");
     const held = this.#registry?.hold(definition.tools) ?? { tools: [], missing: [] };
     if (held.missing.length > 0) env.log.warn("Tools the writer's definition lists are registered by nobody; it holds the rest.", { agent: writer, tools: held.missing });
@@ -625,8 +661,9 @@ export class Turn {
       stream: streamRules,
       runEnd: rules.runEnd,
       gate: this.#gate(ref, parent, held.tools),
-      ...(channel !== undefined ? { channel } : {}),
+      channel,
     });
+    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: writer, tools: runner.leftOut });
     const work = runner.start({ messages }, { parent, given: definition.given });
     const entry = { runner, work };
     this.#working.add(entry);
@@ -639,8 +676,10 @@ export class Turn {
       this.#working.delete(entry);
       ctx.signal.removeEventListener("abort", stop);
     }
-    const failedWords = { writer, ...(outcome.error !== undefined && outcome.error !== "" ? { error: outcome.error } : {}) };
-    if (live) return channel?.released === true ? { content: [{ type: "text", text: channel.shown }] } : answer(words("not_written", failedWords), true);
+    // Why there is no reply is the file's to say, by how the writer's work ended; the error's own words are the model layer's or the provider's, for whoever runs the host.
+    if (outcome.error !== undefined && outcome.error !== "") env.log.warn("The writer's work ended in an error.", { writer, status: outcome.status, error: outcome.error });
+    const failedWords = { writer, ...(outcome.status === "failed" || outcome.status === "limit" || outcome.status === "stopped" ? { [outcome.status]: true } : {}) };
+    if (shown !== undefined) return shown.released ? { content: [{ type: "text", text: shown.shown }] } : answer(words("not_written", failedWords), true);
     if (outcome.status !== "done" || outcome.text.trim() === "") return answer(words("not_written", failedWords), true);
     this.#draft = { text: outcome.text, by: ref };
     return { content: [{ type: "text", text: outcome.text }] };
@@ -652,6 +691,8 @@ export class Turn {
     if (this.#desk.taken) return answer(words("second_reply"), true);
     if (path !== undefined) {
       const read = await this.#c.env.files.read(this.scope, path);
+      // A stop that came while the file was read: the sink has had its error, and nothing follows it.
+      if (ctx.signal.aborted || this.#stopped) return { content: [] };
       if (read.status === "refused") return answer(words(`refused_${read.reason}`, { path: read.path, writable: read.writable }), true);
       if (read.status === "missing") return answer(words(read.folder === true ? "folder" : "missing", { path: read.path }), true);
       if (!this.#desk.claim("file")) return answer(words("second_reply"), true);

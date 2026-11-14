@@ -1,7 +1,7 @@
 // How a turn ends (§10.7, §10.9, §10.10, §5.4): with no reply released, the shipped reminder is put
 // in front of the lead once, and then the host is told; closing calls do not end the run while a
 // run-end rule is due; the run may go on after the reply; and a stop, from the signal or because
-// the turn left the path, leaves nothing running.
+// the turn left the path, leaves nothing running, even a writer that was still being made.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { RuleFiring } from "../../src/contract";
 import { gate, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
@@ -159,5 +159,78 @@ describe("stop", () => {
     expect(outcome).toMatchObject({ status: "stopped", released: true, reply: "Wren lights the lamp." });
     expect(sink.finished).toHaveLength(1);
     expect(sink.errors).toEqual([]);
+  });
+
+  test("while a finished file is being read for release: nothing reaches the sink after its error, and the host hears of no release", async () => {
+    const asked = gate();
+    const held = gate();
+    const kept = "persistent-workspace/reply.md";
+    const s = (open = await stage({
+      drafted: true,
+      files: { [`chats/wren-hale/lighthouse/${kept}`]: "A finished reply.\n" },
+      // The file is held while it is read, until the turn has been stopped.
+      filesPort: (inner) => ({
+        layers: (scope) => inner.layers(scope),
+        places: (scope) => inner.places(scope),
+        find: (scope, query) => inner.find(scope, query),
+        write: (scope, path, op, by) => inner.write(scope, path, op, by),
+        read: async (scope, path, range) => {
+          const read = await inner.read(scope, path, range);
+          if (path === kept) {
+            asked.open();
+            await held.opened;
+          }
+          return read;
+        },
+      }),
+      answers: [{ pieces: [{ call: "reply_release", args: { path: kept, closing: true } }] }],
+    }));
+    const stop = new AbortController();
+
+    const turn = s.turn(request("t1"), undefined, stop.signal);
+    await asked.opened;
+    stop.abort();
+    const { outcome, sink } = await turn;
+    held.open();
+    await s.clock.idle();
+
+    expect(outcome).toMatchObject({ status: "stopped", released: false });
+    expect(sink.errors).toEqual([{ code: "stopped" }]);
+    expect(sink.text).toBe("");
+    expect(sink.finished).toEqual([]);
+    expect(s.told.map((told) => told.kind)).toEqual(["ended"]);
+  });
+
+  test("while the writer is still being made: no writer starts, the sink hears nothing after its error, and the host nothing after the end", async () => {
+    const asked = gate();
+    const held = gate();
+    const s = (open = await stage({
+      drafted: true,
+      // The second model asked for is the writer's: it is held until the turn has been stopped.
+      modelAsked: async (count) => {
+        if (count !== 2) return;
+        asked.open();
+        await held.opened;
+      },
+      answers: [{ pieces: [{ call: "write_reply", args: { brief: "Wren says the boat has not come.", live: true } }] }, { pieces: [{ text: "Not yet, Wren says." }] }],
+    }));
+    const stop = new AbortController();
+
+    const turn = s.turn(request("t1"), undefined, stop.signal);
+    await asked.opened;
+    stop.abort();
+    const { outcome, sink } = await turn;
+    const lines = sink.lines.length;
+    held.open();
+    await s.clock.idle();
+
+    expect(outcome).toMatchObject({ status: "stopped", released: false });
+    expect(s.model.requests).toHaveLength(1);
+    expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["author"]);
+    expect(sink.errors).toEqual([{ code: "stopped" }]);
+    expect(sink.text).toBe("");
+    expect(sink.finished).toEqual([]);
+    expect(sink.lines).toHaveLength(lines);
+    expect(s.told.map((told) => told.kind)).toEqual(["ended"]);
   });
 });

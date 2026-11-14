@@ -1,12 +1,16 @@
 // The rule engine (§5.4) over the drafted rules: each kind of trigger fires on its condition and not
 // otherwise; `repeat:` holds a rule to once per turn unless the file says otherwise; a rule's text is
-// filled from the fact's fields, counting only the groups its header picks; and a reminder tied by
-// `needs:` to a file stops the moment that file is switched off.
+// filled from the fact's fields, counting only the groups its header picks; a reminder tied by
+// `needs:` to a file stops the moment that file is switched off; a pattern that could take time
+// without end is not in force, and the others look at bounded stretches of text; and a question,
+// which no model is asked, is not in force.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { FactValue } from "../../src/contract/index";
+import { createRuleRun } from "../../src/files/engine";
 import type { OwnFactValues, RuleMemory, RuleRun } from "../../src/files/index";
 import { createFacts, loadGuidance } from "../../src/files/index";
+import { parseRule } from "../../src/files/rules";
 import type { Bench } from "./support";
 import { author, bench, drafted, draftedFile, gm, PLAN_FACTS, scope } from "./support";
 
@@ -24,10 +28,10 @@ async function drafts(): Promise<Bench> {
   return bench({ shipped: await drafted() }, PLAN_FACTS);
 }
 
-async function run(memory?: RuleMemory): Promise<RuleRun> {
+async function run(memory?: RuleMemory, window?: number): Promise<RuleRun> {
   if (b === undefined) throw new Error("No bench.");
   const facts = createFacts(b.host.facts, () => own);
-  return loadGuidance(b.host.files, scope).ruleRun({ facts, ...(memory !== undefined ? { memory } : {}) });
+  return loadGuidance(b.host.files, scope).ruleRun({ facts, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}) });
 }
 
 const STAGE: FactValue = {
@@ -178,10 +182,83 @@ describe("a pattern", () => {
   });
 });
 
+describe("a pattern's cost", () => {
+  test("one that could take time without end on some text is a problem when the rules are read, and its rule is not in force", async () => {
+    const rule = (condition: string) => `---\ndescription: Fixture.\nagents: all\nscope: [reply]\ncondition: '${condition}'\n---\nText.\n`;
+    b = await bench({
+      chat: {
+        "rules/nested.md": rule("(a+)+$"),
+        "rules/overlapping.md": rule("(a|aa)*$"),
+        "rules/backwards.md": rule("(\\w+) \\1"),
+        "rules/open.md": rule("a.*b.*c.*z"),
+        "rules/fine.md": rule("(shivers? down (her|his) spine|a.{0,40}b.*c\\(.*\\))"),
+      },
+    });
+    const g = loadGuidance(b.host.files, scope);
+    expect((await g.rules()).map((r) => [r.name, r.inForce, r.why])).toEqual([
+      ["backwards", false, "broken"],
+      ["fine", true, undefined],
+      ["nested", false, "broken"],
+      ["open", false, "broken"],
+      ["overlapping", false, "broken"],
+    ]);
+    const problems = Object.fromEntries((await g.problems()).map((p) => [p.path, p.message]));
+    expect(problems["rules/nested.md"]).toContain("repeats a group that holds a repeat or alternatives of its own");
+    expect(problems["rules/overlapping.md"]).toContain("repeats a group that holds a repeat or alternatives of its own");
+    expect(problems["rules/backwards.md"]).toContain("refers back to a group it matched");
+    expect(problems["rules/open.md"]).toContain("repeats things with no bound more than 2 times");
+    expect(problems["rules/fine.md"]).toBeUndefined();
+  });
+
+  test("it looks at the newest stretch of what is written, and at a tool's text a stretch at a time, so a long text costs no more than its stretches", async () => {
+    b = await bench({
+      chat: {
+        "rules/slow.md": "---\ndescription: Fixture.\nagents: all\nscope: [reply]\ncondition: '.*.*z'\n---\nText.\n",
+        "rules/sourced.md": "---\ndescription: Fixture.\nagents: all\nscope: [result:*]\ncondition: 'the rail is rotten'\n---\nText.\n",
+      },
+    });
+    const r = await run(undefined, 500);
+    const rules = r.stream(author);
+    const long = "a".repeat(4_000);
+    const started = performance.now();
+    expect(rules.check({ agent: author, call: 1, piece: "text", text: long, thinking: "", reply: long })).toBeUndefined();
+    // Over the whole text this pattern takes some seconds; over the newest 500 characters, tens of milliseconds.
+    expect(performance.now() - started).toBeLessThan(1_000);
+    expect(rules.check({ agent: author, call: 1, piece: "text", text: `${long}z`, thinking: "", reply: `${long}z` })?.firing.rule).toBe("slow");
+    // Within a long result, a phrase anywhere is found.
+    const result = { content: [{ type: "text" as const, text: `${"b".repeat(1_234)} the rail is rotten ${"b".repeat(3_000)}` }] };
+    expect((await r.toolResult(gm, { id: "c1", tool: "world_query" }, result)).map((f) => f.firing.matched)).toEqual(["the rail is rotten"]);
+  });
+
+  test("`case: ignore` finds a phrase whatever the case of its letters, as at a sentence's start; left out, the case counts", async () => {
+    const rule = (name: string, extra: string) => `---\ndescription: Fixture ${name}.\nagents: all\nscope: [reply]\ncondition: 'a testament to'\n${extra}---\nText.\n`;
+    b = await bench({ chat: { "rules/exact.md": rule("exact", ""), "rules/any-case.md": rule("any case", "case: ignore\n"), "rules/wrong.md": rule("wrong", "case: loose\n") } });
+    const rules = (await run()).stream(author);
+    const reply = "The tower stands. A testament to the keepers.";
+    expect(rules.check({ agent: author, call: 1, piece: "text", text: reply, thinking: "", reply })?.firing).toMatchObject({ rule: "any-case", matched: "A testament to" });
+    expect(rules.check({ agent: author, call: 1, piece: "text", text: reply, thinking: "", reply })).toBeUndefined();
+    const views = Object.fromEntries((await loadGuidance(b.host.files, scope).rules()).map((r) => [r.name, r.why]));
+    expect(views).toEqual({ "any-case": undefined, exact: undefined, wrong: "broken" });
+  });
+});
+
 describe("a question", () => {
-  test("is asked about what the rule looks at, fires on yes alone, and about a reply already shown goes into the next briefing", async () => {
+  test("is not in force, since no model is asked it, and the user is told so at its `question:` line", async () => {
     b = await bench({ chat: { "rules/no-player-voice.md": await draftedFile(".rules/examples/no-player-voice.md") } });
-    const r = await run();
+    const g = loadGuidance(b.host.files, scope);
+    expect((await g.rules()).map((r) => [r.name, r.trigger, r.inForce])).toEqual([["no-player-voice", "question", false]]);
+    expect(await g.problems()).toContainEqual(expect.objectContaining({ path: "rules/no-player-voice.md", line: 5, message: expect.stringContaining("No model is asked a rule's question") }));
+    expect((await run()).questions(author, { text: "", reply: "Wren nods, and you agree." })).toEqual([]);
+  });
+
+  test("in the engine: asked about what the rule looks at, it fires on yes alone, and about a reply already shown goes into the next briefing", async () => {
+    b = await bench({ chat: { "rules/no-player-voice.md": await draftedFile(".rules/examples/no-player-voice.md") } });
+    const file = await b.host.files.read(scope, "rules/no-player-voice.md");
+    const rule = file.status === "read" ? parseRule(file, "no-player-voice", []).rule : undefined;
+    if (rule === undefined) throw new Error("The rule does not read.");
+    const facts = createFacts(b.host.facts, () => own);
+    const runOf = (memory?: RuleMemory): RuleRun => createRuleRun({ scope, rules: [rule], facts, ...(memory !== undefined ? { memory } : {}) });
+    const r = runOf();
     expect(r.questions(gm, { text: "Rolled.", reply: "x" })).toEqual([]);
     const [q] = r.questions(author, { text: "<reply>Wren nods.</reply>", reply: "Wren nods." });
     expect(q).toMatchObject({ rule: "no-player-voice", watched: "reply", text: "Wren nods.", question: expect.stringContaining("Does this passage decide") });
@@ -196,10 +273,10 @@ describe("a question", () => {
     expect(answered.fired.firing).toMatchObject({ rule: "no-player-voice", moment: "after-message", matched: "yes" });
     expect(r.questions(author, { text: "", reply: "More." })).toEqual([]);
 
-    const next = await run(r.memory());
+    const next = runOf(r.memory());
     const due = await next.turnStart(author);
     expect(due).toEqual([{ carried: true, firing: answered.fired.firing, text: answered.fired.text }]);
-    expect(await (await run(next.memory())).turnStart(author)).toEqual([]);
+    expect(await runOf(next.memory()).turnStart(author)).toEqual([]);
   });
 });
 

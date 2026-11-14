@@ -1,7 +1,8 @@
 // What the harness keeps of a session between its turns (§5.2, §10.2): each lead's opening block,
 // fixed when the session opened, with the tools it held and the snapshot of its stack that later
-// briefings are compared with; and what the user's rules remember across turns. Kept while the
-// harness runs; the session file, which outlives a restart, comes with the sessions lane.
+// briefings are compared with; and what the user's rules remember, as each turn left it, so that a
+// swipe starts from its parent's and not from the attempt it replaces (§6.3, §10.10). Kept while the
+// harness runs: a restart forgets it.
 import type { Scope } from "../contract";
 import type { RuleMemory, StackSnapshot } from "../files/api";
 import type { ReplyTags } from "../reply/tags";
@@ -29,7 +30,10 @@ export interface Opening {
 
 export interface SessionState {
   openings: Map<string, Opening>;
-  memory?: RuleMemory;
+  /** What the user's rules remembered at the end of each turn of the session, by the turn. */
+  memories: Map<string, RuleMemory>;
+  /** The turn whose memory was kept last. */
+  latest?: string;
 }
 
 export class Sessions {
@@ -40,7 +44,7 @@ export class Sessions {
     const key = JSON.stringify([scope.user, scope.chat, scope.session]);
     let state = this.#sessions.get(key);
     if (state === undefined) {
-      state = { openings: new Map() };
+      state = { openings: new Map(), memories: new Map() };
       this.#sessions.set(key, state);
     }
     return state;

@@ -8,11 +8,12 @@
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ApprovalsPort, Environment, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, ToolResult, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage } from "../../src/contract";
+import type { ApprovalsPort, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, ToolResult, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage } from "../../src/contract";
+import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { createHarness, SHIPPED_GUIDANCE } from "../../src/index";
 import { type Answer, FakeClock, scriptedModel, type ScriptedModel } from "../../src/testing/rig";
-import { SinkRecorder, TraceRecorder } from "../loop/support";
+import { SinkRecorder, textOf, TraceRecorder } from "../loop/support";
 
 export { gate, type RecordedRequest } from "../../src/testing/rig";
 export { textOf } from "../loop/support";
@@ -120,6 +121,10 @@ export interface StageOptions {
   files?: Record<string, string>;
   /** How the host is told each thing: tests can hold one back. */
   events?: (inner: TurnEvents) => TurnEvents;
+  /** How the agents' files are read and written: tests can hold a read back. */
+  filesPort?: (inner: FilesPort) => FilesPort;
+  /** Each time an agent's model is asked for, by its count from 1: a test can hold the answer back. */
+  modelAsked?: (count: number) => void | Promise<void>;
 }
 
 export interface Stage {
@@ -210,10 +215,18 @@ export async function stage(options: StageOptions): Promise<Stage> {
   };
   const events = recorded(options.events !== undefined ? options.events(host.events) : host.events);
   const trace = new WatchedTrace();
-  const env: Environment = { ...host, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
+  const env: Environment = { ...host, files: options.filesPort?.(host.files) ?? host.files, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
   const model = scriptedModel(options.answers, { clock, contextWindow: 64_000, maxTokens: 4_000 });
   let next = 0;
-  const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: { agentModel: async () => model.agentModel() } }), ids: () => `id-${(next += 1)}` });
+  let asked = 0;
+  const scripted = {
+    agentModel: async () => {
+      asked += 1;
+      await options.modelAsked?.(asked);
+      return model.agentModel();
+    },
+  };
+  const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: scripted }), ids: () => `id-${(next += 1)}` });
 
   return {
     dir,
@@ -242,4 +255,31 @@ export async function stage(options: StageOptions): Promise<Stage> {
       await rm(dir, { recursive: true, force: true });
     },
   };
+}
+
+/** The reply contract in force on a stage, rendered by its own file for a form: what the lead's opening block holds. */
+export async function contractFor(s: Stage, form: "tags" | "two_step"): Promise<string> {
+  const part = await loadGuidance(s.env.files, request("t1").scope).part("reply-contract");
+  if (part?.format !== "template") throw new Error("The stage has no reply contract.");
+  return part.render({ form: { [form]: true } }).text.trimEnd();
+}
+
+/** Put in place of the reply contract's field in RPH's own briefing template. */
+export const CONTRACT_MARK = "FIXTURE-CONTRACT-MARK";
+
+/**
+ * The briefing the lead's first call ends on, under RPH's own briefing template with the mark in
+ * place of its reply contract's field: the briefing as its template lays it out around the
+ * contract, whatever its words.
+ */
+export async function briefingAround(config?: string): Promise<string> {
+  const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "briefing.md")).text();
+  if (!shipped.includes("{{reply_contract}}")) throw new Error("RPH's own briefing template shows no reply contract.");
+  const s = await stage({ ...(config !== undefined ? { config } : {}), files: { ".prompts/briefing.md": shipped.replace("{{reply_contract}}", CONTRACT_MARK) }, answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }] });
+  try {
+    await s.turn(request("t1", { lead: "lead" }));
+    return textOf(s.model.requests[0]!.messages.at(-1)!);
+  } finally {
+    await s.close();
+  }
 }

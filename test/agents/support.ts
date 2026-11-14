@@ -2,7 +2,8 @@
 // files as its lowest level with the test's files over them, a scripted model for each model a
 // definition names, and the parts of a turn made as the harness makes them: one trace for every
 // agent of the turn (shown live, and counted), the gate around every tool call, the rules, the
-// registry of RPH's own tools and the host's, and the team. Everything else here is invented.
+// user's settings, the registry of RPH's own tools and the host's, and the team. Everything else
+// here is invented.
 //
 // The turns run on the rig's clock without moving it: a scripted answer that must wait holds at a
 // gate the test opens.
@@ -16,6 +17,7 @@ import type { AgentDefinition, PromptPart } from "../../src/files/api";
 import { TurnGate } from "../../src/harness/gate";
 import { LiveHub } from "../../src/harness/live";
 import { userMessage } from "../../src/harness/prompt";
+import { readSettings } from "../../src/harness/settings";
 import { UsageBook } from "../../src/harness/usage";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/index";
@@ -214,7 +216,8 @@ export async function stage(options: StageOptions): Promise<Stage> {
     const scope: Scope & { turn: string } = { user: USER, chat: CHAT, session: "s1", turn };
     await host.givePrompt(scope, { messages: [{ role: "user", content: message }] });
     const guidance = loadGuidance(env.files, scope);
-    const rules = await guidance.ruleRun({ facts: createFacts(env.facts, () => ({})) });
+    const settings = await readSettings(guidance, env.files, scope, env.log);
+    const rules = await guidance.ruleRun({ facts: createFacts(env.facts, () => ({})), window: settings.ruleWindow });
     const run = new RunTrace(hub.tee(env.trace, scope), scope, turn, clock);
     run.watch((record) => usage.record(record));
     usage.begin(turn);
@@ -247,6 +250,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
       texts: () => texts,
       rules: () => rules,
       budget: () => budget,
+      settings: () => settings.subAgents,
       track: (entry) => {
         working.add(entry);
         return () => working.delete(entry);

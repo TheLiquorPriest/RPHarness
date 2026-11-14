@@ -14,11 +14,11 @@
 import type { AgentRef, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
+import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type LoopToolResult, type ParentCall, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { attach, joined, type Wanted } from "./attachments";
-import { type AgentSettings, readAgentSettings } from "./settings";
 import type { AskCall, ConsentArgument, DelegateCall, MessageCall, TeamWork } from "./tools";
 
 /** The frame every brief is laid out by (`.prompts/delegate-brief.md`). */
@@ -53,6 +53,8 @@ export interface TeamDeps {
   rules(): RuleRun;
   /** The turn's limits, shared by every agent of it. */
   budget(): Budget;
+  /** The user's limits on how deep sub-agents may stand and how many one turn may start: the turn's settings. */
+  settings(): AgentSettings;
   /** A sub-agent's work began: the turn stops it with the rest, and its time reaches it. The answer forgets the work once it ends. */
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A sub-agent's model's room, for its window gauge. */
@@ -83,7 +85,6 @@ interface Made {
 
 /** What the team reads once a turn, the first time it is asked to do anything. */
 interface Loaded {
-  settings: AgentSettings;
   brief: TemplatePart | undefined;
   question: TemplatePart | undefined;
   lines: LinesPart | undefined;
@@ -168,7 +169,7 @@ export class Team implements TeamWork {
     const loaded = await this.#load();
     const { words } = loaded;
     const level = (this.#members.get(ctx.agent.id)?.level ?? 0) + 1;
-    const { depth, agents } = loaded.settings;
+    const { depth, agents } = d.settings();
     if (level > depth) return this.#limited(ctx, { limit: "depth", per: "turn", max: depth, value: level }, words("depth", { agent: call.agent, max: depth, value: level }));
     if (agents !== undefined && this.#started >= agents) return this.#limited(ctx, { limit: "agents", per: "turn", max: agents, value: this.#started }, words("agents", { agent: call.agent, max: agents, value: this.#started }));
     // Its place is taken before anything is awaited, so the calls of one step cannot pass the limit
@@ -242,6 +243,7 @@ export class Team implements TeamWork {
       runEnd: rules.runEnd,
       gate: d.gate(ref, parent, held.tools),
     });
+    if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     return { member: { ref, runner, level, parent }, first: joined([brief]), given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
   }
 
@@ -265,10 +267,10 @@ export class Team implements TeamWork {
 
   #load(): Promise<Loaded> {
     this.#loaded ??= (async (): Promise<Loaded> => {
-      const { guidance, env, trace } = this.#d;
-      const [settings, brief, question, lines] = await Promise.all([readAgentSettings(guidance, env.files, trace.scope, env.log), guidance.part(BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART)]);
+      const { guidance } = this.#d;
+      const [brief, question, lines] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART)]);
       const wordLines = lines?.format === "lines" ? lines : undefined;
-      return { settings, brief: template(brief), question: template(question), lines: wordLines, words: (name, fields) => wordLines?.line(name, fields) };
+      return { brief: template(brief), question: template(question), lines: wordLines, words: (name, fields) => wordLines?.line(name, fields) };
     })().catch((error: unknown) => {
       // A read that failed is tried again by the next call.
       this.#loaded = undefined;

@@ -257,7 +257,7 @@ export interface FileChange {
 // ---------------------------------------------------------------- rules
 
 /** The header fields of a rule. Anything else in its header is reported. */
-export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "scope", "question", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
+export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
 
 // ---------------------------------------------------------------- facts
 
@@ -297,6 +297,11 @@ export interface RuleRunOptions {
   facts: Facts;
   /** The session's memory; none for a new session. */
   memory?: RuleMemory;
+  /**
+   * How many characters a pattern looks at at a time: the newest of what is being written, and
+   * stretches of a tool's arguments or result. Absent: the whole text.
+   */
+  window?: number;
 }
 
 /** A tool call as the rules see it before the tool runs. */

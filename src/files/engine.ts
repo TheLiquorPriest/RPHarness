@@ -15,6 +15,8 @@ export interface RuleRunInput {
   rules: readonly Rule[];
   facts: Facts;
   memory?: RuleMemory;
+  /** How many characters a pattern looks at at a time; absent, the whole text. */
+  window?: number;
 }
 
 /** The fields a pattern's text has besides the facts: what it matched, and the tool, on a tool's arguments or result. */
@@ -27,6 +29,20 @@ function factTest(rule: Rule): FactTest | undefined {
 
 function isStreamScope(scope: RuleScope): boolean {
   return scope.watch === "text" || scope.watch === "thinking" || scope.watch === "reply";
+}
+
+/**
+ * A pattern's first match in a whole text (a tool's arguments or result), looked for in stretches
+ * of `window` characters, each starting half a stretch after the one before: no run of the pattern
+ * sees more than a stretch, and every match up to half a stretch long is found.
+ */
+function matchIn(pattern: RegExp, text: string, window: number | undefined): RegExpExecArray | null {
+  if (window === undefined || text.length <= window) return pattern.exec(text);
+  const step = Math.max(1, Math.floor(window / 2));
+  for (let from = 0; ; from += step) {
+    const match = pattern.exec(text.slice(from, from + window));
+    if (match !== null || from + window >= text.length) return match;
+  }
 }
 
 /** What a pattern on a tool's result looks at: its text, its reports, and a line `marked <mark>` for each mark. */
@@ -85,6 +101,7 @@ class Run implements RuleRun {
   readonly #facts: Facts;
   readonly #factNames: ReadonlySet<string>;
   readonly #memory: RuleMemory;
+  readonly #window: number | undefined;
   /** `<rule> <agent id>`: what fired in this run, for `once per turn`. */
   readonly #thisRun = new Set<string>();
   /** `<rule> <agent id> <call>`: what fired on one model call's text. */
@@ -96,6 +113,7 @@ class Run implements RuleRun {
     this.#scope = input.scope;
     this.#rules = input.rules;
     this.#facts = input.facts;
+    this.#window = input.window;
     const defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
     this.#factNames = new Set(defs.keys());
     this.#memory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
@@ -195,7 +213,8 @@ class Run implements RuleRun {
   stream(agent: AgentRef): StreamRules {
     const rules = this.#for(agent).filter((rule) => rule.when.trigger === "pattern" && rule.when.scope.some(isStreamScope));
     return {
-      coverReply: rules.some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply")),
+      // Every form reads the reply out of what the agent writes, so a rule on its text covers the reply as surely as one on the reply.
+      coverReply: rules.some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply" || s.watch === "text")),
       check: (written) => this.#check(agent, rules, written),
     };
   }
@@ -210,7 +229,8 @@ class Run implements RuleRun {
         if (scope.watch === "thinking" ? written.piece !== "thinking" : !isStreamScope(scope) || written.piece !== "text") continue;
         const seen = scope.watch === "text" ? written.text : scope.watch === "thinking" ? written.thinking : written.reply;
         if (seen === undefined || seen === "") continue;
-        const match = rule.when.pattern.exec(seen);
+        // What was written before the newest stretch was looked at as it came.
+        const match = rule.when.pattern.exec(this.#window === undefined ? seen : seen.slice(-this.#window));
         if (match === null) continue;
         this.#inCall.add(callKey);
         this.#mark(rule, agent);
@@ -230,7 +250,7 @@ class Run implements RuleRun {
     for (const rule of this.#for(agent)) {
       if (rule.when.trigger !== "pattern" || !this.#may(rule, agent)) continue;
       if (!rule.when.scope.some((s) => s.watch === watch && "tool" in s && s.tool.match(tool))) continue;
-      const match = rule.when.pattern.exec(seen);
+      const match = matchIn(rule.when.pattern, seen, this.#window);
       if (match !== null) out.push({ rule, matched: match[0], hold: rule.when.hold });
     }
     return out;

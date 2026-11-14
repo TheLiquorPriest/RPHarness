@@ -1,7 +1,7 @@
 // The harness a host builds over its environment (Appendix A `createHarness`): it answers turns,
 // cancels a turn's work when the turn leaves the path, and gives the pages their ways in: the live
-// view, usage, definitions, rules and models. Talking with an agent, jobs and sessions come with
-// their own lanes; until then the harness has none of them.
+// view, usage, definitions, rules and models. It has no way to talk with an agent outside a turn,
+// no jobs, and keeps no session past a restart.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Template } from "../files/api";

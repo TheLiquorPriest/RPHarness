@@ -2,11 +2,12 @@
 // model call for a simple turn, with the lead's context in its blocks and the prompt's messages in
 // the order sent; the intent record told to the host before any tool runs; the reply streamed as it
 // is written; a tool nobody registered left out and reported; and the turn's call limit. Under RPH's
-// own guidance: the reply contract shown again at the briefing's end only when its template says so.
+// own guidance: the reply contract shown again in the briefing where its template puts it, and only
+// when its template says so.
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { SHIPPED_GUIDANCE } from "../../src/index";
-import { gate, PROMPT, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
+import { briefingAround, CONTRACT_MARK, contractFor, gate, PROMPT, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -112,28 +113,16 @@ describe("a simple turn", () => {
 });
 
 describe("where the reply contract is shown", () => {
-  /** The last line of RPH's own reply contract, which runs from its heading to here. */
-  const LAST_LINE = "If one comes back with a report, you get another call to read it.";
-
-  /** The reply contract as a text holds it, from its heading to its last line, or "" when it holds none. */
-  function contractIn(text: string): string {
-    const start = text.indexOf("# The reply contract");
-    const end = start < 0 ? -1 : text.indexOf(LAST_LINE, start);
-    return end < 0 ? "" : text.slice(start, end + LAST_LINE.length);
-  }
-
-  test("RPH's own briefing names it: the contract is in the opening block and again, word for word, as the briefing's last part", async () => {
+  test("RPH's own briefing carries it: the contract, rendered for the connection's form, is in the opening block and again, word for word, where the briefing's template puts it", async () => {
     const s = (open = await stage({ answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }] }));
 
     await s.turn(request("t1", { lead: "lead" }));
 
+    const contract = await contractFor(s, "tags");
     const sent = s.model.requests[0]!.messages;
-    const contract = contractIn(textOf(sent[0]!));
-    expect(contract).toContain("whatever the player should see goes between `<reply>` and `</reply>`");
-    expect(contract).not.toContain("Working text goes in files");
-    const briefing = textOf(sent.at(-1)!);
-    expect(briefing).toStartWith("# Briefing for this turn");
-    expect(briefing).toEndWith(`This turn's files are in sessions/s1/turns/t1/\n\n## How the reply is marked\n\n${contract}`);
+    expect(textOf(sent[0]!)).toContain(contract);
+    expect(textOf(sent[0]!)).not.toContain(await contractFor(s, "two_step"));
+    expect(textOf(sent.at(-1)!)).toBe((await briefingAround()).replace(CONTRACT_MARK, contract));
   });
 
   test("a briefing template with the field taken out leaves the contract in the opening block only", async () => {
@@ -144,12 +133,28 @@ describe("where the reply contract is shown", () => {
 
     await s.turn(request("t1", { lead: "lead" }));
 
+    const contract = await contractFor(s, "tags");
     const sent = s.model.requests[0]!.messages;
-    expect(contractIn(textOf(sent[0]!))).toContain("whatever the player should see goes between `<reply>` and `</reply>`");
+    expect(textOf(sent[0]!)).toContain(contract);
     const briefing = textOf(sent.at(-1)!);
-    expect(contractIn(briefing)).toBe("");
-    expect(briefing).not.toContain("How the reply is marked");
-    expect(briefing).toEndWith("This turn's files are in sessions/s1/turns/t1/");
+    expect(briefing).not.toBe("");
+    expect(briefing).not.toContain(contract);
+  });
+});
+
+describe("a rule on what the lead writes", () => {
+  test("on its text, and stopping the call, holds the reply back by a sentence in the tag form, so what it matches inside the reply is never shown", async () => {
+    const s = (open = await stage({
+      files: { ".rules/fixture-shiver.md": "---\ndescription: Fixture - no shivers.\nagents: [lead]\ncondition: shiver ran down\nscope: [text]\n---\nFixture rule: that phrase is worn out.\n" },
+      answers: [{ pieces: [{ text: "<reply>The hall is dark. A shiver" }, { text: " ran down her spine.</reply>" }] }, { pieces: [{ text: "<reply>She runs.</reply>" }] }],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+    expect(outcome.status).toBe("released");
+    expect(s.trace.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.action])).toEqual([["fixture-shiver", "cut"]]);
+    expect(sink.text).toStartWith("The hall is dark.");
+    expect(sink.text).not.toContain("shiver");
   });
 });
 
@@ -165,10 +170,10 @@ describe("the lead's tools", () => {
 
     expect(outcome.status).toBe("released");
     const declared = s.model.requests[0]!.tools.map((tool) => tool.name).sort();
-    expect(declared).toEqual(["file_find", "file_read", "file_write", "reply_release", "todo", "world_query", "write_reply"]);
+    expect(declared).toEqual(["agent_message", "delegate", "file_find", "file_read", "file_write", "reply_release", "todo", "world_query", "write_reply"]);
     const reported = s.logged.find((line) => line.level === "warn" && line.message.startsWith("Tools the lead's definition lists are registered by nobody"));
     expect(reported?.fields?.["tools"]).toContain("chat_read");
-    expect(reported?.fields?.["tools"]).toContain("delegate");
+    expect(reported?.fields?.["tools"]).not.toContain("delegate");
     expect(reported?.fields?.["tools"]).not.toContain("world_query");
   });
 });

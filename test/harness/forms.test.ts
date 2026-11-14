@@ -3,7 +3,8 @@
 // one reply per generation, a second attempt answered with a plain line from a file.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message } from "@earendil-works/pi-ai";
-import { gate, PROMPT, request, type Stage, stage, textOf, WatchedSink } from "./support";
+import { loadGuidance } from "../../src/files";
+import { briefingAround, CONTRACT_MARK, contractFor, gate, PROMPT, request, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -45,16 +46,13 @@ describe("the two-step form", () => {
     expect(s.model.requests).toHaveLength(2);
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["Wren shakes her head. No boat, not in this sea."]);
     expect(sink.text).not.toContain("Checking");
-    // The contract the lead was given is the two-step one.
+    // The contract the lead was given is the two-step one, in the opening block and again where RPH's own briefing template puts it.
+    const contract = await contractFor(s, "two_step");
     const opening = textOf(s.model.requests[0]!.messages[0]!);
-    expect(opening).toContain("Working text goes in files, never in a message.");
-    expect(opening).toContain("written first to `scratch/intent.md` in the turn's folder");
-    expect(opening).not.toContain("<reply>");
-    // RPH's own briefing, last, ends on the same contract, rendered for the same form.
+    expect(opening).toContain(contract);
+    expect(opening).not.toContain(await contractFor(s, "tags"));
     const briefing = textOf(s.model.requests[0]!.messages.at(-1)!);
-    expect(briefing).toContain("Working text goes in files, never in a message.");
-    expect(briefing).toEndWith("If one comes back with a report, you get another call to read it.");
-    expect(briefing).not.toContain("<reply>");
+    expect(briefing).toBe((await briefingAround("reply:\n  form: two-step\n")).replace(CONTRACT_MARK, contract));
     expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
     expect(s.told[0]!.payload).toBe(intent);
   });
@@ -94,6 +92,55 @@ describe("the narrator", () => {
     expect(lastToolResult(s.model.requests[2]!.messages)).toBe(" has not come, Wren says, and turns back to the brass.");
     const narratorStarted = s.trace.of("agent_started").find((record) => record.agent.definition === "narrator");
     expect(narratorStarted?.parent).toEqual({ agent: "id-1", run: "t1", call: "call_1_1" });
+  });
+
+  test("draft first, under a rule on the reply that names the narrator: the rule sees the draft as it is written, the phrase never reaches the lead, and the narrator goes on under the rule's text", async () => {
+    const rule = "Fixture rule: that phrase is worn out. Say it another way.";
+    const s = (open = await stage({
+      drafted: true,
+      files: {
+        ".rules/fixture-shiver.md": `---\ndescription: Fixture - no shivers.\nagents: [author, narrator]\ncondition: shiver down\nscope: [reply]\n---\n${rule}\n`,
+        ".agents/narrator.md": "---\nname: narrator\ndescription: Fixture narrator.\nmodel: default\ntools: []\nreads: [WRITING]\ngiven: [prompt:*, brief]\nlimits: { calls: 2 }\n---\nFixture narrator: write the reply from the brief.\n",
+      },
+      answers: [
+        { pieces: [{ call: "write_reply", args: { brief: BRIEF } }] },
+        { pieces: [{ text: "Wren turns. A shiver down her spine" }, { text: " as she says it." }] },
+        { pieces: [{ text: "Wren turns and says it plainly." }] },
+        { pieces: [{ call: "reply_release", args: { closing: true } }] },
+      ],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1"));
+
+    expect(outcome).toMatchObject({ status: "released", form: "narrator", reply: "Wren turns and says it plainly." });
+    expect(sink.text).toBe("Wren turns and says it plainly.");
+    expect(s.model.requests).toHaveLength(4);
+    expect(s.trace.of("rule_fired").map((record) => [record.agent.definition, record.event.firing.rule, record.event.firing.action, record.event.firing.dropped])).toEqual([["narrator", "fixture-shiver", "cut", "Wren turns. A shiver down her spine"]]);
+    // Nothing of the draft had been shown, so the narrator goes on under the rule's text alone.
+    expect(textOf(s.model.requests[2]!.messages.at(-1)!)).toBe(rule);
+    expect(lastToolResult(s.model.requests[3]!.messages)).toBe("Wren turns and says it plainly.");
+  });
+
+  test("draft first, when the narrator's call fails: the lead is told, in the file's line for a failed call, that it gave no reply; the error's own words go to the log; and the turn goes on", async () => {
+    const s = (open = await stage({
+      drafted: true,
+      answers: [
+        { pieces: [{ call: "write_reply", args: { brief: BRIEF } }] },
+        { pieces: [{ text: "The boat" }], end: { error: "Fixture: the connection dropped." } },
+        { pieces: [{ text: "<reply>No boat tonight.</reply>" }] },
+      ],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1"));
+
+    expect(outcome).toMatchObject({ status: "released", form: "tags", reply: "No boat tonight." });
+    expect(sink.text).toBe("No boat tonight.");
+    const notices = await loadGuidance(s.env.files, request("t1").scope).part("tool-notices");
+    const line = notices?.format === "lines" ? notices.line("not_written", { writer: "narrator", failed: true }) : undefined;
+    expect(line).toBeDefined();
+    expect(lastToolResult(s.model.requests[2]!.messages)).toBe(line!);
+    expect(line).not.toContain("Fixture: the connection dropped.");
+    expect(s.logged).toContainEqual(expect.objectContaining({ level: "warn", fields: expect.objectContaining({ writer: "narrator", error: "Fixture: the connection dropped." }) }));
   });
 
   test("live: the narrator's words reach the player as they are written, and a closing hand-over ends the turn; two calls", async () => {

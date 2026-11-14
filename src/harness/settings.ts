@@ -6,7 +6,12 @@
 // The keys, in each level's config file (YAML):
 //
 //   limits:
-//     turn: { calls: 40, tokensIn: …, tokensOut: …, time: … }   calls, tokens and seconds across every agent of one turn
+//     turn:
+//       calls: 40                      model calls across every agent of one turn; ~ for no limit
+//       tokensIn: …, tokensOut: …      tokens across every agent of one turn
+//       time: …                        seconds for the whole turn
+//       depth: 2                       how deep a sub-agent may stand: 1, the lead's own; 2, the ones they start too; 0, none
+//       agents: 24                     sub-agents one turn may start in all; ~ for no limit
 //   reply:
 //     form: tags                       how a connection marks its reply: tags, or two-step
 //     forms: { <connection>: two-step } the same for one connection, by its name or its id
@@ -19,6 +24,9 @@
 //     silence: 60                      seconds of nothing shown before that line
 //   results:
 //     clip: 12000                      characters of a tool's result the model reads; the rest is kept in a file
+//   rules:
+//     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
+//                                      written, and stretches of a tool's arguments or result
 
 import type { FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
@@ -26,9 +34,18 @@ import { REPLY_DEFAULTS } from "../reply/defaults";
 
 export type ReplyFormSetting = "tags" | "two-step";
 
+/** The user's limits on sub-agents (§10.11: "sub-agent depth and count ... every one is a setting"). */
+export interface AgentSettings {
+  /** How deep a sub-agent may stand: the lead's own stand at 1, the ones they start at 2. 0: none is started. */
+  depth: number;
+  /** Sub-agents one turn may start in all; absent is no limit. */
+  agents?: number;
+}
+
 export interface Settings {
   /** Limits shared by every agent of one turn; each absent is no limit. `time` in milliseconds. */
   turn: { calls?: number; tokensIn?: number; tokensOut?: number; time?: number };
+  subAgents: AgentSettings;
   /** The form every connection's reply takes, unless `forms` names the connection. */
   form: ReplyFormSetting;
   forms: Readonly<Record<string, ReplyFormSetting>>;
@@ -40,12 +57,16 @@ export interface Settings {
   progress: "all" | "least";
   silenceMs: number;
   clipChars: number;
+  /** Characters a rule's pattern looks at at a time. */
+  ruleWindow: number;
 }
 
 /** The defaults, where no level sets a value. */
 export const DEFAULT_SETTINGS: Settings = {
   // Appendix D.1: calls in a turn across all agents, at most 40.
   turn: { calls: 40 },
+  // Today's build's own (LumiAH's `delegation.depth` and `delegation.perRun`), kept as §10.11 says.
+  subAgents: { depth: 2, agents: 24 },
   // Appendix D.1: by tags, in two steps where a connection was measured not to keep them.
   form: "tags",
   forms: {},
@@ -59,6 +80,9 @@ export const DEFAULT_SETTINGS: Settings = {
   silenceMs: REPLY_DEFAULTS.silenceMs,
   // A long message of a story, or a lore entry, runs from 6,000 to 12,000 characters, and an agent should read one in one go.
   clipChars: 12_000,
+  // Wide enough for any phrase a rule looks for, with room to spare; narrow enough that a pattern of
+  // the kinds the rules let in takes at most some tens of milliseconds on it.
+  ruleWindow: 500,
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -124,6 +148,13 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     passed(key, value);
     return undefined;
   };
+  /** A whole number, 0 or more, or undefined (with a log line) for any other value. */
+  const whole = (key: string, value: JsonValue | undefined): number | undefined => {
+    if (value === undefined) return undefined;
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+    passed(key, value);
+    return undefined;
+  };
   const oneOf = <T extends string>(key: string, value: JsonValue | undefined, allowed: readonly T[]): T | undefined => {
     if (value === undefined) return undefined;
     if (typeof value === "string" && (allowed as readonly string[]).includes(value)) return value as T;
@@ -141,6 +172,10 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const tokensIn = count("limits.turn.tokensIn", turn["tokensIn"]);
   const tokensOut = count("limits.turn.tokensOut", turn["tokensOut"]);
   const seconds = count("limits.turn.time", turn["time"]);
+  // `depth: 0` and `agents: 0` start no sub-agent at all; `agents: ~` (null) lifts that limit.
+  const depth = whole("limits.turn.depth", turn["depth"]) ?? DEFAULT_SETTINGS.subAgents.depth;
+  const agentsValue = turn["agents"];
+  const agents = agentsValue === null ? undefined : (whole("limits.turn.agents", agentsValue) ?? DEFAULT_SETTINGS.subAgents.agents);
 
   const reply = section("reply");
   const forms: Record<string, ReplyFormSetting> = {};
@@ -154,12 +189,12 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const streamValue = reply["streamAnyway"];
   const streamAnyway = Array.isArray(streamValue) ? streamValue.filter((name): name is string => typeof name === "string") : [];
   if (streamValue !== undefined && !Array.isArray(streamValue)) passed("reply.streamAnyway", streamValue);
-  const held = reply["heldSentences"];
-  const heldSentences = held === undefined ? DEFAULT_SETTINGS.heldSentences : typeof held === "number" && Number.isInteger(held) && held >= 0 ? held : (passed("reply.heldSentences", held), DEFAULT_SETTINGS.heldSentences);
+  const heldSentences = whole("reply.heldSentences", reply["heldSentences"]) ?? DEFAULT_SETTINGS.heldSentences;
 
   const progress = section("progress");
   const silence = count("progress.silence", progress["silence"]);
   const results = section("results");
+  const rules = section("rules");
 
   return {
     turn: {
@@ -168,6 +203,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
       ...(tokensOut !== undefined ? { tokensOut } : {}),
       ...(seconds !== undefined ? { time: seconds * 1000 } : {}),
     },
+    subAgents: { depth, ...(agents !== undefined ? { agents } : {}) },
     form: oneOf<ReplyFormSetting>("reply.form", reply["form"], ["tags", "two-step"]) ?? DEFAULT_SETTINGS.form,
     forms,
     streamAnyway,
@@ -177,6 +213,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     progress: oneOf<"all" | "least">("progress.show", progress["show"], ["all", "least"]) ?? DEFAULT_SETTINGS.progress,
     silenceMs: silence !== undefined ? silence * 1000 : DEFAULT_SETTINGS.silenceMs,
     clipChars: count("results.clip", results["clip"]) ?? DEFAULT_SETTINGS.clipChars,
+    ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
   };
 }
 

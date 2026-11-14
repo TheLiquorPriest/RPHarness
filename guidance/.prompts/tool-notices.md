@@ -5,7 +5,7 @@ format: lines
 failed: {{tool}} failed: {{error}}
 unfinished: {{tool}} was stopped before it finished. It may have done its work, or not.
 not_held: You hold no tool named {{tool}}.
-invalid: {{tool}} was not run: its arguments do not fit what it takes. You sent {{arguments}}. It takes {{parameters}}.
+invalid: {{tool}} was not run: the arguments you sent do not fit what it takes. It takes {{parameters}}.
 cut_short: {{tool}} was not run: your message reached its length limit, so its arguments may be cut short. Call it again.
 not_switched_on: {{tool}} was not run: {{name}} {{#waiting}}waits for the player to switch it on{{/waiting}}{{^waiting}}is switched off{{/waiting}}.
 never: {{tool}} was not run: it writes to {{lane}}, where the player allows no writes.

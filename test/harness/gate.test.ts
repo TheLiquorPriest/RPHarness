@@ -138,7 +138,7 @@ describe("answers in a file's words", () => {
 
     const second = s.model.requests[1]!.messages;
     expect(answered(second, "call_1_1")).toBe("You hold no tool named fly_away.");
-    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: its arguments do not fit what it takes. You sent {}. It takes {");
+    expect(answered(second, "call_1_2")).toStartWith("file_read was not run: the arguments you sent do not fit what it takes. It takes {");
     expect(answered(s.model.requests[2]!.messages, "call_2_1")).toBe("todo was not run: your message reached its length limit, so its arguments may be cut short. Call it again.");
   });
 

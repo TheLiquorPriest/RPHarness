@@ -9,6 +9,7 @@ export const OWN_FACTS: readonly (FactDef & { name: OwnFactName })[] = [
   { name: "todo.open", counts: "Items the agent's todo list holds open." },
   { name: "reply.released", counts: "Whether this turn's reply has been released: 1 once it has, 0 until then." },
   { name: "prompt.notices", counts: "Notices this turn about the prompt's shape." },
+  { name: "session.turns", counts: "Turns the open session holds, the one being played among them." },
 ];
 
 const OWN_NAMES: ReadonlySet<string> = new Set(OWN_FACTS.map((d) => d.name));

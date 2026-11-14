@@ -8,7 +8,9 @@
 //   1. the opening block, fixed when the session opened: its definition and instruction stack, the
 //      reply contract, the tool guide (the system prompt, with its tools declared);
 //   2. the assembled prompt exactly as the request carries it, introduced by the frame part;
-//   3. what the session carries, as text: nothing, in every mode the request names;
+//   3. what the session carries, as text, by the request's `carry`: what the lead did in the
+//      session's earlier turns on the path, its records of them, or only what the session opened
+//      with; laid out by the carried part, and never an earlier turn's thinking;
 //   4. the briefing, laid out by its template from the host's parts and RPH's own.
 // Blocks 2 to 4 are placed when the lead's definition is given them (`prompt:*`, `session:carry`,
 // `briefing`).
@@ -21,6 +23,8 @@ import { type AgentOutcome, AgentRunner, Budget, type LoopTool, type LoopToolRes
 import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SilentReply } from "../reply/silent";
+import type { SessionBook, SessionFile } from "../sessions/book";
+import { carriedFields, pathTurns } from "../sessions/carry";
 import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
@@ -28,7 +32,7 @@ import { TurnGate } from "./gate";
 import type { LiveHub } from "./live";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import type { Opening, Sessions } from "./sessions";
-import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
+import { DEFAULT_SETTINGS, effortFor, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools and tool search among them. */
@@ -48,6 +52,8 @@ export interface TurnCore {
   hub: LiveHub;
   usage: UsageBook;
   sessions: Sessions;
+  /** Each session's file (§11), which the turn's own entries are written to. */
+  book: SessionBook;
 }
 
 /** A definition's connection, as its header names it: the choice for the model layer, and the connection's id and name where they are known. */
@@ -140,6 +146,10 @@ export class Turn {
   #registry: Registry | undefined;
   #places: Places | undefined;
   #opening: Opening | undefined;
+  /** The session's file, once the turn has its entry in it. */
+  #file: SessionFile | undefined;
+  /** The session's turns on this turn's path, this one with them: the fact `session.turns`. */
+  #sessionTurns = 0;
   /** The definition `write_reply` hands the prose to, as its file names it. */
   #writer: string | undefined;
   #draft: { text: string; by: AgentRef } | undefined;
@@ -203,7 +213,7 @@ export class Turn {
     const scope = this.scope;
     const guidance = loadGuidance(env.files, scope);
     this.#guidance = guidance;
-    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, goOn, closing] = await Promise.all([
+    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, closing, file] = await Promise.all([
       readSettings(guidance, env.files, scope, env.log),
       env.files.places(scope),
       guidance.definition(req.lead),
@@ -213,11 +223,17 @@ export class Turn {
       guidance.part("prompt-frame"),
       guidance.part("reply-contract"),
       guidance.part("briefing"),
+      guidance.part("carried"),
       guidance.part("continue-after-rule"),
       guidance.tool("closing"),
+      this.#c.book.of(scope),
     ]);
     this.#settings = settings;
     this.#places = places;
+    // The turn's first entry in the session file: a swipe hangs from the entry before the turn it replaces (§11).
+    this.#file = file;
+    const begun = file.add({ type: "turn", parent: file.log.anchor(req.parent), turn: scope.turn, kind: req.kind, lead: req.lead, ...(req.parent !== undefined ? { follows: req.parent } : {}) });
+    this.#sessionTurns = pathTurns(file.log, begun.id).length;
     this.#progress = lines(progress);
     const answers = lines(toolNotices);
     this.#words = (name, fields) => answers?.line(name, fields);
@@ -315,7 +331,14 @@ export class Turn {
       if (prompt.picturesLeft > 0) env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.run, pictures: prompt.picturesLeft });
       messages.push(...prompt.messages);
     }
-    if (opening.given.includes("session:carry") && req.carry !== "nothing") env.log.info("The request asks the session to carry its turns, and this harness carries nothing from one turn to the next.", { turn: this.run, carry: req.carry });
+    // What the session carries, from the path before this turn: fixed for the turn, after the prompt, so it never moves the cached front (§10.2).
+    const layout = template(carried);
+    if (opening.given.includes("session:carry") && layout !== undefined) {
+      const record = layout.header["record"];
+      const fields = await carriedFields({ carry: req.carry, tree: file.log, from: begun.parent, scope, files: env.files, log: env.log, ...(typeof record === "string" ? { record } : {}) });
+      const text = fields === undefined ? "" : joined([layout.render(fields).text]);
+      if (text !== "") messages.push(systemMessage(text, at));
+    }
     if (opening.given.includes("briefing")) {
       const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), promptNotices, lines(notices), places);
       if (text !== undefined) messages.push(systemMessage(joined([text]), at));
@@ -489,9 +512,8 @@ export class Turn {
     return notices;
   }
 
-  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. */
+  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
   async #connection(definition: AgentDefinition): Promise<Connection> {
-    const effort = definition.effort;
     const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
     const list = await this.#c.connections.list().catch((error: unknown) => {
       this.#c.env.log.warn("The connections could not be listed.", { error: errorWords(error) });
@@ -499,11 +521,13 @@ export class Turn {
     });
     const view = named === null ? list?.connections.find((c) => c.id === list.default) : list?.connections.find((c) => c.name === named || c.id === named);
     const id = view?.id ?? named;
+    const name = view?.name ?? named;
+    const effort = effortFor(this.#settings, { id: id ?? null, name }) ?? definition.effort;
     return {
       choice: { connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}) },
       id: id ?? null,
-      name: view?.name ?? named,
-      label: view?.name ?? named ?? "default",
+      name,
+      label: name ?? "default",
     };
   }
 
@@ -585,6 +609,7 @@ export class Turn {
       "reply.released": { count: this.#desk.released ? 1 : 0 },
       "todo.open": { count: open.length, names: open.map((item) => item.text) },
       "prompt.notices": { count: this.#notices },
+      "session.turns": { count: this.#sessionTurns },
     };
   }
 
@@ -754,9 +779,10 @@ export class Turn {
     for (const { runner } of this.#working) runner.limit(hit);
   }
 
-  /** Every record of the run: the usage, progress lines, and what each fired rule's agent did next. */
+  /** Every record of the run: the usage, the lead's entries in the session file, progress lines, and what each fired rule's agent did next. */
   #watch(record: TraceRecord): void {
     this.#c.usage.record(record);
+    this.#record(record);
     const { event } = record;
     const agent = record.agent.id;
     switch (event.kind) {
@@ -787,6 +813,34 @@ export class Turn {
     }
   }
 
+  /** The lead's work, into the session file as it happens (§11): its intent records, what it wrote in each call, its calls and what came back. Never its thinking. */
+  #record(record: TraceRecord): void {
+    const file = this.#file;
+    if (file === undefined || record.agent.id !== this.#lead.id) return;
+    const turn = this.scope.turn;
+    const parent = file.log.tip(turn) ?? null;
+    const { event } = record;
+    switch (event.kind) {
+      case "intent":
+        file.add({ type: "intent", parent, turn, text: event.text });
+        return;
+      case "call_ended":
+        file.add({ type: "message", parent, turn, call: event.call, text: event.text, stop: event.stop, ...(event.error !== undefined ? { error: event.error } : {}) });
+        return;
+      case "tool_started":
+        file.add({ type: "call", parent, turn, callId: event.callId, tool: event.tool, args: event.args, ...(event.closing ? { closing: true as const } : {}), ...(event.via !== undefined ? { via: event.via } : {}) });
+        return;
+      case "tool_ended": {
+        const { result } = event;
+        const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("");
+        file.add({ type: "result", parent, turn, callId: event.callId, tool: event.tool, text, ...(result.reports !== undefined && result.reports.length > 0 ? { reports: result.reports } : {}), ...(result.error === true ? { error: true as const } : {}) });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
   /** Tells the host of each rule that fired for `agent` and that `which` takes, now that what the agent did next is known (§5.4). */
   #then(agent: string, which: (firing: { call: number }) => boolean, then: RuleThen): void {
     const waiting: { firing: RuleFiring; call: number }[] = [];
@@ -807,6 +861,7 @@ export class Turn {
 
   async #settled(): Promise<void> {
     while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+    await this.#file?.settled();
   }
 
   #outcome(ended: Pick<RunOutcome, "status"> & Partial<RunOutcome>): RunOutcome {

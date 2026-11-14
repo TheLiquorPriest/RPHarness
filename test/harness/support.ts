@@ -12,6 +12,7 @@ import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValu
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { createHarness, SHIPPED_GUIDANCE } from "../../src/index";
+import type { AgentChoice } from "../../src/model/source";
 import { type Answer, FakeClock, scriptedModel, type ScriptedModel } from "../../src/testing/rig";
 import { SinkRecorder, textOf, TraceRecorder } from "../loop/support";
 
@@ -243,10 +244,11 @@ export async function stage(options: StageOptions): Promise<Stage> {
   let next = 0;
   let asked = 0;
   const scripted = {
-    agentModel: async () => {
+    // The model at the effort the agent's choice asks for, as the model layer would ask it of a provider; the connection's own is no thinking here.
+    agentModel: async (choice: AgentChoice) => {
       asked += 1;
       await options.modelAsked?.(asked);
-      return model.agentModel();
+      return model.agentModel(choice.effort === undefined || choice.effort === "auto" || choice.effort === "inherit" ? "off" : choice.effort);
     },
   };
   const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: scripted }), ids: () => `id-${(next += 1)}` });

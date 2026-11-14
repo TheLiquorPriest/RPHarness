@@ -29,13 +29,20 @@
 //   rules:
 //     window: 500                      characters a rule's pattern looks at at a time: the newest of what is
 //                                      written, and stretches of a tool's arguments or result
+//   models:
+//     effort: { <connection>: high }   the effort every agent on a connection thinks at, by the connection's
+//                                      name or its id, whatever its definition says: off, minimal, low,
+//                                      medium, high, xhigh or max; none by default
 
-import type { FilesPort, JsonValue, Log, Scope } from "../contract";
+import type { Effort, FilesPort, JsonValue, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
 import { REPLY_DEFAULTS } from "../reply/defaults";
 import { SEARCH_HITS } from "../tools/search";
 
 export type ReplyFormSetting = "tags" | "two-step";
+
+/** Every effort a definition's `effort:` takes, which `models.effort` takes too. */
+const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
 
 /** The user's limits on sub-agents (§10.11: "sub-agent depth and count ... every one is a setting"). */
 export interface AgentSettings {
@@ -64,6 +71,8 @@ export interface Settings {
   searchHits: number;
   /** Characters a rule's pattern looks at at a time. */
   ruleWindow: number;
+  /** The effort agents on a connection think at, by the connection's name or id, over their definitions'. */
+  efforts: Readonly<Record<string, Effort>>;
 }
 
 /** The defaults, where no level sets a value. */
@@ -90,6 +99,8 @@ export const DEFAULT_SETTINGS: Settings = {
   // Wide enough for any phrase a rule looks for, with room to spare; narrow enough that a pattern of
   // the kinds the rules let in takes at most some tens of milliseconds on it.
   ruleWindow: 500,
+  // None: each agent thinks at the effort its definition gives, or its model's own.
+  efforts: {},
 };
 
 type Mapping = { [key: string]: JsonValue };
@@ -203,6 +214,15 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
   const results = section("results");
   const tools = section("tools");
   const rules = section("rules");
+  const models = section("models");
+  const efforts: Record<string, Effort> = {};
+  const effortValue = models["effort"];
+  if (isMapping(effortValue)) {
+    for (const [connection, value] of Object.entries(effortValue)) {
+      const effort = oneOf<Effort>(`models.effort.${connection}`, value, Object.keys(EFFORTS) as Effort[]);
+      if (effort !== undefined) efforts[connection] = effort;
+    }
+  } else if (effortValue !== undefined) passed("models.effort", effortValue);
 
   return {
     turn: {
@@ -223,6 +243,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
     clipChars: count("results.clip", results["clip"]) ?? DEFAULT_SETTINGS.clipChars,
     searchHits: count("tools.search", tools["search"]) ?? DEFAULT_SETTINGS.searchHits,
     ruleWindow: count("rules.window", rules["window"]) ?? DEFAULT_SETTINGS.ruleWindow,
+    efforts,
   };
 }
 
@@ -231,4 +252,10 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
   const keys = [connection.id, connection.name].filter((key): key is string => key !== null);
   const named = keys.map((key) => settings.forms[key]).find((form) => form !== undefined);
   return { form: named ?? settings.form, stream: keys.some((key) => settings.streamAnyway.includes(key)) };
+}
+
+/** The effort the setting gives agents on a connection, by the connection's id or name; undefined where it names neither. */
+export function effortFor(settings: Settings, connection: { id: string | null; name: string | null }): Effort | undefined {
+  const key = [connection.id, connection.name].find((key) => key !== null && Object.hasOwn(settings.efforts, key));
+  return key === undefined || key === null ? undefined : settings.efforts[key];
 }

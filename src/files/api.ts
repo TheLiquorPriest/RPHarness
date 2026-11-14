@@ -264,7 +264,7 @@ export const RULE_FIELDS = ["description", "agents", "needs", "turns", "conditio
 // ---------------------------------------------------------------- facts
 
 /** RPH's own facts. */
-export type OwnFactName = "todo.open" | "reply.released" | "prompt.notices";
+export type OwnFactName = "todo.open" | "reply.released" | "prompt.notices" | "session.turns";
 
 /** RPH's own facts' values at a moment, given by whoever keeps them (the todo list, the reply, the prompt's notices). Absent: unknown, and a rule that tests it does not fire. */
 export type OwnFactValues = Partial<Record<OwnFactName, FactValue>>;

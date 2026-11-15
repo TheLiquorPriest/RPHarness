@@ -27,13 +27,14 @@ import { CONNECTION, frozen, type Group, type ListedSetting, type SettingEntry }
 import { JOBS } from "./jobs";
 import { LIMITS } from "./limits";
 import { MODELS, MODELS_GONE } from "./models";
+import { PROMPT } from "./prompt";
 import { REPLY } from "./reply";
 import { RULES } from "./rules";
 import { TOOLS } from "./tools";
 import { TRACE } from "./trace";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, JOBS, MODELS, REPLY, TOOLS, RULES, TRACE, COMPACTION] as const;
+export const GROUPS = [LIMITS, JOBS, MODELS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE };

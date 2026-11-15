@@ -18,9 +18,9 @@ afterEach(async () => {
 });
 
 /** A turn whose model first calls `lookup`, then answers; the requests that left, and what the agent heard and did. */
-async function lookupTurn(made: Rig, sessionId?: string, messageThreads?: true): Promise<{ run: Agent; asked: unknown[]; pieces: string[]; bodies: Record<string, unknown>[] }> {
-  const saved = await made.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", ...(messageThreads ? { messageThreads } : {}) }, KEY);
-  const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "high" });
+async function lookupTurn(made: Rig, sessionId?: string, messageThreads?: true, user = USER): Promise<{ run: Agent; asked: unknown[]; pieces: string[]; bodies: Record<string, unknown>[] }> {
+  const saved = await made.layer.api.save(user, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", ...(messageThreads ? { messageThreads } : {}) }, KEY);
+  const agent = await made.layer.agentModel({ user, connectionId: saved.id, model: null, effort: "high" });
   expect(agent.thinkingLevel).toBe("high");
   const asked: unknown[] = [];
   const lookup: AgentTool = {
@@ -94,6 +94,19 @@ describe("a turn on the layer's model, run by pi's Agent", () => {
     r.layer.ended(USER, "agent-session-7");
     await run.prompt("And the door?");
     expect(bodyOf(r.sent[2]).thread).toEqual({ type: "create" });
+  });
+
+  test("two users with the same session id: each has a thread of his own, and one's ended keeps the other's", async () => {
+    r = rig({ script: lookupAnswers });
+    const ilse = await lookupTurn(r, "scene-7", true);
+    const other = await lookupTurn(r, "scene-7", true, "lantern-keeper");
+    // The second user's first call starts a thread: none of the first's is his.
+    expect([bodyOf(r.sent[2]).thread, bodyOf(r.sent[3]).thread]).toEqual([{ type: "create" }, { type: "continue", previous_message_id: "msg_1" }]);
+    r.layer.ended(USER, "scene-7");
+    await other.run.prompt("And the door?");
+    expect(bodyOf(r.sent[4]).thread).toMatchObject({ type: "continue" });
+    await ilse.run.prompt("And the door?");
+    expect(bodyOf(r.sent[6]).thread).toEqual({ type: "create" });
   });
 
   test("a model the layer didn't make has no connection to go on, and the call says so", async () => {

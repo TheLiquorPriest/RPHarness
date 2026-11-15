@@ -56,7 +56,7 @@ const QUOTES_ANSWER = /\bbody=/;
 function failure(error: unknown, secrets: Iterable<string>, most: number): string {
   const text = errorWords(error);
   const port = PORT_IN_USE.exec(text);
-  if (port) return `port ${port[1]} on this machine, where OpenAI's sign-in comes back to, is in use by another sign-in still open or by another program: close that, then start again`;
+  if (port) return `port ${port[1]} on this machine, where OpenAI's sign-in comes back to, is in use by another sign-in still open or by another program: close that`;
   const exchange = EXCHANGE_FAILURE.exec(text);
   const report = text.split("; stack=")[0] ?? text;
   const words = exchange ? failureWords(`${exchange[1]}: ${exchange[2]}`) : failureWords(QUOTES_ANSWER.test(report) ? (report.split(" url=")[0] ?? report) : report);

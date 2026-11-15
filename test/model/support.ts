@@ -7,7 +7,7 @@ import type { AssistantMessage, Message, Provider, SimpleStreamOptions } from "@
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { ConnectionsDoc, FilesPort, Layer, Log, ModelsPort, SecretsDoc, UserScope } from "../../src/contract";
 import { readModelSettings } from "../../src/harness/settings";
-import type { AgentModel, ModelLayer } from "../../src/model";
+import type { AgentModel, ModelLayer, ModelTexts } from "../../src/model";
 import { createModelLayer } from "../../src/model";
 import { FakeClock } from "../../src/testing/rig";
 
@@ -246,6 +246,8 @@ export interface Rig {
   configs: Configs;
   /** What reading the settings logged. */
   settingsLog: string[];
+  /** The texts the layer reads as each call starts, the test's own: a change holds from the next call. */
+  texts: ModelTexts;
   done(): Promise<void>;
 }
 
@@ -270,6 +272,8 @@ export function rig(options: RigOptions = {}): Rig {
   };
   const log: Log = { debug: said, info: said, warn: said, error: said };
   let ids = 0;
+  // The texts a host reads from its files; the test's own here: the sign-in line as shipped, the host's mark where a test gives one.
+  const texts: ModelTexts = { signinLine: SIGNIN_LINE, markNote: options.markNote, testPrompt: TEST_PROMPT, emptyAnswer: undefined, picturesAnswer: undefined };
   const layer = createModelLayer({
     store,
     now: clock.now,
@@ -282,11 +286,10 @@ export function rig(options: RigOptions = {}): Rig {
     appName: "Harbour Tales",
     env: options.env ?? {},
     settings: (scope) => readModelSettings(files, scope, log),
-    // The texts a host reads from its files; the test's own here: the sign-in line as shipped, the host's mark where a test gives one.
-    texts: async () => ({ signinLine: SIGNIN_LINE, markNote: options.markNote, testPrompt: TEST_PROMPT, emptyAnswer: undefined, picturesAnswer: undefined }),
+    texts: async () => ({ ...texts }),
     ...(options.providers ? { providers: options.providers } : {}),
   });
-  return { layer, store, sent, clock, logs, configs, settingsLog, done: () => layer.close() };
+  return { layer, store, sent, clock, logs, configs, settingsLog, texts, done: () => layer.close() };
 }
 
 /** A signal that never ends. */

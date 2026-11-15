@@ -1,5 +1,5 @@
 ---
-description: The words an agent is told about its tool calls - what RPH's own tools answer, and what a call is answered with when it could not run or its tool failed. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)".
+description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it was not run or its tool failed, and what a tool's answer that holds no words says. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)".
 format: lines
 ---
 failed: {{tool}} failed.
@@ -41,3 +41,5 @@ no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
 released: The reply went out.
 not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached one of its limits{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.
+empty_answer: {{tool}} answered with nothing.
+pictures_answer: {{tool}} answered with these pictures alone.

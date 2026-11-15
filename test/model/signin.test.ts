@@ -1,8 +1,11 @@
-// Signing in to Anthropic through pi-ai's own flow, on the path a page can finish: the flow's address
-// to open, then the code the provider's page showed, pasted in. Against a scripted token endpoint:
-// the code is exchanged, the tokens are kept with the secrets, a call on the sign-in carries them,
-// an expired token is renewed once however many calls find it so, a flow left open expires, a flow
-// that ends without signing in says why for a while, and signing out forgets the tokens.
+// Signing in to Anthropic and to OpenAI through pi-ai's own flows, on the path a page can finish:
+// the flow's address to open, then what the provider's page gave, pasted in (Anthropic's code,
+// OpenAI's address the browser was sent to), or, for OpenAI, its listener on this machine caught
+// by the browser. Against a scripted token endpoint: the code is exchanged, the tokens are kept with
+// the secrets, a call on the sign-in carries them (an Anthropic one with the line of
+// `.prompts/signin-line.md` first, pi-ai's own nowhere), an expired token is renewed once however
+// many calls find it so, a flow left open expires, a flow that ends without signing in says why for
+// a while, and signing out forgets the tokens.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message } from "@earendil-works/pi-ai";
@@ -94,6 +97,24 @@ describe("signing in to Anthropic", () => {
     expect((bodyOf(sent).system as unknown[]).map((block) => textOf([block]))).toEqual([CLAUDE_CODE, "You narrate a harbour town."]);
   });
 
+  test("a call on the sign-in sends the file's line first and pi-ai's own nowhere; an edited file changes the next request; with the file switched off no line is sent", async () => {
+    tokenEndpoint(anthropicTokens(3600));
+    const { r, connection } = await signInRig();
+    await signIn(r);
+    const agent = await r.layer.agentModel({ user: USER, connectionId: connection, model: null, effort: "off" });
+    const systemOf = (n: number): string[] => (bodyOf(r.sent[n]).system as unknown[] | undefined)?.map((block) => textOf([block])) ?? [];
+    r.texts.signinLine = "Fixture line: the harbour's own sign-in words.";
+    await call(agent, ASK);
+    expect(systemOf(0)).toEqual(["Fixture line: the harbour's own sign-in words.", "You narrate a harbour town."]);
+    r.texts.signinLine = "Fixture line, edited.";
+    await call(agent, ASK);
+    expect(systemOf(1)).toEqual(["Fixture line, edited.", "You narrate a harbour town."]);
+    r.texts.signinLine = undefined;
+    await call(agent, ASK);
+    expect(systemOf(2)).toEqual(["You narrate a harbour town."]);
+    for (const sent of r.sent) expect(sent.text).not.toContain(CLAUDE_CODE);
+  });
+
   test("renews an expired token once, however many calls find it so, and keeps the new one", async () => {
     // The code buys a token good for a minute, within pi-ai's five minutes of expiring, so the first calls renew it; a renewed one is good for an hour.
     const tokens = tokenEndpoint((sent) =>
@@ -178,5 +199,65 @@ describe("signing in to Anthropic", () => {
     expect(JSON.stringify(r.store.secretsDoc)).not.toContain("sk-ant-");
     expect((await call(await r.layer.agentModel({ user: USER, connectionId: connection, model: null, effort: "off" }), ASK)).errorMessage).toBe('There is no sign-in to Anthropic, which the connection "Claude sign-in" uses: sign in on the Connections page.');
     expect(r.sent).toEqual([]);
+  });
+});
+
+/** The tokens OpenAI's endpoint hands out for the sign-in with ChatGPT, the scope a call on them needs included. */
+function openaiTokens(): (sent: Sent) => Response {
+  return () => json({ access_token: "oai-access-harbour-1", refresh_token: "oai-refresh-harbour-1", id_token: "oai-id-harbour-1", scope: "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct", expires_in: 3600 });
+}
+
+/** A layer whose calls on OpenAI are refused at once, so a call's request shows and nothing waits, and a connection on the sign-in. */
+async function openaiRig(): Promise<{ r: Rig; connection: string }> {
+  const made = rig({ script: () => failed(400, { error: { message: "Fixture refusal." } }) });
+  r = made;
+  const saved = await made.layer.api.save(USER, { name: "ChatGPT sign-in", provider: "openai", auth: "signin", model: "gpt-5" });
+  return { r: made, connection: saved.id };
+}
+
+/** The address OpenAI's sign-in sends the browser back to, for the flow at `url`. */
+function callbackFor(url: string, code: string): string {
+  return `http://127.0.0.1:1455/auth/callback?code=${code}&state=${new URL(url).searchParams.get("state")}&client_id=fixture-client`;
+}
+
+describe("signing in to OpenAI", () => {
+  test("OpenAI: a pasted address finishes the sign-in; the listener finishes it by itself; a port in use is said; a call carries the token", async () => {
+    const tokens = tokenEndpoint(openaiTokens());
+    const { r, connection } = await openaiRig();
+    const signin = r.layer.api.signIn(USER);
+
+    // The address the browser was sent to, pasted.
+    const pasted = await signin.start("openai");
+    expect(new URL(pasted.url).searchParams.get("redirect_uri")).toBe("http://127.0.0.1:1455/auth/callback");
+    expect(pasted.note).toContain("copy the whole address");
+    expect((await signin.finish(pasted.flow, callbackFor(pasted.url, "pasted-code"))).signedIn).toBe(true);
+    const form = (t: Sent): URLSearchParams => new URLSearchParams(t.text);
+    expect(tokens.map((t) => [form(t).get("grant_type"), form(t).get("code"), form(t).get("client_id")])).toEqual([["authorization_code", "pasted-code", "fixture-client"]]);
+    expect(JSON.stringify(r.store.secretsDoc)).toContain("oai-refresh-harbour-1");
+    expect(JSON.stringify(await r.layer.api.list(USER))).not.toContain("oai-access");
+
+    // The browser on this machine reaches pi-ai's listener, and the flow finishes with nothing pasted.
+    await signin.out("openai");
+    const caught = await signin.start("openai");
+    const page = await (realFetch ?? fetch)(callbackFor(caught.url, "caught-code"));
+    expect(page.status).toBe(200);
+    // The flow ends on pi-ai's own listener, a real server, and gives no promise to wait on: how the sign-in stands is asked until it says.
+    for (let tries = 0; tries < 100 && !(await signin.state("openai")).signedIn; tries += 1) await Bun.sleep(5);
+    expect(await signin.state("openai")).toMatchObject({ signedIn: true, flow: null, ended: null });
+    expect(tokens.map((t) => form(t).get("code"))).toEqual(["pasted-code", "caught-code"]);
+
+    // A call on the sign-in carries its token.
+    await call(await r.layer.agentModel({ user: USER, connectionId: connection, model: null, effort: "off" }), ASK);
+    expect(r.sent[0]?.headers.authorization).toBe("Bearer oai-access-harbour-1");
+
+    // Another program holds the port the sign-in comes back to.
+    const holder = Bun.serve({ hostname: "127.0.0.1", port: 1455, fetch: () => new Response("held") });
+    try {
+      const words = "The OpenAI sign-in didn't finish: port 1455 on this machine, where OpenAI's sign-in comes back to, is in use by another sign-in still open or by another program: close that. Start it again.";
+      await expect(signin.start("openai")).rejects.toThrow(words);
+      expect((await signin.state("openai")).ended).toBe(words);
+    } finally {
+      await holder.stop(true);
+    }
   });
 });

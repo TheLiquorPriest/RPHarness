@@ -10,10 +10,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message, SimpleStreamOptions, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import type { ConnectionInput } from "../../src/contract";
+import type { ConnectionInput, UserScope } from "../../src/contract";
 import type { ModelEffort } from "../../src/model";
 import type { Rig, Script } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, rig, USER } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, MemoryStore, rig, USER } from "./support";
 
 const ANTHROPIC_KEY = "sk-ant-api03-Ilse0123456789abcdefOkoro";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -314,5 +314,65 @@ describe("a call its connection can't make", () => {
     const answer = await call(await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK, { signal: stop.signal });
     expect([answer.stopReason, answer.errorMessage]).toEqual(["aborted", "The reply was stopped."]);
     expect(r.sent).toEqual([]);
+  });
+});
+
+describe("a tool's answer that holds no words", () => {
+  test("an emptied answer and a picture-only answer carry the file's lines on each API, and pi-ai's own words are in no request", async () => {
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+    const asked: Message[] = [
+      { role: "user", content: "Look up the tide and the chart.", timestamp: 1 },
+      { role: "assistant", content: [{ type: "toolCall", id: "call_1", name: "lookup", arguments: { what: "tide" } }, { type: "toolCall", id: "call_2", name: "lookup", arguments: { what: "chart" } }], api: "openai-completions", provider: "fixture", model: "fixture-model", usage, stopReason: "toolUse", timestamp: 1 },
+      { role: "toolResult", toolCallId: "call_1", toolName: "lookup", content: [], isError: false, timestamp: 1 },
+      { role: "toolResult", toolCallId: "call_2", toolName: "lookup", content: [{ type: "image", data: "Zml4dHVyZQ==", mimeType: "image/png" }], isError: false, timestamp: 1 },
+    ];
+    const connections: [ConnectionInput, string][] = [
+      [claude("claude-sonnet-4-5"), ANTHROPIC_KEY],
+      [{ name: "Local", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" }, SERVER_KEY],
+      [{ name: "OpenAI", provider: "openai", auth: "key", model: "gpt-5" }, "sk-proj-0123456789abcdefghijklmn"],
+    ];
+    for (const [connection, key] of connections) {
+      const made = rig({ script: () => failed(400, { error: { message: "Fixture refusal." } }) });
+      r = made;
+      made.texts.emptyAnswer = (tool) => `Fixture: ${tool} gave nothing.`;
+      made.texts.picturesAnswer = (tool) => `Fixture: ${tool} gave pictures.`;
+      const saved = await made.layer.api.save(USER, connection, key);
+      await call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), asked);
+      const sent = made.sent[0]?.text ?? "";
+      expect([connection.provider, sent.includes("Fixture: lookup gave nothing."), sent.includes("Fixture: lookup gave pictures.")]).toEqual([connection.provider, true, true]);
+      for (const own of ["(no tool output)", "(see attached image)"]) expect(sent).not.toContain(own);
+      await made.done();
+      r = undefined;
+    }
+  });
+});
+
+/** A user the host does not serve: both his documents' reads fail, as a host refuses one. */
+const STRANGER = "lamp-stranger";
+
+/** A store that refuses the stranger and counts each user's reads of his secrets, which a desk reads once. */
+class RefusingStore extends MemoryStore {
+  readonly secretReads: string[] = [];
+  override async loadConnections(scope: UserScope): Promise<unknown> {
+    if (scope.user === STRANGER) throw new Error("Fixture: no such user here.");
+    return super.loadConnections(scope);
+  }
+  override async loadSecrets(scope: UserScope): Promise<unknown> {
+    this.secretReads.push(scope.user);
+    if (scope.user === STRANGER) throw new Error("Fixture: no such user here.");
+    return super.loadSecrets(scope);
+  }
+}
+
+describe("each user's desk", () => {
+  test("a user name the host refuses leaves no desk: the store is asked again each time; a served user's desk stays", async () => {
+    const store = new RefusingStore();
+    r = rig({ store });
+    for (let n = 0; n < 2; n += 1) {
+      await r.layer.api.list(STRANGER).catch(() => undefined);
+      await r.layer.api.list(USER);
+    }
+    expect(store.secretReads.filter((user) => user === STRANGER).length).toBe(2);
+    expect(store.secretReads.filter((user) => user === USER).length).toBe(1);
   });
 });

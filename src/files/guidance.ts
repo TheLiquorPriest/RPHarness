@@ -309,6 +309,7 @@ class TreeGuidance implements Guidance {
         off: found.off,
         ...(d.model !== undefined ? { model: d.model } : {}),
         ...(d.effort !== undefined ? { effort: d.effort } : {}),
+        ...(d.toolsAs !== undefined ? { toolsAs: d.toolsAs } : {}),
         tools: [...d.tools],
         reads: [...d.reads],
         given: [...d.given],

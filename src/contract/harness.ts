@@ -6,7 +6,7 @@ import type { AgentRef, Effort, Scope, Usage } from "./common";
 import type { Environment } from "./environment";
 import type { RuleFiring } from "./events";
 import type { LayerLevel } from "./files";
-import type { ModelsApi } from "./models";
+import type { ModelsApi, ToolsAs } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
 import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
@@ -320,6 +320,8 @@ export interface DefinitionView {
   /** Its connection profile's name and effort, as its header says. */
   model?: string;
   effort?: Effort;
+  /** How its tools are offered, as its header says (`tools_as:`); absent: auto. */
+  toolsAs?: ToolsAs;
   /** Its fixed tools, the instruction files it reads, and what it is given at the start of a run. */
   tools: string[];
   reads: string[];

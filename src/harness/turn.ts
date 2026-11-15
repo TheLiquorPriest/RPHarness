@@ -34,6 +34,7 @@ import { BASE_TOOLS, baseTools, skillsIndex } from "../tools/base";
 import { canLoadSkills } from "./opening";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
+import { JOB_SEARCHED, jobTools } from "../jobs/tools";
 import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { TurnGate } from "./gate";
 import { Judges } from "./judge";
@@ -45,8 +46,8 @@ import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid 
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search, `job_start` and the prompt map's among them. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...PROMPT_TOOLS] as const;
+/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search, `job_start`, the job tools behind the search and the prompt map's among them. */
+const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED, ...PROMPT_TOOLS] as const;
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
@@ -322,7 +323,7 @@ export class Turn {
     this.#say("started");
     this.#budget = new Budget("turn", counted);
     if (time !== undefined) this.#timer = env.clock.setTimeout(() => this.#outOfTime(time), time);
-    if (definition === undefined) return this.#outcome({ status: "failed", error: { code: "failed", detail: `No agent definition named "${req.lead}" is in force for this chat.` } });
+    if (definition === undefined) return this.#outcome({ status: "failed", error: { code: "no-definition", agent: req.lead } });
 
     const session = this.#c.sessions.of(scope);
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
@@ -397,7 +398,7 @@ export class Turn {
     let opening = session.openings.get(req.lead) ?? keptOpening(file.log, req.lead);
     if (opening === undefined) {
       const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing));
-      if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: "failed", detail: opened } });
+      if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: opened, agent: req.lead } });
       opening = opened;
       file.add({ type: "opening", parent: begun.id, lead: req.lead, opening: opening as unknown as JsonObject });
     }
@@ -681,7 +682,7 @@ export class Turn {
   }
 
   /** Opens the session for its lead: the opening block, which holds still for the session (§5.2, §10.2), or why it cannot be made. */
-  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, closing: TemplatePart | undefined): Promise<Opening | string> {
+  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, closing: TemplatePart | undefined): Promise<Opening | "no-tags"> {
     const { env } = this.#c;
     const stack = await guidance.stack(definition.name);
     for (const problem of stack.problems) env.log.warn("A file of the lead's stack cannot be used.", { path: problem.path, problem: problem.message });
@@ -701,7 +702,7 @@ export class Turn {
       contractText = joined([contract.render({ form: form === "tags" ? { tags: true } : { two_step: true } }).text]);
       texts.push(contractText);
     }
-    if (form === "tags" && tags === undefined) return "This connection's replies are marked by tags, and no reply contract in force names them.";
+    if (form === "tags" && tags === undefined) return "no-tags";
     // The tool guide: the guide of each family of the tools the lead holds, where its file is (`.tools/<family>.md`).
     const held = registry.hold(definition.tools);
     for (const family of new Set(held.tools.map((tool) => tool.family))) {
@@ -818,6 +819,7 @@ export class Turn {
       agentMessage(team, texts.get("agent_message")),
       agentDrop(team, texts.get("agent_drop")),
       jobStart(this.#c.jobs, texts.get(JOB_START), this.#settings.jobs.perRun),
+      ...jobTools(this.#c.jobs, texts, this.#settings.perCall),
       ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
       promptTool({ prompt: async () => this.#prompt, guidance, texts, env }),
       promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env, signatureHead: this.#settings.signatureHead }),

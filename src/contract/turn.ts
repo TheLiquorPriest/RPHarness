@@ -110,9 +110,12 @@ export interface Release {
 /**
  * A limit the user sets (§10.11): model calls, tokens in and out, tokens sent and written together
  * (`tokens`: the jobs' tokens in the user's day), wall time, sub-agent depth and count, and jobs
- * started (§13.5) in the user's day, or by the agents of one turn's or one job's run.
+ * started (§13.5) in the user's day, or by the agents of one turn's or one job's run; and an agent's
+ * own controls on each call (C-M3): its prompt (`callTokensIn`), its answer (`callTokensOut`) and its
+ * time (`callTime`), its answers that call tools (`toolRounds`), the messages it may be sent after its
+ * first answer (`repeats`), and a connection's tokens in a minute (`tokensPerMinute`).
  */
-export type LimitName = "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs";
+export type LimitName = "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs" | "callTokensIn" | "callTokensOut" | "callTime" | "toolRounds" | "repeats" | "tokensPerMinute";
 
 /** A limit reached: which, over what (a turn, one agent, one job's run, or the user's day: the daily caps), the limit and the count. */
 export interface LimitHit {
@@ -128,13 +131,20 @@ export interface LimitHit {
 
 /**
  * Why the reply failed, as facts: no reply was released (§10.7); a limit was reached; the model's
- * provider failed (`detail`: its own words); the signal stopped the turn; or RPH itself failed.
- * The host says it in its own words.
+ * provider failed (`detail`: its own words); the signal stopped the turn; RPH itself failed; no
+ * definition in force names the turn's lead (`no-definition`); or the connection's replies are marked
+ * by tags and no reply contract in force names them (`no-tags`). The host says it in its own words.
  */
 export interface ReplyError {
-  code: "no-reply" | "limit" | "provider" | "stopped" | "failed";
+  code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags";
   limit?: LimitHit;
   detail?: string;
+  /**
+   * For `no-definition` and `no-tags`: the name of the agent definition the turn named as its lead. `no-definition`: no
+   * file in force for the chat defines it. `no-tags`: the connection's replies are marked by tags (§10.7) and no reply contract
+   * in force names them. RPH words neither: the host does, from its own file. For `failed`, `detail` is the failure's own words, never an RPH sentence.
+   */
+  agent?: string;
   /**
    * For `no-reply`, `limit` and `stopped`: the lead's last plain text outside any mark, trimmed: in
    * the tag form, every tagged part (the intent record, a reply) and what it holds taken out; in the

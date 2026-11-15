@@ -17,9 +17,13 @@
 // - `OWNER_ONLY`: the members of the harness's API that only the owner's own presses may call
 //   (`jobs.start`, `live.pause`, ...), which both repositories' call-site tests read, so a member
 //   renamed in the contract or called by anything but a press fails them loudly (C-24).
+// - `placeOf`: the form of the place a connection's key and headers' values were given for (its
+//   provider and its address's origin and path), so a host that writes keys for the layer (the
+//   migration) writes their places as the layer records them (C22, R-53).
 
 export { mergedConfig, SETTINGS } from "./harness/settings";
 export { checkSettingValue } from "./harness/settings/check";
 export { DEFINITION_FIELDS } from "./files/api";
 export { parseDefinition } from "./files/definitions";
 export { OWNER_ONLY } from "./owner";
+export { placeOf } from "./model/place";

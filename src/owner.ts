@@ -8,7 +8,7 @@
 // each is a member of the harness; RPE's checks the same of its sources. It is typed against the
 // contract, so a member renamed there fails the typecheck here, and a member of the list that is
 // gone fails the tests. Each member joins the list in the package that makes it.
-import type { DefinitionsApi, JobsApi, LiveApi, SessionsApi } from "./contract";
+import type { DefinitionsApi, JobsApi, LiveApi, ModelsApi, SessionsApi } from "./contract";
 
 /** The owner-only members, by the member of the harness they are on. */
 const MEMBERS = {
@@ -16,7 +16,8 @@ const MEMBERS = {
   definitions: ["apply"],
   jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "answer"],
   sessions: ["compact"],
-} as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[] };
+  models: ["save"],
+} as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[]; models: readonly (keyof ModelsApi)[] };
 
 /** Each owner-only member as `<harness member>.<name>` (`jobs.start`): the one list both repositories' call-site tests read. */
 export const OWNER_ONLY: readonly string[] = Object.freeze(Object.entries(MEMBERS).flatMap(([api, names]) => names.map((name) => `${api}.${name}`)));

@@ -85,7 +85,7 @@ export function switches(states: Readonly<Record<string, SwitchState>>): Switche
   const asked: string[] = [];
   return {
     asked,
-    state: async (thing) => {
+    state: async (_user, thing) => {
       asked.push(thing.name);
       return states[thing.name] ?? "waiting";
     },

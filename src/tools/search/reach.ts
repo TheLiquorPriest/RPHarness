@@ -52,13 +52,16 @@ export class Reach {
   readonly #fixed: ReadonlySet<string>;
   readonly #outOfReach: ReadonlySet<string>;
   readonly #switches: SwitchesPort | undefined;
+  /** The user whose agent's reach this is: the switches are his. */
+  readonly #user: string;
   readonly #asked = new Map<string, Promise<SwitchState>>();
 
-  constructor(reach: AgentReach, switches: SwitchesPort | undefined) {
+  constructor(reach: AgentReach, switches: SwitchesPort | undefined, user: string) {
     this.#byName = new Map(reach.tools.map((tool) => [tool.name, tool]));
     this.#fixed = new Set(reach.fixed);
     this.#outOfReach = new Set(reach.outOfReach);
     this.#switches = switches;
+    this.#user = user;
   }
 
   /** Where the tool of that name stands; a name no tool answers to is out of reach. */
@@ -84,7 +87,7 @@ export class Reach {
     const key = JSON.stringify([thing.kind, thing.name, thing.target]);
     let state = this.#asked.get(key);
     if (state === undefined) {
-      state = this.#switches.state(thing);
+      state = this.#switches.state(this.#user, thing);
       this.#asked.set(key, state);
     }
     return state;

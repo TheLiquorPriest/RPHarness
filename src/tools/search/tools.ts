@@ -60,7 +60,7 @@ export function toolSearch(deps: ToolSearchDeps): OwnTool {
       const asked = (text(given, "words") ?? "").trim();
       const [words, reach] = await Promise.all([wordsOf(deps.guidance), deps.reach.of(ctx.agent)]);
       if (asked === "") return answer(words("no_words"), true);
-      const view = new Reach(reach, deps.switches);
+      const view = new Reach(reach, deps.switches, ctx.scope.user);
       const standings = await Promise.all(reach.tools.map((tool) => view.standing(tool)));
       // A tool that waits to be switched on is found by the same words, and named as waiting rather than offered.
       const waitingOn = new Map<ReachableTool, Switchable>();
@@ -111,7 +111,7 @@ export function toolUse(deps: ToolSearchDeps): OwnTool {
       const given = fieldsOf(args);
       const name = (text(given, "name") ?? "").trim();
       const [words, reach] = await Promise.all([wordsOf(deps.guidance), deps.reach.of(ctx.agent)]);
-      const at = await new Reach(reach, deps.switches).named(name);
+      const at = await new Reach(reach, deps.switches, ctx.scope.user).named(name);
       if (at.at === "unreached") return answer(words("no_tool", { tool: name }), true);
       if (at.at === "waiting") return answer(words("not_switched_on", { tool: name, name: at.thing.name }), true);
       const sent = given["args"] ?? {};

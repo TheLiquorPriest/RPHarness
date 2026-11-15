@@ -12,7 +12,7 @@ import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
 import { callTerms, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
-import { type AgentOutcome, type AgentRunner, Budget, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
+import { type AgentOutcome, type AgentRunner, Budget, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
@@ -94,7 +94,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const rules = await guidance.ruleRun({
     facts: createFacts(env.facts, (_scope, agent) => {
       const open = todos.get(agent.id).filter((item) => !item.done);
-      return { "todo.open": { count: open.length, names: open.map((item) => item.text) } };
+      const left = leftFact([...working].find((entry) => entry.runner.agent.id === agent.id)?.runner.left() ?? {}, budget.left());
+      return { "todo.open": { count: open.length, names: open.map((item) => item.text) }, ...(left !== undefined ? { "limits.left": left } : {}) };
     }),
     window: settings.ruleWindow,
   });
@@ -108,14 +109,14 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const tokensIn = limit(settings.jobs.run.tokensIn, given.tokensIn);
   const tokensOut = limit(settings.jobs.run.tokensOut, given.tokensOut);
   // A job started by another job's agent spends from that job's run, which spends from the user's jobs' day, which spends from every agent's day; any other, from the jobs' day. The usage book counts every call into the day as it ends, so these budgets only read the counts.
-  const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.jobs.cachedWeight });
-  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.jobs.cachedWeight });
+  const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.cachedWeight });
+  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.cachedWeight });
   // Its own `tokens` count a cached re-read at the weight the day's job tokens do, so the two limits on a job's tokens mean the same; tokens in and out count in full, as the run limits they tighten.
   const budget = new Budget(
     "job",
     { ...(calls !== undefined ? { calls } : {}), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(given.tokens !== undefined ? { tokens: given.tokens } : {}) },
     ask.over ?? day,
-    { cachedWeight: settings.jobs.cachedWeight },
+    { cachedWeight: settings.cachedWeight },
   );
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
@@ -177,7 +178,10 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     rules: () => rules,
     questions: () => judges,
     budget: () => budget,
-    settings: () => settings.subAgents,
+    settings: () => {
+      const { agents: _turnAgents, ...subAgents } = settings.subAgents;
+      return settings.jobs.run.agents !== undefined ? { ...subAgents, agents: settings.jobs.run.agents } : subAgents;
+    },
     perCall: () => settings.perCall,
     terms: (definition) => callTerms(settings, definition),
     track: (entry) => {

@@ -36,7 +36,7 @@ function routed(lead: Reply[], keeper: Reply[]): Answer[] {
   return Array.from({ length: lead.length + keeper.length }, () => route);
 }
 
-const start = (id: string): Reply => ({ pieces: [{ call: "job_start", args: { agent: "keeper", brief: BRIEF }, id }] });
+const start = (id: string, brief = BRIEF): Reply => ({ pieces: [{ call: "job_start", args: { agent: "keeper", brief }, id }] });
 const reply = (text: string): Reply => ({ pieces: [{ text: `<reply>${text}</reply>` }] });
 
 /** What the host was told of each job, in order. */
@@ -95,7 +95,8 @@ describe("a job an agent starts", () => {
     const s = (open = await stage({
       config: "jobs:\n  atOnce: 5\n  connections:\n    fixture-line: { atOnce: 1, perDay: 2 }\n",
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER("fixture-line") },
-      answers: routed([start("start-1"), start("start-2"), start("start-3"), reply("The tower is quiet.")], [{ pieces: [{ hold: first }, { text: "First count: seven." }] }, { pieces: [{ text: "Second count: seven." }] }]),
+      // Each start asks for a task of its own: the same call three times in a row ends the agent's work (`limits.repeats`).
+      answers: routed([start("start-1", `${BRIEF} First.`), start("start-2", `${BRIEF} Second.`), start("start-3", `${BRIEF} Third.`), reply("The tower is quiet.")], [{ pieces: [{ hold: first }, { text: "First count: seven." }] }, { pieces: [{ text: "Second count: seven." }] }]),
     }));
 
     await s.turn(request("t1", { lead: "lead" }));
@@ -158,10 +159,10 @@ describe("a job an agent starts", () => {
   });
 
   test("a seventh job_start in one turn, past the player's jobs per run, is answered in the file's words and starts nothing", async () => {
-    const six: Reply = { pieces: Array.from({ length: 6 }, (_, at) => ({ call: "job_start", args: { agent: "keeper", brief: BRIEF }, id: `start-${at + 1}` })) };
+    const six: Reply = { pieces: Array.from({ length: 6 }, (_, at) => ({ call: "job_start", args: { agent: "keeper", brief: `${BRIEF} #${at + 1}.` }, id: `start-${at + 1}` })) };
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
-      answers: routed([six, start("start-7"), reply("The tower is quiet.")], Array.from({ length: 6 }, () => ({ pieces: [{ text: "Fixture count: seven." }] }))),
+      answers: routed([six, start("start-7", `${BRIEF} #7.`), reply("The tower is quiet.")], Array.from({ length: 6 }, () => ({ pieces: [{ text: "Fixture count: seven." }] }))),
     }));
 
     await s.turn(request("t1", { lead: "lead" }));
@@ -208,7 +209,7 @@ describe("a job an agent starts", () => {
     };
 
     expect(await counted("jobs:\n  tokensPerDay: 1000\n")).toBe("No job was started: what jobs sent and wrote today counts as 1050 tokens, and the player allows 1000.");
-    expect(await counted("jobs:\n  tokensPerDay: 1000\n  cachedWeight: 1\n")).toBe("No job was started: what jobs sent and wrote today counts as 9150 tokens, and the player allows 1000.");
+    expect(await counted("jobs:\n  tokensPerDay: 1000\nlimits:\n  cachedWeight: 1\n")).toBe("No job was started: what jobs sent and wrote today counts as 9150 tokens, and the player allows 1000.");
   });
 
   test("the day's job tokens hold across a restart, cached ones at their weight: a harness made again over the same store starts no job past them", async () => {
@@ -271,6 +272,32 @@ describe("a job the player starts", () => {
     await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { calls: 1 } });
     await jobEnded(s, "done", 2);
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
+  });
+
+  test("a job's run starts no more sub-agents than its setting", async () => {
+    const keeper = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [delegate]\n---\nFixture keeper: you count what you are asked to count.\n";
+    const clerk = "---\nname: clerk\ndescription: Fixture clerk.\nmodel: default\ntools: [todo]\n---\nFixture clerk: you note what you are asked to note.\n";
+    // The keeper asks the clerk twice, one after the other: the first call starts the clerk, who answers; the second is past the setting.
+    const s = (open = await stage({
+      config: "jobs:\n  run:\n    agents: 1\n",
+      files: { ".agents/keeper.md": keeper, ".agents/clerk.md": clerk },
+      answers: [
+        { pieces: [{ call: "delegate", args: { agent: "clerk", brief: "Note the bell count." }, id: "d-1" }] },
+        { pieces: [{ text: "Noted the count." }] },
+        { pieces: [{ call: "delegate", args: { agent: "clerk", brief: "Note the bell count again." }, id: "d-2" }] },
+        { pieces: [{ text: "Counted and noted." }] },
+      ],
+    }));
+
+    const started = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
+    await jobEnded(s, "done");
+
+    expect(toldJobs(s).at(-1)).toMatchObject({ id: started.id, state: "done", report: "Counted and noted." });
+    // The first started the clerk, whose words came back; the second was answered in the delegation file's words and started nobody.
+    expect(answerTo(s, "d-1")).toContain("Noted the count.");
+    expect(answerTo(s, "d-2")).toMatch(/^clerk was not started: .*\b1\b.*\b1\b/);
+    expect(s.model.requests).toHaveLength(4);
+    expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "agents", per: "job", max: 1, value: 1 }]);
   });
 
   test("its brief is framed by RPH's job-brief part, as a job of the player's, not as work for the lead on one turn", async () => {

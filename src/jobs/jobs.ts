@@ -544,7 +544,7 @@ export class Jobs implements JobsApi, JobsWork {
   #asks(live: Live, usage: Usage): void {
     const { askAt } = live;
     if (askAt === undefined || live.view.state !== "running") return;
-    const reached = new Budget("job", { tokens: askAt }, undefined, { used: usage, cachedWeight: live.prepared.settings.jobs.cachedWeight }).reached(live.prepared.agent)[0];
+    const reached = new Budget("job", { tokens: askAt }, undefined, { used: usage, cachedWeight: live.prepared.settings.cachedWeight }).reached(live.prepared.agent)[0];
     if (reached === undefined) return;
     live.view = { ...live.view, state: "asking", asks: { at: askAt, tokens: reached.value } };
     this.#core.hub.holds.add(live.view.id, "asking");

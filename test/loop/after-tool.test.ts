@@ -99,7 +99,9 @@ describe("after a tool, in pi's afterToolCall", () => {
 
     const lines = await notices(s);
     expect(ran).toEqual(['tide_table {"day":9}', 'tide_table {"day":10}']);
-    expect(s.trace.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.tool, record.event.firing.moment, record.event.firing.callId])).toEqual([
+    // The two calls of one message run side by side, so which result's rule is traced first is not fixed: they are compared call by call.
+    const fired = s.trace.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.tool, record.event.firing.moment, record.event.firing.callId]);
+    expect(fired.sort((a, b) => `${a[3]}`.localeCompare(`${b[3]}`))).toEqual([
       ["fixture-tides", "tide_table", "tool-result", "f-1"],
       ["fixture-tides", "tide_table", "tool-result", "u-1"],
     ]);

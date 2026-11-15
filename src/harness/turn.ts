@@ -31,6 +31,7 @@ import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
 import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, REPLY_FAMILY, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools, skillsIndex } from "../tools/base";
+import { canLoadSkills } from "./opening";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
 import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
@@ -708,8 +709,8 @@ export class Turn {
       const guide = template(await guidance.tool(family))?.render().text;
       if (guide !== undefined) texts.push(guide);
     }
-    // The skills in force, for a lead that holds `skill_load`: the list stands as the session opened it, and the briefing says when it no longer does.
-    const skills = await skillsIndex(guidance, held.tools);
+    // The skills in force, for a lead that can call `skill_load`: the list stands as the session opened it, and the briefing says when it no longer does.
+    const skills = await skillsIndex(guidance, canLoadSkills(held.tools, definition.outOfReach));
     if (skills !== "") texts.push(skills);
     const closingText = joined([closing?.render().text ?? ""]);
     return {
@@ -731,7 +732,7 @@ export class Turn {
 
   /** The list of skills as it stands, when it is no longer what the opening block holds: the notices' line for that, then the list. */
   async #skillsChanged(guidance: Guidance, notices: PromptPart | undefined, opening: Opening): Promise<string> {
-    const now = await skillsIndex(guidance, this.#registry?.hold(opening.tools).tools ?? []);
+    const now = await skillsIndex(guidance, canLoadSkills(this.#registry?.hold(opening.tools).tools ?? [], opening.outOfReach));
     if (now === (opening.skills ?? "")) return "";
     const line = notices?.format === "lines" ? notices.line("skills_changed", now !== "" ? { listed: true } : {}) : undefined;
     return joined([line ?? "", now]);
@@ -1021,7 +1022,7 @@ export class Turn {
     const session = this.#c.ids();
     const stack = await guidance.stack(writer);
     const held = this.#registry?.hold(definition.tools) ?? { tools: [], missing: [] };
-    const instructions = joined([...stack.entries.flatMap((entry) => (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined ? [] : [entry.kind === "definition" ? this.#instructions(definition, fieldsOf(ref)) : entry.text])), await skillsIndex(guidance, held.tools)]);
+    const instructions = joined([...stack.entries.flatMap((entry) => (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined ? [] : [entry.kind === "definition" ? this.#instructions(definition, fieldsOf(ref)) : entry.text])), await skillsIndex(guidance, canLoadSkills(held.tools, definition.outOfReach))]);
     const connection = await this.#connection(definition);
     const model = await this.#c.models.agentModel(connection.choice);
     const parent: ParentCall = { agent: ctx.agent.id, run: this.run, call: ctx.callId };

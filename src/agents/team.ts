@@ -20,6 +20,7 @@ import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type Loo
 import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
+import { canLoadSkills } from "../harness/opening";
 import { skillsIndex } from "../tools/base";
 import { attach, joined, type Wanted } from "./attachments";
 import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
@@ -185,7 +186,7 @@ async function instructionsOf(guidance: Guidance, definition: AgentDefinition, t
     const guide = template(await guidance.tool(family))?.render().text;
     if (guide !== undefined) texts.push(guide);
   }
-  texts.push(await skillsIndex(guidance, tools));
+  texts.push(await skillsIndex(guidance, canLoadSkills(tools, definition.outOfReach)));
   return joined(texts);
 }
 

@@ -19,7 +19,7 @@
 // What has no chat in view (a connection's test, a sign-in, a request passed through) reads its
 // settings at the levels every chat shares, through a read that names only the user (`UserScope`).
 
-import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
+import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Sampling, Scope, SettingTakes, UserScope } from "../../contract";
 import type { Guidance } from "../../files/api";
 import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
@@ -434,6 +434,18 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
   const keys = [connection.id, connection.name].filter((key): key is string => key !== null);
   const named = keys.map((key) => (Object.hasOwn(settings.forms, key) ? settings.forms[key] : undefined)).find((form) => form !== undefined);
   return { form: named ?? settings.form, stream: keys.some((key) => settings.streamAnyway.includes(key)) };
+}
+
+/**
+ * How each model call of an agent is measured and sampled (§10.2 l.1165; Appendix D.1 l.2419,
+ * l.2421): the characters per token every estimate before a provider counts is made at, the least
+ * room an answer is given, and, for an agent of a definition, that definition's own sampling, on
+ * each call whose own settings give none. An agent of no definition (a judging call, the writer of
+ * a narrator's reply, which takes the preset's) has no sampling of its own.
+ */
+export function callTerms(settings: Settings, definition?: string): { charsPerToken: number; answerFloor: number; sampling?: Sampling } {
+  const own = definition !== undefined && Object.hasOwn(settings.sampling, definition) ? settings.sampling[definition] : undefined;
+  return { charsPerToken: settings.tokens.charsPerToken, answerFloor: settings.answerFloor, ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}) };
 }
 
 /** The user's counts for the jobs on one connection, under the setting's key that names it (its name or its id). */

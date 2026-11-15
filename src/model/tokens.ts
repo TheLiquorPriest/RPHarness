@@ -44,6 +44,24 @@ export function promptTokens(messages: readonly Message[], charsPerToken: number
   return tokens;
 }
 
+/** A provider's count of a request it was sent: the messages as they went, and the tokens it reported they came to (what it read from its cache and wrote to it included). */
+export interface ProviderCount {
+  messages: readonly Message[];
+  tokens: number;
+}
+
+/**
+ * A request's prompt as estimated before it is sent. Where a provider counted an earlier request
+ * this one goes on from (every message that request was sent still here, the very same, in its
+ * place), it starts from that count and estimates only what was added since, at the ratio; else
+ * every message is estimated.
+ */
+export function requestTokens(messages: readonly Message[], charsPerToken: number, counted?: ProviderCount): number {
+  const goesOn = counted !== undefined && counted.messages.length > 0 && counted.messages.length <= messages.length && counted.messages.every((m, at) => messages[at] === m);
+  if (!goesOn) return promptTokens(messages, charsPerToken);
+  return counted.tokens + promptTokens(messages.slice(counted.messages.length), charsPerToken);
+}
+
 /** A call's own estimate, for whatever its provider doesn't report: the prompt, the answer and its reasoning. */
 export interface UsageEstimate {
   in: number;

@@ -32,6 +32,7 @@ import { createModels } from "@earendil-works/pi-ai/models";
 import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, UserScope } from "../contract";
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
+import { promptMessages } from "../harness/prompt";
 import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
@@ -43,13 +44,13 @@ import { passRequest } from "./pass";
 import { Refusals } from "./refusals";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
-import { tokensOf } from "./tokens";
+import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
-export { DEFAULT_CHARS_PER_TOKEN, callUsage, estimateOf, messageText, promptTokens, tokensOf } from "./tokens";
-export type { CallUsage, UsageEstimate, UsageField } from "./tokens";
+export { DEFAULT_CHARS_PER_TOKEN, callUsage, estimateOf, messageText, promptTokens, requestTokens, tokensOf } from "./tokens";
+export type { CallUsage, ProviderCount, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
 export { limitsOf } from "./limits";
 export { connectionNamed, runOf } from "./runs-on";
@@ -332,10 +333,10 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       return (await shapeOf(deskOf(user).calls, { connectionId, model: model ?? null })).limits;
     },
     async count(scope, connectionId, prompt) {
-      // The connection must be one the call could go on; the count is the chat's own measure, as RPH's own calls are measured before a provider counts them.
-      await shapeOf(deskOf(scope.user).calls, { connectionId, model: null });
+      // The connection must be one the call could go on. The prompt is counted as RPH's own fit check counts a request before a provider has: its messages as pi's loop is given them, at the chat's ratio. No provider has counted a host's prompt, so there is no count to start from.
+      const { model } = await shapeOf(deskOf(scope.user).calls, { connectionId, model: null });
       const { charsPerToken } = await deps.settings(scope);
-      return prompt.reduce((tokens, m) => tokens + tokensOf(typeof m.content === "string" ? m.content : m.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"), charsPerToken), 0);
+      return promptTokens(promptMessages(prompt, model, 0).messages, charsPerToken);
     },
     signIn: (user) => deskOf(user).signIn,
     pass: (user, request, sink, signal) => passRequest(deskOf(user).calls, request, sink, signal),

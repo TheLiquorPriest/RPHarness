@@ -70,10 +70,12 @@ describe("a model pi's catalogue doesn't list", () => {
     expect(capped?.max_tokens).toBe(300);
   });
 
-  test("takes what the user entered for it", async () => {
+  test("takes what the user entered for it, pictures too, and the agent's model carries them", async () => {
     r = rig();
-    const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", limits: { "deepseek-v4-flash": { contextWindow: 1_000_000, maxTokens: 384_000 } } }, KEY);
-    expect(await r.layer.api.limits(USER, saved.id)).toMatchObject({ contextWindow: { tokens: 1_000_000, from: "user" }, maxTokens: { tokens: 384_000, from: "user" } });
+    const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", limits: { "deepseek-v4-flash": { contextWindow: 1_000_000, maxTokens: 384_000, pictures: true } } }, KEY);
+    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: { tokens: 1_000_000, from: "user" }, maxTokens: { tokens: 384_000, from: "user" }, pictures: { takes: true, from: "user" }, asked: [] });
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null });
+    expect([agent.model.contextWindow, agent.model.maxTokens, agent.model.input]).toEqual([1_000_000, 384_000, ["text", "image"]]);
   });
 
   test("takes what its server reported when it listed its models, each limit by the name that server gives it", async () => {

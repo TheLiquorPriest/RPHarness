@@ -5,8 +5,9 @@
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Api, AssistantMessage, Message, Model, Usage } from "@earendil-works/pi-ai";
-import type { ConnectionInput } from "../../src/contract";
-import { callUsage, estimateOf, promptTokens, tokensOf } from "../../src/model";
+import type { ConnectionInput, PromptMessage } from "../../src/contract";
+import { promptMessages } from "../../src/harness/prompt";
+import { callUsage, estimateOf, promptTokens, requestTokens, tokensOf } from "../../src/model";
 import type { Rig, Script } from "./support";
 import { anthropicStream, anthropicTurn, call, chatStream, chunk, eventStream, rig, USER } from "./support";
 
@@ -87,5 +88,42 @@ describe("a call's tokens its provider didn't report", () => {
       { type: "text", text: "At the quay." },
     ]);
     expect(estimateOf(sent, said, 4)).toEqual({ in: promptTokens(sent, 4), out: 3, reasoningOut: 5 });
+  });
+});
+
+describe("an estimate before a provider counts", () => {
+  test("an estimate starts from the last call's reported input and adds the new text at the setting's ratio", () => {
+    const opening: Message = { role: "system", content: "You narrate the harbour.", timestamp: 1 };
+    const asked: Message = { role: "user", content: "Where is Ilse?", timestamp: 1 };
+    const sent = [opening, asked];
+    const said: Message = { role: "assistant", content: [{ type: "text", text: "At the quay, mending nets." }], api: "openai-completions", provider: "x", model: "m", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "stop", timestamp: 2 };
+    const more: Message = { role: "user", content: "And the keeper?", timestamp: 3 };
+    const counted = { messages: sent, tokens: 900 };
+    // The provider said the first request was 900 tokens: only what came after it is estimated, at the ratio given.
+    expect(requestTokens([...sent, said, more], 2, counted)).toBe(900 + Math.ceil("At the quay, mending nets.".length / 2) + Math.ceil("And the keeper?".length / 2));
+    expect(requestTokens([...sent, said, more], 4, counted)).toBe(900 + Math.ceil("At the quay, mending nets.".length / 4) + Math.ceil("And the keeper?".length / 4));
+    // A request that no longer goes on from the counted one (a message put in place of one it was sent) is estimated whole.
+    const replaced: Message = { role: "user", content: "Where is Ilse?", timestamp: 1 };
+    expect(requestTokens([opening, replaced, said], 2, counted)).toBe(promptTokens([opening, replaced, said], 2));
+    // With no count, every message is estimated.
+    expect(requestTokens([...sent, said], 2)).toBe(promptTokens([...sent, said], 2));
+  });
+
+  test("the model port gives the model's window as pi reports it, and its count of a prompt is the count RPH's fit check makes of the same messages, at the chat's ratio, from the provider's count where there is one", async () => {
+    r = rig({ chats: { "chat-tight": "tokens:\n  charsPerToken: 2\n" } });
+    const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-flash" }, "sk-deepseek-0123456789abcdef");
+    const limits = await r.layer.api.limits(USER, saved.id);
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+    expect(limits.contextWindow).toEqual({ tokens: agent.model.contextWindow, from: "pi" });
+    const prompt: PromptMessage[] = [
+      { role: "system", content: [{ type: "text", text: "The tide turns at dusk." }, { type: "text", text: " Ilse knows it." }] },
+      { role: "user", content: [{ type: "text", text: "Look at this chart." }, { type: "image", data: "aGFyYm91cg==", mimeType: "image/png" }, { type: "text", text: "Where is the reef?" }] },
+      { role: "assistant", content: "North of the light." },
+    ];
+    // No provider has counted a host's prompt: the whole is estimated, exactly as the fit check estimates the messages pi's loop is given, at each chat's ratio.
+    const fit = (ratio: number): number => promptTokens(promptMessages(prompt, agent.model, 0).messages, ratio);
+    expect(await r.layer.api.count({ user: USER, chat: "chat-tight", session: "session-a" }, saved.id, prompt)).toBe(fit(2));
+    expect(await r.layer.api.count({ user: USER, chat: "chat-plain", session: "session-b" }, saved.id, prompt)).toBe(fit(3.2));
+    expect(fit(2)).not.toBe(fit(3.2));
   });
 });

@@ -104,6 +104,7 @@ export function toolUse(deps: ToolSearchDeps): OwnTool {
   return {
     name: TOOL_USE,
     family: FAMILY,
+    carrier: true,
     tier: "read",
     description: own?.description ?? "",
     parameters: argumentsOf({ name: { type: "string" }, args: { type: "object" } }, ["name"], own),

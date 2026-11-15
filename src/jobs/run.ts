@@ -6,36 +6,22 @@ import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from 
 import type { DelegateCall } from "../agents/tools";
 import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
 import { createFacts, loadGuidance } from "../files";
-import { TurnGate } from "../harness/gate";
+import { AgentRuns } from "../harness/agent-run";
 import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
-import { requestPath, sentMessages } from "../harness/requests";
 import { callTerms, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
-import { type AgentOutcome, type AgentRunner, Budget, type GateCall, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type ToolGate, type Work } from "../loop";
+import { type AgentOutcome, type AgentRunner, Budget, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
-import { SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
+import { SEARCH_TOOLS, searchTools } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "./tool";
 import { JOB_SEARCHED, jobTools } from "./tools";
 
 /** RPH's own tools a job's agents may hold, each described by its file in `.tools/`. */
 const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED] as const;
-
-/** A gate that tells `ran` of each call it answered after the tool ran: the call, and its answer. */
-function noting(inner: ToolGate, ran: (call: GateCall, result: LoopToolResult) => void): ToolGate {
-  const bound = inner.bound?.bind(inner);
-  return {
-    before: (call, signal) => inner.before(call, signal),
-    async after(call, result, signal, added) {
-      ran(call, result);
-      return inner.after(call, result, signal, added);
-    },
-    ...(bound !== undefined ? { bound } : {}),
-  };
-}
 
 /** What every job's run shares: the harness's. */
 export interface JobCore {
@@ -135,21 +121,28 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   let registry: Registry | undefined;
   /** Who a run's writes are told to, from the moment it runs. */
   let heard: JobHearing | undefined;
-  const keep = (agent: AgentRef): KeepRequest | undefined => {
-    const turn = places.turn;
-    if (settings.requests === "none" || turn === undefined) return undefined;
-    return (call, messages, opening) => {
-      if (settings.requests === "first" && call !== 1) return undefined;
-      const path = requestPath(turn, agent, call);
-      void env.files.write(scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages, opening) }) }, "harness").then(
-        (done) => {
-          if (done.status !== "written") env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, status: done.status });
-        },
-        (error: unknown) => env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, error: error instanceof Error ? error.message : String(error) }),
-      );
-      return path;
-    };
-  };
+  /** Every write of the run still under way (a kept request, a transcript line): the run's end waits for them. */
+  const pending = new Set<Promise<unknown>>();
+  const runs = new AgentRuns({
+    env,
+    scope,
+    trace,
+    places,
+    settings: () => settings,
+    rules: () => rules,
+    words,
+    tools: () => registry?.all() ?? [],
+    tell: (written) => {
+      const settled = written.catch(() => undefined);
+      pending.add(settled);
+      void settled.finally(() => pending.delete(settled));
+    },
+    ran: (_call, result, tool) => {
+      if (tool?.tier !== "write" || result.error === true) return;
+      const first = result.content.find((part) => part.type === "text");
+      heard?.wrote({ tool: tool.name, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), line: first?.type === "text" ? (first.text.split("\n")[0] ?? "").trim() : "" });
+    },
+  });
   const judges = new Judges({
     env,
     trace,
@@ -177,31 +170,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     connection: (definition) => connectionOf(core.connections, scope, definition, env.log),
     hold: (names) => registry?.hold(names) ?? { tools: [], missing: [...names] },
     unregistered: (name, tools) => env.log.warn("Tools an agent's definition lists are registered by nobody; it holds the rest.", { agent: name, tools: [...tools] }),
-    gate: (agent, parent) =>
-      noting(
-        new TurnGate({
-          scope,
-          agent,
-          ...(parent !== undefined ? { parent } : {}),
-          trace,
-          clock: env.clock,
-          files: env.files,
-          log: env.log,
-          ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
-          ...(env.switches !== undefined ? { switches: env.switches } : {}),
-          places,
-          rules,
-          words,
-          tools: new Map((registry?.all() ?? []).map((tool) => [tool.name, tool])),
-          clipChars: settings.clipChars,
-        }),
-        (call, result) => {
-          const tool = registry?.all().find((held) => held.name === call.tool);
-          if (tool?.tier !== "write" || result.error === true) return;
-          const first = result.content.find((part) => part.type === "text");
-          heard?.wrote({ tool: tool.name, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), line: first?.type === "text" ? (first.text.split("\n")[0] ?? "").trim() : "" });
-        },
-      ),
+    gate: (agent, parent) => runs.gate(agent, parent),
     texts: () => texts,
     rules: () => rules,
     questions: () => judges,
@@ -214,7 +183,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       return () => working.delete(entry);
     },
     gauge: (agent, limits) => core.usage.gauge(scope, ask.id, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
-    keep: (agent) => keep(agent),
+    keep: (agent) => runs.keep(agent),
     job: ask.id,
   });
   const own = new Map<string, ToolText>();
@@ -252,7 +221,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       texts: own,
       hits: settings.searchHits,
       schemaShown: settings.schemaShown,
-    }).map((tool) => (tool.name === TOOL_USE ? { ...tool, carrier: true } : tool)),
+    }),
   ];
   registry = new Registry(tools, await env.tools.all(scope));
   if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
@@ -333,6 +302,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         outcome = await work.done;
         // What the judging model still has under way is part of the run.
         await judges.settled();
+        // Its request files and transcripts settle before its end is told, as a turn's do.
+        while (pending.size > 0) await Promise.allSettled([...pending]);
       } finally {
         working.delete(entry);
         signal.removeEventListener("abort", stop);

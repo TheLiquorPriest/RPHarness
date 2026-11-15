@@ -1,14 +1,16 @@
 // Invented prompts of two presets, laid out as a host would lay them out, and a host's prompt and
 // lore ports in memory. Preset A's chat application names its blocks; preset B's names none, and
 // puts its instructions and its style rules in one message. Everything here is invented.
-import type { ActivatedLore, AgentRef, Environment, FileText, JsonObject, JsonValue, LocatedSlices, LoreEntry, PresetRef, PromptMap, PromptMessage, PromptPort, PromptRole, RawBlock, RawLayout, RawPart, Scope, ToolCtx } from "../../src/contract";
+import type { ActivatedLore, AgentRef, Environment, FileText, JsonObject, JsonValue, LocatedSlices, LoreEntry, PresetRef, PromptMap, PromptMessage, PromptPort, PromptRole, RawBlock, RawLayout, RawPart, Scope, SliceKind, ToolCtx } from "../../src/contract";
 import type { Guidance, PartKind, PromptPart } from "../../src/files/api";
 import { parsePart } from "../../src/files/parts";
 import { SHIPPED_GUIDANCE } from "../../src/harness/shipped";
 import type { Item } from "../../src/prompt/names";
 import { TurnPrompt } from "../../src/prompt/prompt";
 import { textHash } from "../../src/prompt/text";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import { promptMapWrite } from "../../src/prompt/tools";
+import { memoryJobs } from "../../src/testing/rig";
 import type { ToolText } from "../../src/tools/kit";
 
 export const SCOPE: Scope = { user: "u-1", chat: "c-1", session: "s-1", turn: "t-1" };
@@ -169,6 +171,14 @@ export function presetA(shape: TurnShape<typeof A_TEXT>, order: AKey[] = ["main"
   );
 }
 
+/** The kinds Lumiverse's own blocks say for preset A's: the persona's slot, the card's, and the preset's own text; the style guide left unmarked. */
+const A_KINDS: Partial<Record<string, SliceKind>> = { "Main Prompt": "instructions", Persona: "persona", "Character Description": "character", "Post-History Instructions": "instructions" };
+
+/** A prompt whose blocks carry the kinds the chat application's own blocks say (`RawBlock.kind`). */
+export function markedA(built: BuiltPrompt): BuiltPrompt {
+  return { ...built, layout: { ...built.layout, blocks: built.layout.blocks.map((block) => ({ ...block, ...(A_KINDS[block.name] !== undefined ? { kind: A_KINDS[block.name] } : {}) })) } };
+}
+
 // ---------------------------------------------------------------- preset B: no blocks
 
 export const PRESET_B: PresetRef = { id: "preset-b", name: "Fog City", revision: "7" };
@@ -281,6 +291,7 @@ export function memoryHost(): MemoryHost {
           return user === scope.user && key.startsWith(prefix) ? [key] : [];
         });
       },
+      jobs: memoryJobs(),
     },
   };
   return {
@@ -321,9 +332,9 @@ export async function turnOf(host: MemoryHost, built: BuiltPrompt, lore: string[
   return TurnPrompt.read({ env: host.env, scope: SCOPE, messages: built.messages });
 }
 
-/** A mapper's `prompt_map_write` call on `prompt`: the answer's text, and whether it is an error. */
-export async function write(host: MemoryHost, prompt: TurnPrompt, slices: JsonValue): Promise<{ text: string; error: boolean }> {
-  const tool = promptMapWrite({ prompt: async () => prompt, guidance: shippedParts(), texts: new Map([["prompt_map_write", await shippedTool("prompt_map_write")]]), env: host.env });
+/** A mapper's `prompt_map_write` call on `prompt`, its signatures keeping `head` characters (the setting's default when not given): the answer's text, and whether it is an error. */
+export async function write(host: MemoryHost, prompt: TurnPrompt, slices: JsonValue, head = DEFAULT_SETTINGS.signatureHead): Promise<{ text: string; error: boolean }> {
+  const tool = promptMapWrite({ prompt: async () => prompt, guidance: shippedParts(), texts: new Map([["prompt_map_write", await shippedTool("prompt_map_write")]]), env: host.env, signatureHead: head });
   const result = await tool.run({ slices }, ctxOf(MAPPER));
   return { text: result.content.map((part) => (part.type === "text" ? part.text : "")).join(""), error: result.error === true };
 }

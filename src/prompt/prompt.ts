@@ -1,9 +1,11 @@
 // One turn's prompt, cut into named slices (§4.8): by its learned map where its preset has one, by
-// its raw layout alone where it has none. History is addressed by message and lore by entry, so
+// its raw layout alone where it has none, each block of the chat application's breakdown taking the
+// kind its own block says. History is addressed by message and lore by entry, so
 // neither needs learning. RPH reads the facts from the host's prompt port once per turn and keeps
 // them here, for the `prompt` tool, for what an agent is given by name, and for the turn's views.
 import type { ActivatedLore, Environment, PresetRef, PromptMap, PromptMessage, PromptNotice, PromptRole, RawLayout, Scope, SliceBehaviour, SliceKind } from "../contract";
 import { type Cut, cut, namePlaces, type Piece } from "./cut";
+import { SLICE_KINDS } from "./names";
 import { locate } from "./locate";
 import { noticesOf, type PromptRecord } from "./shape";
 import { mergedSpans, messageText, type Span, spannedText } from "./text";
@@ -188,7 +190,9 @@ export class TurnPrompt {
         return { ...base, kind: "lore", from: "lore" };
       case "block": {
         const block = piece.block === undefined ? undefined : this.facts.layout?.blocks[piece.block];
-        return { ...base, kind: "other", from: "block", ...(block !== undefined ? { block: { name: block.name, type: block.type } } : {}) };
+        // Until a map is learned, the kind the chat application's own block says (one RPH does not know is none).
+        const kind = block?.kind !== undefined && SLICE_KINDS.includes(block.kind) ? block.kind : "other";
+        return { ...base, kind, from: "block", ...(block !== undefined ? { block: { name: block.name, type: block.type } } : {}) };
       }
       case "loose":
         return { ...base, kind: "other", from: "place" };

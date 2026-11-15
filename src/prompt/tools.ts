@@ -64,7 +64,8 @@ function writtenOf(args: JsonValue): WrittenSlice[] {
   });
 }
 
-export function promptMapWrite(deps: PromptToolsDeps): OwnTool {
+/** `prompt_map_write`, made with how many characters of each slice's start its signature keeps (`prompt.signatureHead`). */
+export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }): OwnTool {
   const own = deps.texts.get("prompt_map_write");
   const slice = {
     type: "object",
@@ -87,7 +88,7 @@ export function promptMapWrite(deps: PromptToolsDeps): OwnTool {
     async run(args, ctx) {
       const [prompt, words] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance)]);
       if (prompt === undefined) return answer(words("no_prompt"), true);
-      const learned = learn(prompt, writtenOf(args));
+      const learned = learn(prompt, writtenOf(args), deps.signatureHead);
       if ("problems" in learned) {
         const said = learned.problems.flatMap((problem) => words(problem.line, problem.fields) ?? []);
         return answer(said.length === 0 ? undefined : said.join("\n"), true);

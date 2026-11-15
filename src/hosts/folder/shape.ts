@@ -19,6 +19,7 @@ import type {
   PromptPart,
   PromptRole,
   RawBlock,
+  SliceKind,
   ToolTier,
 } from "../../contract/index";
 
@@ -62,6 +63,14 @@ function object(where: string, value: unknown, field: string): Record<string, un
 function role(where: string, value: unknown): PromptRole {
   if (value !== "system" && value !== "user" && value !== "assistant") throw new ShapeError(where, `"role" must be "system", "user" or "assistant"`);
   return value;
+}
+
+/** The slice kinds, as a block's `kind` may say one (`RawBlock.kind`). */
+const SLICE_KINDS: Record<SliceKind, true> = { instructions: true, style: true, character: true, persona: true, world: true, note: true, lore: true, history: true, other: true };
+
+function sliceKind(where: string, value: unknown, field: string): SliceKind {
+  if (typeof value !== "string" || !Object.hasOwn(SLICE_KINDS, value)) throw new ShapeError(where, `"${field}" must be one of ${Object.keys(SLICE_KINDS).join(", ")}`);
+  return value as SliceKind;
 }
 
 /** True when a value is JSON (finite numbers only). */
@@ -237,7 +246,8 @@ export function givenPrompt(where: string, value: unknown): GivenPrompt {
     out.blocks = v.blocks.map((raw, i) => {
       const b = object(where, raw, `blocks[${i}]`);
       const id = optionalText(where, b.id, `blocks[${i}].id`);
-      return { name: text(where, b.name, `blocks[${i}].name`), type: text(where, b.type, `blocks[${i}].type`), text: text(where, b.text, `blocks[${i}].text`), ...(b.role !== undefined ? { role: role(where, b.role) } : {}), ...(id !== undefined ? { id } : {}) };
+      const kind = b.kind === undefined ? undefined : sliceKind(where, b.kind, `blocks[${i}].kind`);
+      return { name: text(where, b.name, `blocks[${i}].name`), type: text(where, b.type, `blocks[${i}].type`), text: text(where, b.text, `blocks[${i}].text`), ...(b.role !== undefined ? { role: role(where, b.role) } : {}), ...(id !== undefined ? { id } : {}), ...(kind !== undefined ? { kind } : {}) };
     });
   }
   if (v.blocksFrom !== undefined) {

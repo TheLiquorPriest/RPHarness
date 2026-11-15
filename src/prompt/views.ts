@@ -1,7 +1,9 @@
 // The turn folder's views of the prompt (§5.3), built from the same map and the same names as the
 // `prompt` tool (§4.8): the whole prompt in order with its roles and markers, the history it holds,
 // every instruction slice, the persona, the character. Which file holds which part is the `views`
-// list in the header of `.prompts/prompt-map.md`, so the files written follow that list.
+// list in the header of `.prompts/prompt-map.md`, so the files written follow that list. RPH is their
+// one writer, from a chat's first turn, and writes them alongside the lead's run, never before it
+// (§10.1): a read of a view waits for its write instead.
 import type { AgentRef, FilesPort, HistoryRange, Log, Scope } from "../contract";
 import type { Guidance } from "../files/api";
 import { findName } from "./names";
@@ -42,12 +44,38 @@ export async function promptViews(prompt: TurnPrompt, guidance: Pick<Guidance, "
   return made.flat();
 }
 
-/** Writes the views in the turn's folder (`Places.turn`), as the harness writes its own files there; a view that cannot be written is logged. */
-export async function writeViews(files: FilesPort, scope: Scope, folder: string, views: readonly PromptView[], log: Log): Promise<void> {
-  await Promise.all(
-    views.map(async (view) => {
-      const written = await files.write(scope, `${folder}${view.file}`, { op: "write", text: view.text.endsWith("\n") ? view.text : `${view.text}\n` }, "harness");
-      if (written.status !== "written") log.warn("A view of the prompt could not be written in the turn's folder.", { file: view.file, status: written.status });
-    }),
+/** The views' writes in the turn's folder, under way. */
+export interface ViewWrites {
+  /** Settles once every view is written, or its failure logged. */
+  done: Promise<void>;
+  /** Settles once the view at `path` (a path in the agents' view) is written, or its failure logged; at once for a path that is no view. */
+  written(path: string): Promise<void>;
+}
+
+/**
+ * Writes the views in the turn's folder (`Places.turn`) as they are made, as the harness writes its
+ * own files there, and is not waited for: a view that cannot be made or written is logged.
+ */
+export function writeViews(files: FilesPort, scope: Scope, folder: string, views: Promise<readonly PromptView[]>, log: Log): ViewWrites {
+  const writes = new Map<string, Promise<void>>();
+  const write = async (view: PromptView): Promise<void> => {
+    const written = await files.write(scope, `${folder}${view.file}`, { op: "write", text: view.text.endsWith("\n") ? view.text : `${view.text}\n` }, "harness").catch((error: unknown) => ({ status: error instanceof Error ? error.message : String(error) }));
+    if (written.status !== "written") log.warn("A view of the prompt could not be written in the turn's folder.", { file: view.file, status: written.status });
+  };
+  const made = views.then(
+    (list) => {
+      for (const view of list) writes.set(`${folder}${view.file}`, write(view));
+    },
+    (error: unknown) => log.warn("The views of the prompt could not be made.", { error: error instanceof Error ? error.message : String(error) }),
   );
+  return {
+    done: made.then(async () => {
+      await Promise.all(writes.values());
+    }),
+    written: async (path) => {
+      if (!path.startsWith(folder)) return;
+      await made;
+      await writes.get(path);
+    },
+  };
 }

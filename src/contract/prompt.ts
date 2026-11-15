@@ -67,13 +67,19 @@ export interface RawMessage {
   images?: number;
 }
 
-/** A block of the preset as the chat application's own breakdown has it (§4.8): its name, type and resolved text. */
+/** A block of the preset as the chat application's own breakdown has it (§4.8): its name, type and resolved text, and the kind its own block says. */
 export interface RawBlock {
   name: string;
   type: string;
   role?: PromptRole;
   text: string;
   id?: string;
+  /**
+   * The kind the chat application's own block says it is, where it says one: for Lumiverse, the
+   * persona's slot is `persona`, the card's slots are `character`, and a block of the preset's own
+   * text is `instructions`. Until a map is learned the block's slice takes this kind; absent, `other`.
+   */
+  kind?: SliceKind;
 }
 
 /**

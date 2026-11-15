@@ -7,5 +7,5 @@ export { findName, type Item, SLICE_KINDS } from "./names";
 export { type PromptFacts, type PromptSources, type Slice, type SliceFrom, TurnPrompt } from "./prompt";
 export { locatedOf, noticesOf, type PromptRecord, recordOf } from "./shape";
 export { PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, type PromptToolsDeps } from "./tools";
-export { type PromptView, promptViews, writeViews } from "./views";
+export { type PromptView, promptViews, type ViewWrites, writeViews } from "./views";
 export { laid, noticeLines, PROMPT_PART, promptWords } from "./words";

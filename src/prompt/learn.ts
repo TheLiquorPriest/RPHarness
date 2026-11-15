@@ -50,18 +50,18 @@ function partSpans(prompt: TurnPrompt, name: string): Span[] | "history" | "unkn
   return piece.kind === "history" || piece.kind === "lore" ? "history" : [piece.span];
 }
 
-/** What a slice of the map is given to be found again: the signature of its text, its block's name, its role, and its neighbours. */
-function finderOf(prompt: TurnPrompt, spans: readonly Span[]): PromptSlice["find"] {
+/** What a slice of the map is given to be found again: the signature of its text (keeping `head` characters of its start), its block's name, its role, and its neighbours. */
+function finderOf(prompt: TurnPrompt, spans: readonly Span[], head: number): PromptSlice["find"] {
   const blocks = prompt.facts.layout?.blocks ?? [];
   const block = prompt.cut.pieces.find((piece) => piece.kind === "block" && spans.some((span) => span.message === piece.span.message && span.start <= piece.span.start && piece.span.end <= span.end));
   const name = block?.block === undefined ? undefined : blocks[block.block]?.name;
   const first = spans[0];
   const role = first === undefined ? undefined : prompt.cut.pieces.find((piece) => piece.span.message === first.message && piece.span.start <= first.start && first.start < piece.span.end)?.role;
-  return { signature: signatureOf(prompt.texts, spans), ...(name !== undefined ? { block: name } : {}), ...(role !== undefined ? { role } : {}) };
+  return { signature: signatureOf(prompt.texts, spans, head), ...(name !== undefined ? { block: name } : {}), ...(role !== undefined ? { role } : {}) };
 }
 
-/** Learns a map from the slices written for this prompt, keeping the player's own slices of the map before it. */
-export function learn(prompt: TurnPrompt, written: readonly WrittenSlice[]): Learned {
+/** Learns a map from the slices written for this prompt, keeping the player's own slices of the map before it. Each signature keeps `head` characters of its slice's start (`prompt.signatureHead`). */
+export function learn(prompt: TurnPrompt, written: readonly WrittenSlice[], head: number): Learned {
   const problems: Problem[] = [];
   const preset = prompt.preset;
   if (preset === null) return { problems: [{ line: "write_no_preset", fields: {} }] };
@@ -145,7 +145,7 @@ export function learn(prompt: TurnPrompt, written: readonly WrittenSlice[]): Lea
   const slices: PromptSlice[] = placed.map(({ slice, spans }, at) => {
     const after = besideHistory(spans[0], "after") ? HISTORY_ANCHOR : placed[at - 1]?.slice.marker;
     const next = besideHistory(spans.at(-1), "before") ? HISTORY_ANCHOR : placed[at + 1]?.slice.marker;
-    return { ...slice, find: { ...finderOf(prompt, spans), ...(after !== undefined ? { after } : {}), ...(next !== undefined ? { before: next } : {}) } };
+    return { ...slice, find: { ...finderOf(prompt, spans, head), ...(after !== undefined ? { after } : {}), ...(next !== undefined ? { before: next } : {}) } };
   });
   for (const k of kept) if (k.spans.length === 0) slices.push(k.slice);
   return { map: { format: 1, preset, slices }, kept: kept.map((k) => k.slice.marker) };

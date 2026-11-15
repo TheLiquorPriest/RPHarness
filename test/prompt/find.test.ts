@@ -4,7 +4,7 @@
 import { expect, test } from "bun:test";
 import { findName } from "../../src/prompt/names";
 import type { TurnPrompt } from "../../src/prompt/prompt";
-import { A_MAP, A_TEXT, B_MAP, B_TEXT, build, chatLine, LEAD, memoryHost, presetA, presetB, texts, turnOf, write } from "./support";
+import { A_MAP, A_TEXT, B_MAP, B_TEXT, build, chatLine, LEAD, memoryHost, presetA, presetB, SCOPE, texts, turnOf, write } from "./support";
 
 /** The markers found, in prompt order, history and lore left out. */
 function markers(prompt: TurnPrompt): string[] {
@@ -79,4 +79,17 @@ test("two neighbours whose words both changed, with a new part between them, are
   const prompt = await turnOf(host, built, []);
   expect(markers(prompt)).toEqual(["rules", "style", "message[1]", "message[2]", "message[3]", "note"]);
   expect(prompt.slices.filter((slice) => slice.from === "unclaimed").map((slice) => prompt.text(slice))).toEqual(["The player is Bryn.", "Out of character: keep it short.", "Hollis sells letters."]);
+});
+
+test("a map learned with the head at 64 is found under 32; a map learned under 32 keeps 32 characters", async () => {
+  for (const head of [64, 32]) {
+    const host = memoryHost();
+    expect((await write(host, await turnOf(host, presetA({ history: 2, lore: ["e-1"] }), ["e-1"]), A_MAP, head)).error).toBe(false);
+    const map = await host.env.prompt.map(SCOPE);
+    const starts = map?.slices.map((slice) => (JSON.parse(slice.find.signature ?? "[]") as { a: string }[])[0]?.a.length);
+    expect(starts).toEqual(map?.slices.map((slice) => Math.min(head, A_TEXT[({ "preset.main": "main", persona: "persona", card: "card", "preset.style": "style", "preset.after": "post" } as const)[slice.marker as "persona"]].length)));
+    // Found again on a later turn, whatever the setting is now: each signature keeps its own start.
+    const later = await turnOf(host, presetA({ history: 6, lore: ["e-2"] }), ["e-2"]);
+    expect(markers(later)).toEqual(["preset.main", "persona", "card", "preset.style", "preset.after"]);
+  }
 });

@@ -1,8 +1,10 @@
 // The map from the first turn (§4.8): with nothing learned, the raw layout names the prompt's parts,
-// by the chat application's block names where it gave them and by place where it did not.
+// by the chat application's block names where it gave them and by place where it did not, and each
+// block is of the kind its own block says.
 import { expect, test } from "bun:test";
+import { findName } from "../../src/prompt/names";
 import { TurnPrompt } from "../../src/prompt/prompt";
-import { A_TEXT, B_TEXT, type BuiltPrompt, ENTRIES, memoryHost, presetA, presetB, SCOPE } from "./support";
+import { A_TEXT, B_TEXT, type BuiltPrompt, ENTRIES, LEAD, markedA, memoryHost, presetA, presetB, SCOPE } from "./support";
 
 async function first(built: BuiltPrompt, lore: string[]) {
   const host = memoryHost();
@@ -29,6 +31,25 @@ test("preset A: each block under the chat application's name, the lore and the h
   const instructions = prompt.slices.filter((slice) => slice.kind === "other");
   expect(instructions.every((slice) => slice.from === "block")).toBe(true);
   expect(prompt.slices.find((slice) => slice.marker === "Persona")?.block).toEqual({ name: "Persona", type: "persona" });
+});
+
+test("a block the host marks persona is the persona slice before a map is learned; kind(character) gives the card's blocks in order; kind(instructions) gives the preset's own blocks in order under their block names; an unmarked block is other", async () => {
+  const prompt = await first(markedA(presetA({ history: 2, lore: ["e-1"] })), ["e-1"]);
+  expect(prompt.slices.filter((slice) => slice.from === "block").map((slice) => [slice.marker, slice.kind])).toEqual([
+    ["Main Prompt", "instructions"],
+    ["Persona", "persona"],
+    ["Character Description", "character"],
+    ["Style Guide", "other"],
+    ["Post-History Instructions", "instructions"],
+  ]);
+  const found = async (name: string) => (await findName(prompt, name, LEAD))?.flatMap((item) => (item.type === "slice" ? [[item.slice.marker, item.text]] : []));
+  expect(await found("kind(persona)")).toEqual([["Persona", A_TEXT.persona]]);
+  expect(await found("kind(character)")).toEqual([["Character Description", A_TEXT.card]]);
+  expect(await found("kind(instructions)")).toEqual([
+    ["Main Prompt", A_TEXT.main],
+    ["Post-History Instructions", A_TEXT.post],
+  ]);
+  expect(await found("kind(other)")).toEqual([["Style Guide", A_TEXT.style]]);
 });
 
 test("preset B: with no blocks, every part is named by its place, the history by message", async () => {

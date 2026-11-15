@@ -13,24 +13,21 @@ import type { PromptMap, PromptSlice } from "../contract";
 import type { Piece } from "./cut";
 import { inOrder, isBefore, mergedSpans, type Span, textHash, trimmed } from "./text";
 
-/** How many characters of a slice's text its signature keeps, to look for the text again. */
-const SIGNATURE_HEAD = 64;
-
 /** The neighbour a slice's finder names when the chat history is next to it: `after: history` sits after a chat message, `before: history` before one. */
 export const HISTORY_ANCHOR = "history";
 
-/** One stretch of a slice's text, as its signature keeps it: the hash, the length and the first words. */
+/** One stretch of a slice's text, as its signature keeps it: the hash, the length and the first words, as many characters as the setting gave when it was made. */
 interface Signed {
   h: string;
   n: number;
   a: string;
 }
 
-/** A slice's signature: each stretch of its text, in order. */
-export function signatureOf(texts: readonly string[], spans: readonly Span[]): string {
+/** A slice's signature: each stretch of its text, in order, with `head` characters of its start (`prompt.signatureHead`). A signature keeps its own start, so it is found whatever the setting is later. */
+export function signatureOf(texts: readonly string[], spans: readonly Span[], head: number): string {
   const signed: Signed[] = mergedSpans(texts, spans).map((span) => {
     const text = (texts[span.message] ?? "").slice(span.start, span.end);
-    return { h: textHash(text), n: text.length, a: text.slice(0, SIGNATURE_HEAD) };
+    return { h: textHash(text), n: text.length, a: text.slice(0, head) };
   });
   return JSON.stringify(signed);
 }

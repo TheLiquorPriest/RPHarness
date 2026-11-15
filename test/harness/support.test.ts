@@ -50,6 +50,7 @@ test("a close() while the day's usage is still being written leaves no rph-agent
     set: (scope, key, value) => inner.set(scope, key, value),
     delete: (scope, key) => inner.delete(scope, key),
     list: (scope, prefix) => inner.list(scope, prefix),
+    jobs: inner.jobs,
     update: (scope, key, change) => {
       if (!key.startsWith("usage/")) return inner.update(scope, key, change);
       asked.open();

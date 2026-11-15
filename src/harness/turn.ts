@@ -33,7 +33,7 @@ import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool
 import { BASE_TOOLS, baseTools, skillsIndex } from "../tools/base";
 import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
-import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, writeViews } from "../prompt";
+import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { TurnGate } from "./gate";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
@@ -164,6 +164,10 @@ export class Turn {
   #opening: Opening | undefined;
   /** The turn's prompt, its parts named (§4.8): what `prompt`, a `prompt:` name and the views read. */
   #prompt: TurnPrompt | undefined;
+  /** The views of the prompt being written in the turn's folder, alongside the lead's run (§10.1). */
+  #views: ViewWrites | undefined;
+  /** What the turn's agents reach: the host's, with a files port whose read of a view still being written waits for that write. */
+  readonly #env: Environment;
   /** The session's file, once the turn has its entry in it. */
   #file: SessionFile | undefined;
   /** The session's file, held for the turn: let go once the turn's lines are written. */
@@ -194,6 +198,20 @@ export class Turn {
     this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock);
     this.#trace.watch((record) => this.#watch(record));
     this.#lead = { id: core.ids(), definition: req.lead };
+    const files = core.env.files;
+    this.#env = {
+      ...core.env,
+      files: {
+        layers: (scope) => files.layers(scope),
+        places: (scope) => files.places(scope),
+        find: (scope, query) => files.find(scope, query),
+        write: (scope, path, op, by) => files.write(scope, path, op, by),
+        read: async (scope, path, range) => {
+          await this.#views?.written(path);
+          return files.read(scope, path, range);
+        },
+      },
+    };
   }
 
   /** Runs the turn to the end of the lead's run. The reply goes to the sink at release, or the sink is told why there is none. */
@@ -308,7 +326,7 @@ export class Turn {
     // A `prompt:` name, given by `delegate` or a definition's `given:`, the lead's or a sub-agent's, read as the prompt tool reads it.
     const slice = promptSlice(async () => this.#prompt, guidance);
     const team = new Team({
-      env,
+      env: this.#env,
       trace: this.#trace,
       guidance,
       ids: () => this.#c.ids(),
@@ -395,7 +413,11 @@ export class Turn {
       this.#prompt = prompt;
       this.#notices = located.notices.length;
       if (located.notices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: located.notices });
-      if (places.turn !== undefined) await writeViews(env.files, scope, places.turn, await promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
+      // The views are written alongside the lead's run, not before its first call; a read of one waits for its write, and the turn's end for them all.
+      if (places.turn !== undefined) {
+        this.#views = writeViews(env.files, scope, places.turn, promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
+        this.#tell(this.#views.done);
+      }
     }
 
     const at = env.clock.now();
@@ -752,7 +774,7 @@ export class Turn {
    */
   async #given(guidance: Guidance, refs: readonly string[], slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<string> {
     const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const given = await attach({ env: this.#c.env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, slice }, this.#lead, refs.map((ref) => ({ ref, from: "definition" as const })));
+    const given = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, slice }, this.#lead, refs.map((ref) => ({ ref, from: "definition" as const })));
     const part = template(layout);
     if (part === undefined) return joined(given.blocks.map((block) => block.text));
     return joined([part.render({ ...(given.blocks.length > 0 ? { attachments: given.blocks.map((block) => ({ name: block.name, text: block.text })) } : {}), ...(given.missing.length > 0 ? { missing: given.missing } : {}) }).text]);
@@ -764,7 +786,8 @@ export class Turn {
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {
-    const { env } = this.#c;
+    // The agents' tools read through the turn's files, so a view still being written is waited for.
+    const env = this.#env;
     const fileDeps: FileToolsDeps = { files: env.files, words: (name, fields) => this.#words(name, fields), texts, most: this.#settings.perCall, written: (_scope, by, done) => this.#written(by, done.path) };
     const work: ReplyWork = { write: (brief, live, ctx) => this.#write(brief, live, ctx), release: (path, ctx) => this.#releaseReply(path, ctx) };
     return [
@@ -781,7 +804,7 @@ export class Turn {
       jobStart(this.#c.jobs, texts.get(JOB_START), this.#settings.jobs.perRun),
       ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
       promptTool({ prompt: async () => this.#prompt, guidance, texts, env }),
-      promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env }),
+      promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env, signatureHead: this.#settings.signatureHead }),
       ...searchTools({
         reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
         ...(env.switches !== undefined ? { switches: env.switches } : {}),

@@ -3,5 +3,6 @@
 
 export { FakeClock } from "./clock";
 export { gate, scriptedModel, scriptedSource } from "./scripted";
+export { memoryJobs } from "./jobs";
 export type { Answer, Gate, Piece, PushedPiece, RecordedOptions, RecordedRequest, Reply, ReplyUsage, ScriptedModel, ScriptedOptions, ScriptedSource } from "./scripted";
 export type { AgentChoice, AgentModel, ModelSource, UserChoice } from "../../model/source";

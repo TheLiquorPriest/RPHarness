@@ -4,7 +4,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
-import type { AgentRef, JsonValue, Scope, TraceEvent, TraceKind, TraceRecord, Usage } from "../../contract/index";
+import type { AgentRef, JobView, JsonValue, Scope, TraceEvent, TraceKind, TraceRecord, Usage } from "../../contract/index";
 import type { KitContext } from "./context";
 import { KIT_OTHER_USER, unlessRefused } from "./context";
 
@@ -63,6 +63,69 @@ export function storeCases(ctx: KitContext<"store">): void {
       const second = await ctx.make(ctx.seed, place);
       expect(await second.store.get(ctx.scope, "kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
       expect(await second.store.get(ctx.scope, "kit/count")).toBe(1);
+      await second.close();
+    } finally {
+      await rm(place, { recursive: true, force: true });
+    }
+  });
+
+  // The typed part for job records (`StorePort.jobs`). Each case keeps its records in a chat of its own, so what an earlier case left does not show in a later one's pages.
+  const job = (chat: string, id: string, started: number, extra: Partial<JobView> = {}): JobView => ({ id, agent: "indexer", brief: "Index the lore.", state: "done", scope: { user: ctx.scope.user, chat, session: `kit-job-session-${id}` }, startedBy: "user", started, usage: NO_USAGE, ...extra });
+  const ids = (jobs: JobView[]): string[] => jobs.map((j) => j.id);
+
+  test("a job record is kept whole and read by its id, and the same id under two users is two records", async () => {
+    const mine = job("kit-chat-whole", "kit-job-a", 1_000, { report: "Mine.", wrote: [{ tool: "kit_stamp", lane: "engine", line: "stamped" }], attach: ["notes/a.md"], missing: ["notes/gone.md"] });
+    await ctx.env.store.jobs.set(ctx.scope, mine);
+    expect(await ctx.env.store.jobs.get(ctx.scope, "kit-job-a")).toEqual(mine);
+    expect(await ctx.env.store.jobs.get(ctx.scope, "kit-job-none")).toBeUndefined();
+    await ctx.env.store.jobs.set(ctx.scope, { ...mine, state: "interrupted", report: "Changed." });
+    expect(await ctx.env.store.jobs.get(ctx.scope, "kit-job-a")).toMatchObject({ state: "interrupted", report: "Changed." });
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat: "kit-chat-whole" })).jobs)).toEqual(["kit-job-a"]);
+    // A host that serves one user only may refuse another's scope outright; one that keeps both keeps each his own.
+    const other = { user: KIT_OTHER_USER };
+    await unlessRefused(ctx.env.store.jobs.set(other, { ...mine, scope: { ...mine.scope, user: KIT_OTHER_USER }, report: "Theirs." }));
+    expect(await ctx.env.store.jobs.get(ctx.scope, "kit-job-a")).toMatchObject({ report: "Changed." });
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat: "kit-chat-whole" })).jobs)).toEqual(["kit-job-a"]);
+  });
+
+  test("job records come a page at a time, the latest started first, and a page holds only what it was asked for", async () => {
+    const chat = "kit-chat-pages";
+    for (let at = 1; at <= 7; at += 1) await ctx.env.store.jobs.set(ctx.scope, job(chat, `kit-page-${at}`, 10_000 + at * 10, at % 2 === 0 ? { state: "running" } : {}));
+    const first = await ctx.env.store.jobs.list(ctx.scope, { chat, limit: 3 });
+    expect(ids(first.jobs)).toEqual(["kit-page-7", "kit-page-6", "kit-page-5"]);
+    expect(first.next).toBeDefined();
+    const second = await ctx.env.store.jobs.list(ctx.scope, { chat, limit: 3, cursor: first.next! });
+    expect(ids(second.jobs)).toEqual(["kit-page-4", "kit-page-3", "kit-page-2"]);
+    const third = await ctx.env.store.jobs.list(ctx.scope, { chat, limit: 3, cursor: second.next! });
+    expect(ids(third.jobs)).toEqual(["kit-page-1"]);
+    expect(third.next).toBeUndefined();
+    // Whole: no limit gives every record, and no next.
+    const all = await ctx.env.store.jobs.list(ctx.scope, { chat });
+    expect(ids(all.jobs)).toEqual(["kit-page-7", "kit-page-6", "kit-page-5", "kit-page-4", "kit-page-3", "kit-page-2", "kit-page-1"]);
+    expect(all.next).toBeUndefined();
+    // By state and by chat, the page still full of what matches.
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat, states: ["running"], limit: 2 })).jobs)).toEqual(["kit-page-6", "kit-page-4"]);
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat, states: ["done"] })).jobs)).toEqual(["kit-page-7", "kit-page-5", "kit-page-3", "kit-page-1"]);
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat: "kit-no-such-chat" })).jobs)).toEqual([]);
+  });
+
+  test("the records of jobs started before a time are removed, and no other", async () => {
+    const chat = "kit-chat-old";
+    for (const at of [100, 200, 300]) await ctx.env.store.jobs.set(ctx.scope, job(chat, `kit-old-${at}`, at));
+    expect(await ctx.env.store.jobs.prune(ctx.scope, 250)).toBe(2);
+    expect(ids((await ctx.env.store.jobs.list(ctx.scope, { chat })).jobs)).toEqual(["kit-old-300"]);
+    expect(await ctx.env.store.jobs.prune(ctx.scope, 250)).toBe(0);
+    expect(await ctx.env.store.jobs.get(ctx.scope, "kit-old-100")).toBeUndefined();
+  });
+
+  test("a job record survives a new instance over the same place", async () => {
+    const place = await mkdtemp(join(tmpdir(), "rph-kit-jobs-"));
+    try {
+      const first = await ctx.make(ctx.seed, place);
+      await first.store.jobs.set(ctx.scope, job("kit-chat-kept", "kit-kept", 5_000, { state: "running", usage: { ...NO_USAGE, calls: 2, input: 300 } }));
+      await first.close();
+      const second = await ctx.make(ctx.seed, place);
+      expect(await second.store.jobs.get(ctx.scope, "kit-kept")).toMatchObject({ state: "running", usage: { calls: 2, input: 300 } });
       await second.close();
     } finally {
       await rm(place, { recursive: true, force: true });

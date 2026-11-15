@@ -8,6 +8,7 @@ import type { RuleFiring } from "./events";
 import type { LayerLevel } from "./files";
 import type { ModelsApi } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
+import type { JobPage, JobQuery } from "./store";
 import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 
 // ---------------------------------------------------------------- jobs
@@ -32,11 +33,27 @@ export interface JobView {
   startedBy: AgentRef | "user";
   started: number;
   ended?: number;
+  /** What it has spent so far, kept at the end of each of its calls, so an interrupted job shows what it spent. */
   usage: Usage;
-  /** What its agent last wrote, once it ended: its report, or for an interrupted job what it had done. */
+  /** What its agent last wrote, kept as it writes: its report once it ended, or for an interrupted job what it had done. */
   report?: string;
   /** For a job that ended at one of the user's limits (§10.11): which. It ends with what it has. */
   limit?: LimitHit;
+  /** The attachments its start named, by name, kept with the rest of its start (agent, brief, limits, the turn in `scope`) so a job that waited can wait again after a restart. */
+  attach?: string[];
+  /** The limits of its own its start gave. */
+  limits?: JobLimits;
+  /** What its agent was not given: the names in `attach` nobody could find (§4.8). */
+  missing?: string[];
+  /** Each write it made, its sub-agents' included, in order, so an interrupted job shows what it had done. */
+  wrote?: JobWrite[];
+}
+
+/** A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer. */
+export interface JobWrite {
+  tool: string;
+  lane?: string;
+  line: string;
 }
 
 /**
@@ -72,12 +89,14 @@ export interface JobStart {
 /**
  * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found
  * only under its own user's name, so no user reads or stops another's job by its id (READINGS R-52).
- * After a restart, a job the store holds as under way is kept as interrupted, with what it had done,
- * and told, on its user's first call here; a list is such a call, so it is listed as interrupted
- * (§13.5). A host that wants that done at its start, as before, calls `list` for each user it knows.
+ * After a restart, a job the store holds as under way and running is kept as interrupted, with what it
+ * had done and spent, and told, on its user's first call here; one that was only waiting is queued
+ * again from its kept start (§13.5). A list is such a call, so it is listed so. A host that wants that
+ * done at its start, as before, calls `list` for each user it knows.
  */
 export interface JobsApi {
-  list(filter: { user: string; chat?: string; states?: JobState[] }): Promise<JobView[]>;
+  /** The user's jobs a page at a time, the latest started first: only that page is read (`JobQuery`). */
+  list(filter: { user: string } & JobQuery): Promise<JobPage>;
   /** The user's job; undefined when he has none by that id. */
   get(user: string, id: string): Promise<JobView | undefined>;
   /** The user starts a job. Code never does (§13.5). */
@@ -245,6 +264,24 @@ export interface DefinitionView {
 }
 
 /**
+ * What a definition runs on, resolved among the user's connections for the scope it is listed for
+ * (C28), as the Agents page shows it. A fact: thinking effort is set in definitions alone.
+ */
+export interface DefinitionRun {
+  /** The connection its header names, by name or id; `default`, or none named, his default. Null where none is there. */
+  connection: { id: string; name: string } | null;
+  /** That connection's model; null where no connection resolves, or it names none. */
+  model: string | null;
+  /** The effort it thinks at: its definition's; where it names none, its connection's own; null for its provider's own default. */
+  effort: Effort | null;
+}
+
+/** A definition in force for a scope, as `definitions.list` gives it: with what it runs on. */
+export interface ListedDefinition extends DefinitionView {
+  runsOn: DefinitionRun;
+}
+
+/**
  * What an agent definition's body may name (§5.4). Its instructions are a template, and a sub-agent's
  * run (one `delegate` starts, a job's agent, the writer `write_reply` starts) fills it with these
  * fields and no others when it starts: `agent`, its handle this run (`gm-1`); `definition`, its
@@ -285,7 +322,8 @@ export interface StackPart {
 }
 
 export interface DefinitionsApi {
-  list(scope: Scope): Promise<DefinitionView[]>;
+  /** The definitions for a scope, each with what it runs on among the scope's user's connections (C28). */
+  list(scope: Scope): Promise<ListedDefinition[]>;
   /** The exact stack an agent will get, and where each part came from (§5.2). */
   stack(scope: Scope, agent: string): Promise<StackPart[]>;
 }

@@ -2,12 +2,14 @@
 // under `host/user/<hash>/store/` (the folder is named by a hash of his name, `Site.userFolder`),
 // its key's segments as folders (`jobs/9f2c` is `host/user/<hash>/store/jobs/9f2c.json`), so two
 // users' values under one key never meet. A scope of a user the host does not serve is refused, as
-// at every other port. Changes to one key run one at a time.
+// at every other port. Changes to one key run one at a time. Its typed part for the job records
+// (`jobs.ts`) is kept in `host/user/<hash>/jobs/`.
 
 import { readdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import type { JsonValue, StorePort, UserScope } from "../../contract/index";
 import { codeOf, readJson, Serial, writeJson } from "./disk";
+import { folderJobs } from "./jobs";
 import type { Site } from "./site";
 
 const SEGMENT = /^[A-Za-z0-9._-]+$/;
@@ -62,5 +64,8 @@ export function folderStore(site: Site): StorePort {
     },
 
     list: async (scope, prefix) => (await keys(join(await site.userFolder(scope), "store"), "")).filter((k) => k.startsWith(prefix)),
+
+    // The job records are a typed part, kept in a folder of their own beside `store/`, so no plain key reaches them.
+    jobs: folderJobs(site),
   };
 }

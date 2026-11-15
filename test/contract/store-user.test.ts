@@ -65,8 +65,8 @@ describe("the store by user", () => {
 
     // Each harness counts its own ids, so the two jobs are kept under the same key.
     expect(theirs.id).toBe(mine.id);
-    expect((await s.harness.jobs!.list({ user: USER })).map((job: JobView) => [job.scope.user, job.report])).toEqual([[USER, "Counted seven."]]);
-    expect((await other.harness.jobs!.list({ user: OTHER })).map((job: JobView) => [job.scope.user, job.report])).toEqual([[OTHER, "Counted nine."]]);
+    expect((await s.harness.jobs!.list({ user: USER })).jobs.map((job: JobView) => [job.scope.user, job.report])).toEqual([[USER, "Counted seven."]]);
+    expect((await other.harness.jobs!.list({ user: OTHER })).jobs.map((job: JobView) => [job.scope.user, job.report])).toEqual([[OTHER, "Counted nine."]]);
     expect(await s.harness.jobs!.get(USER, mine.id)).toMatchObject({ scope: { user: USER, chat: CHAT }, report: "Counted seven." });
     expect(await other.harness.jobs!.get(OTHER, theirs.id)).toMatchObject({ scope: { user: OTHER, chat: OTHER_CHAT }, report: "Counted nine." });
     await expect(s.harness.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: 1 jobs were started today, and the setting allows 1.");
@@ -87,6 +87,12 @@ describe("the store by user", () => {
       update: (scope, key, change) => store(scope.user).update(scope, key, change),
       delete: (scope, key) => store(scope.user).delete(scope, key),
       list: (scope, prefix) => store(scope.user).list(scope, prefix),
+      jobs: {
+        get: (scope, id) => store(scope.user).jobs.get(scope, id),
+        set: (scope, job) => store(scope.user).jobs.set(scope, job),
+        list: (scope, query) => store(scope.user).jobs.list(scope, query),
+        prune: (scope, before) => store(scope.user).jobs.prune(scope, before),
+      },
     };
     const held = gate();
     const model = scriptedModel([{ pieces: [{ hold: held }, { text: "Counted seven." }] }], { clock: s.clock });
@@ -98,7 +104,7 @@ describe("the store by user", () => {
 
     expect(await harness.jobs!.get(OTHER, job.id)).toBeUndefined();
     expect(await harness.jobs!.cancel(OTHER, job.id)).toBeUndefined();
-    expect(await harness.jobs!.list({ user: OTHER })).toEqual([]);
+    expect(await harness.jobs!.list({ user: OTHER })).toEqual({ jobs: [] });
     expect((await harness.jobs!.get(USER, job.id))?.state).toBe("running");
 
     held.open();

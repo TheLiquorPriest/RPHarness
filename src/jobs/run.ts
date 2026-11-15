@@ -4,7 +4,7 @@
 // sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools.
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
-import type { AgentRef, Environment, JobLimits, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
+import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import { TurnGate } from "../harness/gate";
 import { Judges } from "../harness/judge";
@@ -13,7 +13,7 @@ import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harne
 import { requestPath, sentMessages } from "../harness/requests";
 import { readSettings, type Settings } from "../harness/settings";
 import type { UsageBook } from "../harness/usage";
-import { type AgentOutcome, type AgentRunner, Budget, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
+import { type AgentOutcome, type AgentRunner, Budget, type GateCall, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type ToolGate, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
@@ -22,6 +22,19 @@ import { JOB_START, jobStart, type JobsWork } from "./tool";
 
 /** RPH's own tools a job's agents may hold, each described by its file in `.tools/`. */
 const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START] as const;
+
+/** A gate that tells `ran` of each call it answered after the tool ran: the call, and its answer. */
+function noting(inner: ToolGate, ran: (call: GateCall, result: LoopToolResult) => void): ToolGate {
+  const bound = inner.bound?.bind(inner);
+  return {
+    before: (call, signal) => inner.before(call, signal),
+    async after(call, result, signal, added) {
+      ran(call, result);
+      return inner.after(call, result, signal, added);
+    },
+    ...(bound !== undefined ? { bound } : {}),
+  };
+}
 
 /** What every job's run shares: the harness's. */
 export interface JobCore {
@@ -67,8 +80,17 @@ export interface PreparedJob {
   budget: Budget;
   /** What all of the user's jobs have spent today, held to this job's `jobs.tokensPerDay`: a call of any of its agents past it is not made. */
   day: Budget;
-  /** Runs it to its end. `onText` hears what its agent writes, call by call; the signal stops every agent of it. */
-  run(signal: AbortSignal, onText: (text: string) => void): Promise<JobEnd>;
+  /** What the agents found nobody to give them: the names in the job's `attach` that nobody could find. */
+  missing: string[];
+  /** Runs it to its end. `hearing` is told what its agent writes, what all its agents have spent and each write any of them makes, as they happen; the signal stops every agent of it. */
+  run(signal: AbortSignal, hearing: JobHearing): Promise<JobEnd>;
+}
+
+/** What a job's run tells its job as it goes, so the job's record is true if the process is cut off: its first agent's latest text, what the run has spent, and each write. */
+export interface JobHearing {
+  text(text: string): void;
+  spent(usage: Usage): void;
+  wrote(write: JobWrite): void;
 }
 
 /** Makes a job's run and its first agent, or gives the answer (in `.prompts/delegation.md`'s words) that says why none can be made. */
@@ -108,6 +130,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   );
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
+  /** Who a run's writes are told to, from the moment it runs. */
+  let heard: JobHearing | undefined;
   const keep = (agent: AgentRef): KeepRequest | undefined => {
     const turn = places.turn;
     if (settings.requests === "none" || turn === undefined) return undefined;
@@ -151,21 +175,29 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     hold: (names) => registry?.hold(names) ?? { tools: [], missing: [...names] },
     unregistered: (name, tools) => env.log.warn("Tools an agent's definition lists are registered by nobody; it holds the rest.", { agent: name, tools: [...tools] }),
     gate: (agent, parent) =>
-      new TurnGate({
-        scope,
-        agent,
-        ...(parent !== undefined ? { parent } : {}),
-        trace,
-        clock: env.clock,
-        files: env.files,
-        ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
-        ...(env.switches !== undefined ? { switches: env.switches } : {}),
-        places,
-        rules,
-        words,
-        tools: new Map((registry?.all() ?? []).map((tool) => [tool.name, tool])),
-        clipChars: settings.clipChars,
-      }),
+      noting(
+        new TurnGate({
+          scope,
+          agent,
+          ...(parent !== undefined ? { parent } : {}),
+          trace,
+          clock: env.clock,
+          files: env.files,
+          ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
+          ...(env.switches !== undefined ? { switches: env.switches } : {}),
+          places,
+          rules,
+          words,
+          tools: new Map((registry?.all() ?? []).map((tool) => [tool.name, tool])),
+          clipChars: settings.clipChars,
+        }),
+        (call, result) => {
+          const tool = registry?.all().find((held) => held.name === call.tool);
+          if (tool?.tier !== "write" || result.error === true) return;
+          const first = result.content.find((part) => part.type === "text");
+          heard?.wrote({ tool: tool.name, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), line: first?.type === "text" ? (first.text.split("\n")[0] ?? "").trim() : "" });
+        },
+      ),
     texts: () => texts,
     rules: () => rules,
     questions: () => judges,
@@ -233,14 +265,19 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     trace,
     budget,
     day,
-    async run(signal, onText) {
+    missing: [...made.missing],
+    async run(signal, hearing) {
       const startedAt = env.clock.now();
       core.hub.started({ run: ask.id, scope, what: "job", agents: [], started: startedAt });
       core.usage.begin(ask.id);
+      heard = hearing;
       trace.watch((record) => {
         core.usage.record(record);
         const { event } = record;
-        if (record.agent.id === ref.id && event.kind === "call_ended" && event.text.trim() !== "") onText(event.text);
+        if (event.kind !== "call_ended") return;
+        // What every agent of the run has spent, as of the call that ended.
+        hearing.spent({ ...budget.used });
+        if (record.agent.id === ref.id && event.text.trim() !== "") hearing.text(event.text);
       });
       trace.event(ref, ask.parent, { kind: "run_started", run: "job", lead: ref.definition });
       let limit: LimitHit | undefined;

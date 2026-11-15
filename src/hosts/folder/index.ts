@@ -17,6 +17,7 @@
 //   host/user/<hash>/user.json             a user's folder is named by the SHA-256 of his name in hex, never by the name: two names never share a folder, whatever the disk's rule on case, and a name of any length or letters fits; the file keeps the name, checked when the folder is first used
 //   host/user/<hash>/models/, secrets/     the model layer's documents, each user's in his own folder
 //   host/user/<hash>/store/                small durable state, each user's in his own folder
+//   host/user/<hash>/jobs/<started>~<id>.json  the store's typed part for job records, the file's name starting with the job's start so a page is read as a page
 //   host/user/<name>/                      never read: folders made under the name itself are not this layout's, and only tests made them
 //   host/log.jsonl                         the log
 //

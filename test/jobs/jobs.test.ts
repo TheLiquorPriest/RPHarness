@@ -8,7 +8,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRef, JobView, JsonValue, StorePort, TraceRecord } from "../../src/contract";
 import { createHarness } from "../../src/index";
-import { type Answer, type Reply, scriptedModel } from "../../src/testing/rig";
+import { type Answer, memoryJobs, type Reply, scriptedModel } from "../../src/testing/rig";
 import { gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
 import { userHarness } from "./support";
 
@@ -357,12 +357,12 @@ describe("what stops a job", () => {
 
     // A process that ended without closing left a job kept as running.
     const crashed = { ...toldJobs(s)[0]!, id: "crashed-1", state: "running" as const, report: "Half the ledger read." };
-    await s.env.store.set(crashed.scope, "jobs/all/crashed-1", crashed as unknown as JsonValue);
+    await s.env.store.jobs.set(crashed.scope, crashed);
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
       expect(await again.jobs!.get(USER, "crashed-1")).toMatchObject({ state: "interrupted", report: "Half the ledger read." });
       expect(toldJobs(s).at(-1)).toMatchObject({ id: "crashed-1", state: "interrupted" });
-      expect((await again.jobs!.list({ user: USER, states: ["interrupted"] })).map((job) => job.id).sort()).toEqual(["crashed-1", id].sort());
+      expect((await again.jobs!.list({ user: USER, states: ["interrupted"] })).jobs.map((job) => job.id).sort()).toEqual(["crashed-1", id].sort());
     } finally {
       await again.close();
     }
@@ -377,16 +377,19 @@ describe("a job and the user it is for", () => {
     const kept = Promise.withResolvers<void>();
     const flaky: StorePort = {
       ...s.env.store,
-      list: async (scope, prefix) => {
-        if (failures > 0) {
-          failures -= 1;
-          throw new Error("The store did not answer.");
-        }
-        return s.env.store.list(scope, prefix);
-      },
-      set: async (scope, key, value) => {
-        await s.env.store.set(scope, key, value);
-        if (key.startsWith("jobs/all/") && typeof value === "object" && value !== null && !Array.isArray(value) && value["state"] === "running") kept.resolve();
+      jobs: {
+        ...s.env.store.jobs,
+        list: async (scope, query) => {
+          if (failures > 0) {
+            failures -= 1;
+            throw new Error("The store did not answer.");
+          }
+          return s.env.store.jobs.list(scope, query);
+        },
+        set: async (scope, job) => {
+          await s.env.store.jobs.set(scope, job);
+          if (job.state === "running") kept.resolve();
+        },
       },
     };
     const held = gate();
@@ -397,7 +400,7 @@ describe("a job and the user it is for", () => {
       expect(s.logged.some((line) => line.message === "The jobs a restart cut off could not be found.")).toBe(true);
       await kept.promise;
       // The search runs again at his next call, while the job runs: it is no job a restart cut off.
-      expect((await harness.jobs!.list({ user: USER })).map((view) => [view.id, view.state])).toEqual([[job.id, "running"]]);
+      expect((await harness.jobs!.list({ user: USER })).jobs.map((view) => [view.id, view.state])).toEqual([[job.id, "running"]]);
 
       held.open();
       await jobEnded(s, "done");
@@ -433,13 +436,16 @@ describe("a job and the user it is for", () => {
   test("a running record in A's store that names B: A's first call neither writes it to B's store nor tells it to the host as B's", async () => {
     const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [] }));
     const stray: JobView = { id: "stray-1", agent: "keeper", brief: BRIEF, state: "running", scope: { user: "second-reader", chat: "quay", session: "s9" }, startedBy: "user", started: 1, usage: { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 } };
-    await s.env.store.set({ user: USER }, "jobs/all/stray-1", stray as unknown as JsonValue);
+    await s.env.store.jobs.set({ user: USER }, stray);
     const written: string[] = [];
     const watched: StorePort = {
       ...s.env.store,
-      set: async (scope, key, value) => {
-        written.push(`${scope.user}:${key}`);
-        return s.env.store.set(scope, key, value);
+      jobs: {
+        ...s.env.store.jobs,
+        set: async (scope, job) => {
+          written.push(`${scope.user}:${job.id}`);
+          return s.env.store.jobs.set(scope, job);
+        },
       },
     };
     const { harness } = userHarness(s, {}, { store: watched });
@@ -449,8 +455,110 @@ describe("a job and the user it is for", () => {
       // Nothing was written, to either user's store, and the host was told nothing.
       expect(written).toEqual([]);
       expect(toldJobs(s)).toEqual([]);
-      expect(await s.env.store.get({ user: USER }, "jobs/all/stray-1")).toMatchObject({ state: "running", scope: { user: "second-reader" } });
+      expect(await s.env.store.jobs.get({ user: USER }, "stray-1")).toMatchObject({ state: "running", scope: { user: "second-reader" } });
       expect(s.logged.filter((line) => line.level === "warn").map((line) => line.fields)).toEqual([{ job: "stray-1", user: USER, names: "second-reader" }]);
+    } finally {
+      await harness.close();
+    }
+  });
+});
+
+describe("what a job's record holds and where", () => {
+  test("job_start with an attachment nobody has: the answer names it and the job's record lists it", async () => {
+    const attach: Reply = { pieces: [{ call: "job_start", args: { agent: "keeper", brief: BRIEF, attach: ["notes/nothing-here.md"] }, id: "start-1" }] };
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
+      answers: routed([attach, reply("The tower is quiet.")], [{ pieces: [{ text: "Fixture count: seven." }] }]),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+
+    const id = toldJobs(s)[0]!.id;
+    const answered = answerTo(s, "start-1");
+    expect(answered).toContain(`Job ${id} was started: keeper works on it in the background.`);
+    expect(answered).toContain("keeper was not given notes/nothing-here.md: it could not be found.");
+    expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ attach: ["notes/nothing-here.md"], missing: ["notes/nothing-here.md"] });
+  });
+
+  test("list with limit 20 reads 20 records from a store holding 500", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [] }));
+    const records = memoryJobs();
+    for (let at = 1; at <= 500; at += 1) await records.set({ user: USER }, { id: `kept-${at}`, agent: "keeper", brief: BRIEF, state: "done", scope: { user: USER, chat: "lighthouse", session: `job-${at}` }, startedBy: "user", started: at * 1_000, ended: at * 1_000 + 5, usage: { calls: 1, input: 10, cacheRead: 0, cacheWrite: 0, output: 5 } });
+    let returned = 0;
+    const counted: StorePort = {
+      ...s.env.store,
+      jobs: {
+        ...records,
+        list: async (scope, query) => {
+          const page = await records.list(scope, query);
+          returned += page.jobs.length;
+          return page;
+        },
+      },
+    };
+    const { harness } = userHarness(s, {}, { store: counted });
+    try {
+      const first = await harness.jobs!.list({ user: USER, limit: 20 });
+
+      expect(first.jobs.map((job) => job.id)).toEqual(Array.from({ length: 20 }, (_, at) => `kept-${500 - at}`));
+      expect(first.next).toBeDefined();
+      // The recovery's search for jobs under way finds none of them; the page is the 20.
+      expect(returned).toBe(20);
+      const second = await harness.jobs!.list({ user: USER, limit: 20, cursor: first.next! });
+      expect(second.jobs.map((job) => job.id)).toEqual(Array.from({ length: 20 }, (_, at) => `kept-${480 - at}`));
+      expect(returned).toBe(40);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("a record older than jobs.keepDays is gone after the next start", async () => {
+    const s = (open = await stage({ config: "jobs:\n  keepDays: 30\n", files: { ".agents/keeper.md": KEEPER() }, answers: [{ pieces: [{ text: "Counted seven." }] }] }));
+    const day = 24 * 60 * 60 * 1000;
+    s.clock.advance(100 * day);
+    const old = (id: string, started: number): JobView => ({ id, agent: "keeper", brief: BRIEF, state: "done", scope: { user: USER, chat: "lighthouse", session: `job-${id}` }, startedBy: "user", started, usage: { calls: 1, input: 10, cacheRead: 0, cacheWrite: 0, output: 5 } });
+    await s.env.store.jobs.set({ user: USER }, old("kept-long-ago", 100 * day - 31 * day));
+    await s.env.store.jobs.set({ user: USER }, old("kept-lately", 100 * day - 29 * day));
+
+    // Listed, and not yet removed: nothing has started.
+    expect((await s.harness.jobs!.list({ user: USER })).jobs.map((job) => job.id)).toEqual(["kept-lately", "kept-long-ago"]);
+    const started = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    await jobEnded(s, "done");
+
+    expect((await s.harness.jobs!.list({ user: USER })).jobs.map((job) => job.id)).toEqual([started.id, "kept-lately"]);
+    expect(await s.harness.jobs!.get(USER, "kept-long-ago")).toBeUndefined();
+  });
+
+  test("a job's record reaches the host's store through its typed part, not as a plain key", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [] }));
+    const plain: string[] = [];
+    const typed: string[] = [];
+    const watched: StorePort = {
+      ...s.env.store,
+      set: async (scope, key, value) => {
+        plain.push(key);
+        return s.env.store.set(scope, key, value);
+      },
+      jobs: {
+        ...s.env.store.jobs,
+        set: async (scope, job) => {
+          typed.push(`${job.id}:${job.state}`);
+          return s.env.store.jobs.set(scope, job);
+        },
+      },
+    };
+    const model = scriptedModel([{ pieces: [{ text: "Counted seven." }] }], { clock: s.clock });
+    const { harness } = userHarness(s, { "": model }, { store: watched });
+    try {
+      const job = await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+      await jobEnded(s, "done");
+      await harness.jobs!.list({ user: USER });
+
+      expect(typed).toEqual(expect.arrayContaining([`${job.id}:queued`, `${job.id}:running`, `${job.id}:done`]));
+      expect(plain.filter((key) => key.startsWith("jobs/all/"))).toEqual([]);
+      expect(await s.env.store.list({ user: USER }, "jobs/all/")).toEqual([]);
+      expect(await s.env.store.jobs.get({ user: USER }, job.id)).toMatchObject({ state: "done", report: "Counted seven." });
     } finally {
       await harness.close();
     }

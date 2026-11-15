@@ -33,6 +33,8 @@ export const JOBS = worded(
     runTokensIn: { key: "jobs.run.tokensIn", takes: { type: "whole", least: 1 }, default: 600_000, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensIn" },
     runTokensOut: { key: "jobs.run.tokensOut", takes: { type: "whole", least: 1 }, default: 60_000, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensOut" },
     runTime: { key: "jobs.run.time", takes: { type: "whole", least: 1 }, default: 900, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.time", ms: true },
+    // How long a job's record is kept: the Jobs page lists them a page at a time, and the oldest go as a job starts.
+    keepDays: { key: "jobs.keepDays", takes: { type: "whole", least: 1 }, default: 90, perConnection: false, at: "jobs.keepDays" },
   },
   JOBS_WORDS,
 );

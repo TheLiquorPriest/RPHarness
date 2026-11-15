@@ -7,12 +7,14 @@
 // may spend. A job an agent of another job started spends from that job's run as well as its own, so
 // that a chain of jobs never spends more than its first may. A job is tied to the turn that started
 // it: the host saying that turn left the path cancels it, and a stop of the turn does not. Each change
-// of a job's state is kept in the host's store under its user, told to the host and traced, so a
-// restart finds a job that was running and lists it as interrupted, with what it had done; the day's
-// counts of jobs and of their tokens are kept there too, under the user alone. RPH cannot list the
-// users a store holds, so what a restart cut off is found for each user at his first call.
+// of a job's state, and what it spent, wrote and wrote down as it goes, is kept in the host's store
+// (its typed part for job records) under its user, told to the host and traced, so a restart finds a
+// job that was running and lists it as interrupted, with what it had done and spent, and a job that was
+// only waiting waits again from its kept start; the day's counts of jobs and of their tokens are kept
+// there too, under the user alone. RPH cannot list the users a store holds, so what a restart cut off
+// is found for each user at his first call.
 import type { DelegateCall } from "../agents/tools";
-import type { JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
+import type { JobPage, JobQuery, JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
 import { loadGuidance } from "../files";
 import { lines } from "../harness/means";
 import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
@@ -24,13 +26,14 @@ import type { JobsWork, RunJobs } from "./tool";
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
 const LINES_PART = "jobs";
 
-/** Where each job is kept in the host's store, by its id. */
-const KEPT = "jobs/all/";
 /** Where the count of each day's jobs is kept, by the user's day. */
 const DAYS = "jobs/days/";
 
-/** The states a job is still under way in: a restart finds it interrupted. */
-const UNDER_WAY: Readonly<Partial<Record<JobState, true>>> = { queued: true, running: true };
+/** A day, in the milliseconds the clock counts: what `jobs.keepDays` is in. */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The states a job is still under way in: a restart finds it interrupted, or, where it only waited, queued again. */
+const UNDER_WAY: readonly JobState[] = ["queued", "running"];
 
 /** A job of this process, waiting for its place or running. */
 interface Live {
@@ -75,12 +78,6 @@ function isObject(value: JsonValue | undefined): value is { [key: string]: JsonV
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A kept job, read back: undefined for anything that is not one. */
-function keptView(value: JsonValue | undefined): JobView | undefined {
-  if (!isObject(value) || typeof value["id"] !== "string" || typeof value["state"] !== "string") return undefined;
-  return value as unknown as JobView;
-}
-
 function dayCount(value: JsonValue | undefined): DayCount {
   const all = isObject(value) && typeof value["all"] === "number" ? value["all"] : 0;
   const connections: Record<string, number> = {};
@@ -109,7 +106,7 @@ export class Jobs implements JobsApi, JobsWork {
   readonly #writes = new Map<string, Promise<unknown>>();
   /** What each user's jobs have spent today, by the day and the user, read from the store once in this process. */
   readonly #days = new Map<string, Promise<DaySpend>>();
-  /** For each user this process has acted for: settles once the jobs a restart found him under way are kept as interrupted. */
+  /** For each user this process has acted for: settles once the jobs a restart found him under way are kept as interrupted or queued again. */
   readonly #recovered = new Map<string, Promise<void>>();
   /** Every job this process made, running or ended: none is one a restart cut off, whatever a search of the store reads of it. */
   readonly #made = new Set<string>();
@@ -121,7 +118,7 @@ export class Jobs implements JobsApi, JobsWork {
   /**
    * `job_start`: a job tied to the caller's turn, in a session of its own, counted among the jobs of
    * the caller's run (`run`), and for a caller that is a job's agent, against that job's run too; the
-   * answer says what became of it.
+   * answer says what became of it, and names what its agent was not given.
    */
   async startFor(call: DelegateCall, ctx: ToolCtx, run: RunJobs): Promise<LoopToolResult> {
     const { scope } = ctx;
@@ -148,23 +145,28 @@ export class Jobs implements JobsApi, JobsWork {
       return answer(part?.line(line, { agent: call.agent, max: hit.max, value: hit.value, ...(hit.connection !== undefined ? { connection: hit.connection } : {}) }), true);
     }
     const { view } = begun;
-    return answer(part?.line("started", { job: view.id, agent: view.agent, ...(view.state === "queued" ? { queued: true } : {}) }));
+    const started = answer(part?.line("started", { job: view.id, agent: view.agent, ...(view.state === "queued" ? { queued: true } : {}) }));
+    // Each name nobody could find is one line after the answer, as `delegate` reports one.
+    const reports = (view.missing ?? []).flatMap((ref) => {
+      const line = part?.line("missing", { agent: view.agent, ref });
+      return line === undefined ? [] : [line];
+    });
+    return reports.length > 0 ? { ...started, reports } : started;
   }
 
   // ---------------------------------------------------------------- the Jobs page (`JobsApi`)
 
-  async list(filter: { user: string; chat?: string; states?: JobState[] }): Promise<JobView[]> {
-    const user = { user: filter.user };
-    await this.#recovery(filter.user);
+  async list(filter: { user: string } & JobQuery): Promise<JobPage> {
+    const { user, ...query } = filter;
+    await this.#recovery(user);
     await Promise.allSettled([...this.#writes.values()]);
-    const { store } = this.#core.env;
-    const views = new Map<string, JobView>();
-    for (const key of await store.list(user, KEPT)) {
-      const view = keptView(await store.get(user, key));
-      if (view !== undefined) views.set(view.id, view);
-    }
-    for (const live of this.#live.values()) if (live.view.scope.user === filter.user) views.set(live.view.id, live.view);
-    return [...views.values()].filter((view) => (filter.chat === undefined || view.scope.chat === filter.chat) && (filter.states === undefined || filter.states.includes(view.state))).map((view) => ({ ...view }));
+    // Only the page is read from the store; a job of this process is shown as it stands now.
+    const page = await this.#core.env.store.jobs.list({ user }, query);
+    const jobs = page.jobs.map((view) => {
+      const live = this.#live.get(view.id);
+      return { ...(live !== undefined && live.view.scope.user === user ? live.view : view) };
+    });
+    return { jobs, ...(page.next !== undefined ? { next: page.next } : {}) };
   }
 
   async get(user: string, id: string): Promise<JobView | undefined> {
@@ -172,7 +174,7 @@ export class Jobs implements JobsApi, JobsWork {
     const live = this.#live.get(id);
     if (live !== undefined && live.view.scope.user === user) return { ...live.view };
     await this.#writes.get(id);
-    return keptView(await this.#core.env.store.get({ user }, `${KEPT}${id}`));
+    return this.#core.env.store.jobs.get({ user }, id);
   }
 
   /** The user starts a job, tied to no turn, held to the limits it was given where they are tighter than the settings'. It rejects when none can be started; the error says why, for the host. */
@@ -201,10 +203,22 @@ export class Jobs implements JobsApi, JobsWork {
     await Promise.all(cut.map((live) => this.#stop(live, "off-path")));
   }
 
-  /** Stops every job, kept as interrupted (§13.5), and waits for what is kept and told to settle. */
+  /**
+   * Stops every running job, kept as interrupted (§13.5), and waits for what is kept and told to settle.
+   * A job that was only waiting is let go as it is kept, queued: the next start of the harness queues it again.
+   */
   async close(): Promise<void> {
     await Promise.allSettled([...this.#recovered.values()]);
-    await Promise.all([...this.#live.values()].map((live) => this.#stop(live, "interrupted")));
+    await Promise.all(
+      [...this.#live.values()].map((live) => {
+        const waiting = this.#queue.indexOf(live);
+        if (waiting < 0) return this.#stop(live, "interrupted");
+        this.#queue.splice(waiting, 1);
+        this.#live.delete(live.view.id);
+        live.settle({ ...live.view });
+        return live.done;
+      }),
+    );
     while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
   }
 
@@ -214,7 +228,7 @@ export class Jobs implements JobsApi, JobsWork {
    * Makes a job and counts it in the user's day: its view, the limit it would pass, or the answer that
    * says why none can be made. `over` is the budget of the job whose agent started it. No job is
    * started once the user's jobs have spent the day's tokens, and none such is counted among the
-   * day's jobs.
+   * day's jobs. The user's job records older than `jobs.keepDays` are removed as a job starts.
    */
   async #begin(ask: Omit<JobAsk, "id" | "spent">): Promise<Begun> {
     const { scope, call, by, parent } = ask;
@@ -231,8 +245,28 @@ export class Jobs implements JobsApi, JobsWork {
       prepared.trace.event(by ?? prepared.agent, parent, { kind: "limit", hit });
       return { hit };
     }
+    await this.#prune(scope.user, prepared.settings);
+    const view: JobView = {
+      id,
+      agent: prepared.agent.definition,
+      brief: call.brief,
+      state: "queued",
+      scope,
+      startedBy: by ?? "user",
+      started: core.env.clock.now(),
+      usage: emptyUsage(),
+      // Its start is kept with it: a job that waits can wait again after a restart, and be started again with the same task.
+      ...(call.attach.length > 0 ? { attach: [...call.attach] } : {}),
+      ...(ask.limits !== undefined ? { limits: ask.limits } : {}),
+      ...(prepared.missing.length > 0 ? { missing: prepared.missing } : {}),
+    };
+    // As it stands once it had its chance at a place: running, or still waiting.
+    return { view: this.#enqueue(view, prepared, own, spend).view };
+  }
+
+  /** Puts a job of this process in the queue for a place, kept, traced and told as queued, and gives the places that are free. */
+  #enqueue(view: JobView, prepared: PreparedJob, own: readonly ConnectionCounts[], spend: DaySpend): Live {
     const { promise, resolve } = Promise.withResolvers<JobView>();
-    const view: JobView = { id, agent: prepared.agent.definition, brief: call.brief, state: "queued", scope, startedBy: by ?? "user", started: core.env.clock.now(), usage: emptyUsage() };
     const live: Live = {
       view,
       prepared,
@@ -242,13 +276,22 @@ export class Jobs implements JobsApi, JobsWork {
       done: promise,
       settle: resolve,
     };
-    this.#made.add(id);
-    this.#live.set(id, live);
+    this.#made.add(view.id);
+    this.#live.set(view.id, live);
     this.#queue.push(live);
     this.#changed(live);
     this.#next();
-    // As it stands once it had its chance at a place: running, or still waiting.
-    return { view: live.view };
+    return live;
+  }
+
+  /** Removes the user's job records started before `jobs.keepDays` days ago; a failure is logged and the start goes on. */
+  async #prune(user: string, settings: Settings): Promise<void> {
+    const { store, clock, log } = this.#core.env;
+    try {
+      await store.jobs.prune({ user }, clock.now() - settings.jobs.keepDays * DAY_MS);
+    } catch (error) {
+      log.error("The jobs kept longer than the setting allows could not be removed.", { user, error: errorWords(error) });
+    }
   }
 
   /**
@@ -327,10 +370,16 @@ export class Jobs implements JobsApi, JobsWork {
     live.view = { ...live.view, state: "running" };
     this.#changed(live);
     const signal = live.controller.signal;
+    // What the run tells as it goes is kept as it comes, so a record found after a crash shows what the job said, wrote and spent.
+    const kept = (change: Partial<JobView>): void => {
+      live.view = { ...live.view, ...change };
+      this.#keep(live.view);
+    };
     void live.prepared
-      .run(signal, (text) => {
-        live.view = { ...live.view, report: text };
-        this.#keep(live.view);
+      .run(signal, {
+        text: (text) => kept({ report: text }),
+        spent: (usage) => kept({ usage }),
+        wrote: (write) => kept({ wrote: [...(live.view.wrote ?? []), write] }),
       })
       .then(
         (end) => {
@@ -380,7 +429,7 @@ export class Jobs implements JobsApi, JobsWork {
   #keep(view: JobView): Promise<unknown> {
     const { store, log } = this.#core.env;
     const write = (this.#writes.get(view.id) ?? Promise.resolve())
-      .then(() => store.set(view.scope, `${KEPT}${view.id}`, view as unknown as JsonValue))
+      .then(() => store.jobs.set(view.scope, view))
       .catch((error: unknown) => log.error("A job could not be kept.", { job: view.id, error: errorWords(error) }));
     this.#writes.set(view.id, write);
     this.#pend(write, "A job could not be kept.", view.id);
@@ -416,24 +465,46 @@ export class Jobs implements JobsApi, JobsWork {
   }
 
   /**
-   * After a restart: a job the store holds as the user's and under way was cut off by it. It is kept as interrupted, with what it had done, and told (§13.5).
-   * A job this process made is passed over, so a search run again after a failed one marks only the jobs a restart truly cut off; so is a record in the user's store that names another user, which is neither kept nor told (it is logged).
+   * After a restart: a job the store holds as the user's and running was cut off by it. It is kept as
+   * interrupted, with what it had done and spent, and told (§13.5). One that was only waiting waits
+   * again, from its kept start, and is told as queued. A job this process made is passed over, so a
+   * search run again after a failed one marks only the jobs a restart truly cut off; so is a record in
+   * the user's store that names another user, which is neither kept nor told (it is logged).
    */
   async #recover(user: string): Promise<void> {
     const { store, clock, log } = this.#core.env;
-    const scope = { user };
     const done: Promise<unknown>[] = [];
-    for (const key of await store.list(scope, KEPT)) {
-      const view = keptView(await store.get(scope, key).catch(() => undefined));
-      if (view === undefined || UNDER_WAY[view.state] !== true || this.#made.has(view.id)) continue;
+    const found = await store.jobs.list({ user }, { states: [...UNDER_WAY] });
+    // The oldest first, so the jobs that waited are queued again in the order they were started.
+    for (const view of [...found.jobs].reverse()) {
+      if (this.#made.has(view.id)) continue;
       if (view.scope.user !== user) {
         log.warn("A kept job names another user than the one whose store holds it, and is passed over.", { job: view.id, user, names: view.scope.user });
         continue;
       }
+      if (view.state === "queued" && (await this.#again(view))) continue;
       const interrupted: JobView = { ...view, state: "interrupted", ended: clock.now() };
       done.push(this.#keep(interrupted), this.#tell(interrupted));
     }
     // Its own writes and words alone: other users' jobs may be running and writing meanwhile.
     await Promise.all(done);
+  }
+
+  /** A job that was waiting when the process stopped waits again, from its kept start; false when it cannot be made again (logged), and it is then kept as interrupted. */
+  async #again(view: JobView): Promise<boolean> {
+    const { log } = this.#core.env;
+    try {
+      const spend = await this.#spend(view.scope.user);
+      const prepared = await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spent: spend.used, ...(view.limits !== undefined ? { limits: view.limits } : {}) });
+      if (!("run" in prepared)) {
+        log.warn("A job that was waiting could not be queued again.", { job: view.id, agent: view.agent });
+        return false;
+      }
+      this.#enqueue(view, prepared, jobCountsFor(prepared.settings, prepared.connection), spend);
+      return true;
+    } catch (error) {
+      log.error("A job that was waiting could not be queued again.", { job: view.id, error: errorWords(error) });
+      return false;
+    }
   }
 }

@@ -10,4 +10,5 @@ export const JOBS_WORDS = {
   "jobs.run.tokensIn": { name: "Tokens sent in a job's run", about: "Tokens sent to models across all the agents of one job's run." },
   "jobs.run.tokensOut": { name: "Tokens written in a job's run", about: "Tokens models write across all the agents of one job's run." },
   "jobs.run.time": { name: "Time for a job's run", about: "Seconds one job's run may take." },
+  "jobs.keepDays": { name: "Days a job is kept", about: "Days the record of a job is kept; the older ones are removed when the next job starts." },
 };

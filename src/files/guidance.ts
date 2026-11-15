@@ -10,7 +10,7 @@ import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import { problemAt } from "./header";
 import { parsePart } from "./parts";
-import type { ReadRule } from "./rules";
+import type { ReadRule, Rule } from "./rules";
 import { parseRule } from "./rules";
 import { parseSkill } from "./skills";
 import { holdsNothing } from "./stack";
@@ -74,6 +74,7 @@ export const loadGuidance: LoadGuidance = (files, scope) => new TreeGuidance(fil
 
 class TreeGuidance implements Guidance {
   readonly scope: Scope | UserScope;
+  readonly #files: FilesPort;
   readonly #tree: Tree;
   /** What parsing found, each file's once. */
   readonly #problems: Problem[] = [];
@@ -81,6 +82,7 @@ class TreeGuidance implements Guidance {
 
   constructor(files: FilesPort, scope: Scope | UserScope) {
     this.scope = scope;
+    this.#files = files;
     this.#tree = new Tree(files, scope);
   }
 
@@ -546,13 +548,19 @@ class TreeGuidance implements Guidance {
     return views;
   }
 
-  async ruleRun(options: RuleRunOptions): Promise<RuleRun> {
-    const rules = [...(await this.#ruleStates()).values()].flatMap((s) => {
+  /** The triggered rules in force (`always` rules are the stack's), as this read found the files. */
+  async #triggered(): Promise<Rule[]> {
+    return [...(await this.#ruleStates()).values()].flatMap((s) => {
       const rule = s.found.item?.rule;
       return s.inForce && rule !== undefined && rule.when.trigger !== "always" ? [rule] : [];
     });
+  }
+
+  async ruleRun(options: RuleRunOptions): Promise<RuleRun> {
     const scope = this.scope;
     if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
-    return createRuleRun({ scope, rules, facts: options.facts, ...(options.memory !== undefined ? { memory: options.memory } : {}), ...(options.window !== undefined ? { window: options.window } : {}) });
+    // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
+    const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope).#triggered();
+    return createRuleRun({ scope, rules: await this.#triggered(), read, facts: options.facts, ...(options.memory !== undefined ? { memory: options.memory } : {}), ...(options.window !== undefined ? { window: options.window } : {}) });
   }
 }

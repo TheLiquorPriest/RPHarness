@@ -32,6 +32,8 @@ export interface Written {
 export interface StreamRules {
   /** Whether a rule that interrupts looks at the reply, so the reply is held back by sentences (§5.4). */
   readonly coverReply: boolean;
+  /** Reads the rules as the files stand, at the start of each model call: the check, which cannot wait, goes by them for that call. None: the rules never change. */
+  fresh?(): Promise<void>;
   /** Looks at what was written after each piece, and gives back a rule that fires. */
   check(written: Written): StreamFired | undefined;
 }

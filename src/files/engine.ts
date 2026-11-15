@@ -1,6 +1,10 @@
 // The rule engine (§5.4): handed the events of a run and the facts of the moment, it answers which
 // of the user's triggered rules fire, with their texts filled in, and keeps to each rule's
-// `repeat:`. It decides nothing else: what happens after a rule fires is the runner's.
+// `repeat:`. It decides nothing else: what happens after a rule fires is the runner's. The rules in
+// force are read as the files stand at each moment a rule would fire (decision 16), not fixed when
+// the run began: a rule switched off, or held by a `needs:` no longer in force, stops at once, an
+// edited one fires as it now reads, and `repeat:` counts carry across, by the rule's name. On the
+// stream, whose check cannot wait, the rules are those read at the start of the model call.
 
 import type { AgentRef, FactDef, FactValue, RuleMoment, Scope, ToolResult } from "../contract/index";
 import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../loop/rules";
@@ -11,8 +15,10 @@ import type { Rule, RuleScope } from "./rules";
 
 export interface RuleRunInput {
   scope: Scope;
-  /** The triggered rules in force, each loaded whole. */
+  /** The triggered rules in force when the run begins, each loaded whole. */
   rules: readonly Rule[];
+  /** The triggered rules in force as the files stand now. */
+  read(): Promise<readonly Rule[]>;
   facts: Facts;
   memory?: RuleMemory;
   /** How many characters a pattern looks at at a time; absent, the whole text. */
@@ -97,7 +103,12 @@ class Run implements RuleRun {
   readonly problems: Problem[] = [];
   readonly runEnd: RunEndRules;
   readonly #scope: Scope;
-  readonly #rules: readonly Rule[];
+  /** The rules in force as last read: at the run's start, then at each moment and each model call's start. */
+  #rules: readonly Rule[];
+  readonly #inForce: () => Promise<readonly Rule[]>;
+  readonly #defs: ReadonlyMap<string, FactDef>;
+  /** Each rule's file and text whose facts were checked, so a rule read again is said once. */
+  readonly #checked = new Set<string>();
   readonly #facts: Facts;
   readonly #factNames: ReadonlySet<string>;
   readonly #memory: RuleMemory & { session: NonNullable<RuleMemory["session"]> };
@@ -106,21 +117,44 @@ class Run implements RuleRun {
   readonly #thisRun = new Set<string>();
   /** `<rule> <agent id> <call>`: what fired on one model call's text. */
   readonly #inCall = new Set<string>();
-  readonly #asked = new Map<string, Rule>();
+  /** Each question put, by its id: the name of the rule that asked it, which the answer finds as it reads then. */
+  readonly #asked = new Map<string, string>();
   #questions = 0;
 
   constructor(input: RuleRunInput) {
     this.#scope = input.scope;
-    this.#rules = input.rules;
+    this.#rules = [];
+    this.#inForce = input.read;
     this.#facts = input.facts;
     this.#window = input.window;
-    const defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
-    this.#factNames = new Set(defs.keys());
+    this.#defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
+    this.#factNames = new Set(this.#defs.keys());
     const memory: RuleMemory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
     // A run in another session than the one the memory notes begins that session's list: a rule `repeat: once per session` fires again in it.
     this.#memory = { ...memory, session: memory.session !== undefined && memory.session.id === input.scope.session ? memory.session : { id: input.scope.session, fired: [] } };
-    for (const rule of input.rules) this.problems.push(...checkFacts(rule, defs));
-    this.runEnd = { due: (moment) => this.#due(moment.agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "run-end" ? "run-end" : undefined)) };
+    this.#take(input.rules);
+    this.runEnd = {
+      due: async (moment) => {
+        await this.#now();
+        return this.#due(moment.agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "run-end" ? "run-end" : undefined));
+      },
+    };
+  }
+
+  /** The rules as read, each new rule's facts checked once. */
+  #take(rules: readonly Rule[]): void {
+    this.#rules = rules;
+    for (const rule of rules) {
+      const key = `${rule.path}\n${rule.text.text}`;
+      if (this.#checked.has(key)) continue;
+      this.#checked.add(key);
+      this.problems.push(...checkFacts(rule, this.#defs));
+    }
+  }
+
+  /** The rules in force as the files stand now. */
+  async #now(): Promise<void> {
+    this.#take(await this.#inForce());
   }
 
   #for(agent: AgentRef): Rule[] {
@@ -207,6 +241,7 @@ class Run implements RuleRun {
     const turns = this.#memory.turns;
     const held = this.#memory.held.filter((h) => h.agent === agent.definition);
     this.#memory.held = this.#memory.held.filter((h) => h.agent !== agent.definition);
+    await this.#now();
     const due = await this.#due(agent, (rule) => {
       if (rule.when.trigger === "moment" && rule.when.at === "turn-start") return "turn-start";
       if (rule.when.trigger === "interval" && turns % rule.when.every === 0) return "interval";
@@ -216,11 +251,14 @@ class Run implements RuleRun {
   }
 
   stream(agent: AgentRef): StreamRules {
-    const rules = this.#for(agent).filter((rule) => rule.when.trigger === "pattern" && rule.when.scope.some(isStreamScope));
+    const rules = (): Rule[] => this.#for(agent).filter((rule) => rule.when.trigger === "pattern" && rule.when.scope.some(isStreamScope));
     return {
       // Every form reads the reply out of what the agent writes, so a rule on its text covers the reply as surely as one on the reply.
-      coverReply: rules.some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply" || s.watch === "text")),
-      check: (written) => this.#check(agent, rules, written),
+      get coverReply() {
+        return rules().some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply" || s.watch === "text"));
+      },
+      fresh: () => this.#now(),
+      check: (written) => this.#check(agent, rules(), written),
     };
   }
 
@@ -262,8 +300,9 @@ class Run implements RuleRun {
   }
 
   async toolCall(agent: AgentRef, call: ToolCallSeen): Promise<ToolCallFired> {
+    await this.#now();
     const matches = this.#toolMatches(agent, "arguments", call.tool, JSON.stringify(call.args) ?? "");
-    // Marked before any wait, so a call running beside this one cannot fire the same rule again.
+    // Marked before any later wait, so a call running beside this one cannot fire the same rule again.
     for (const { rule } of matches) this.#mark(rule, agent);
     const fired: { fired: Fired; hold: boolean }[] = [];
     for (const { rule, matched, hold } of matches) {
@@ -275,6 +314,7 @@ class Run implements RuleRun {
   }
 
   async toolResult(agent: AgentRef, call: { id: string; tool: string }, result: ToolResult): Promise<Fired[]> {
+    await this.#now();
     const matches = this.#toolMatches(agent, "result", call.tool, resultText(result));
     for (const { rule } of matches) this.#mark(rule, agent);
     const out: Fired[] = [];
@@ -285,7 +325,8 @@ class Run implements RuleRun {
     return out;
   }
 
-  beforeCompaction(agent: AgentRef): Promise<Fired[]> {
+  async beforeCompaction(agent: AgentRef): Promise<Fired[]> {
+    await this.#now();
     return this.#due(agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "before-compaction" ? "before-compaction" : undefined));
   }
 
@@ -300,7 +341,7 @@ class Run implements RuleRun {
         if (text === undefined || text.trim() === "") continue;
         this.#questions += 1;
         const id = `${rule.name}#${this.#questions}`;
-        this.#asked.set(id, rule);
+        this.#asked.set(id, rule.name);
         out.push({ id, rule: rule.name, agent, question: when.question, watched: scope.watch, text, interrupt: when.interrupt, ...(when.judge !== undefined ? { judge: when.judge } : {}) });
       }
     }
@@ -308,9 +349,13 @@ class Run implements RuleRun {
   }
 
   async answered(question: Question, yes: boolean): Promise<Answered | undefined> {
-    const rule = this.#asked.get(question.id);
+    const name = this.#asked.get(question.id);
     this.#asked.delete(question.id);
-    if (rule === undefined || !yes || !this.#may(rule, question.agent)) return undefined;
+    if (name === undefined || !yes) return undefined;
+    // The rule as it reads now: one switched off since the question was put does not fire, and an edited one fires as it now reads.
+    await this.#now();
+    const rule = this.#for(question.agent).find((r) => r.name === name && r.when.trigger === "question");
+    if (rule === undefined || !this.#may(rule, question.agent)) return undefined;
     this.#mark(rule, question.agent);
     const text = await this.#fill(rule, question.agent, {});
     // The judging model's answer is what a question rule "matched" (`RuleFiring.matched`).

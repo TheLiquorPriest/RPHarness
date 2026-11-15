@@ -461,6 +461,8 @@ export class AgentRunner {
       if (stint !== undefined && changed !== undefined && stint.halt === undefined && this.#calls > 0) await this.#tellChanged(changed);
       const point = this.#o.point;
       if (stint !== undefined && point !== undefined && stint.halt === undefined) await this.#atPoint(stint, point, undefined);
+      // The rules on what it writes, as the files stand at the start of this call.
+      await this.#o.stream?.fresh?.();
       const settings = this.#o.settings?.({ agent: this.agent, call: this.#calls + 1, model: this.#o.model.id }) ?? {};
       this.#settings = settings;
       return { context: { messages: this.#request(), tools: [...this.#tools.values()] }, model: settings.model ?? this.#o.model, thinkingLevel: settings.effort ?? this.#o.thinkingLevel ?? "off" };

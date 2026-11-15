@@ -267,7 +267,7 @@ describe("a question", () => {
     const rule = file.status === "read" ? parseRule(file, "no-player-voice", []).rule : undefined;
     if (rule === undefined) throw new Error("The rule does not read.");
     const facts = createFacts(b.host.facts, () => own);
-    const runOf = (memory?: RuleMemory): RuleRun => createRuleRun({ scope, rules: [rule], facts, ...(memory !== undefined ? { memory } : {}) });
+    const runOf = (memory?: RuleMemory): RuleRun => createRuleRun({ scope, rules: [rule], read: async () => [rule], facts, ...(memory !== undefined ? { memory } : {}) });
     const r = runOf();
     expect(r.questions(gm, { text: "Rolled.", reply: "x" })).toEqual([]);
     const [q] = r.questions(author, { text: "<reply>Wren nods.</reply>", reply: "Wren nods." });
@@ -308,21 +308,31 @@ describe("`repeat:`", () => {
 });
 
 describe("`needs:`", () => {
-  test("a reminder stops the moment the file it needs is switched off, and starts again when it is back", async () => {
+  test("a reminder stops the moment the file it needs is switched off, within one run", async () => {
     b = await drafts();
     own = { "reply.released": { count: 0 } };
     await b.facts({ "stage.unperceived": STAGE, "turns.since.engine.change": { count: 9 } });
-    expect((await (await run()).runEnd.due({ agent: author, call: 1 })).map((f) => f.firing.rule)).toEqual(["perceptions-owed", "reply-missing"]);
-
+    // The run begins with every rule in force; the files go off before its first moment.
+    const r = await run();
     await b.put("chat", "config.yml", "off: [rules/perceptions, TURN]\n");
-    expect((await (await run()).runEnd.due({ agent: author, call: 1 })).map((f) => f.firing.rule)).toEqual(["reply-missing"]);
-    expect(await (await run()).turnStart(author)).toEqual([]);
+    expect((await r.runEnd.due({ agent: author, call: 1 })).map((f) => f.firing.rule)).toEqual(["reply-missing"]);
+    expect(await r.turnStart(author)).toEqual([]);
     const rules = Object.fromEntries((await loadGuidance(b.host.files, scope).rules()).map((r) => [r.name, r]));
     for (const name of ["perceptions-owed", "perceptions-missing", "engine-silent", "history-leaving"]) expect(rules[name]).toMatchObject({ inForce: false, why: "needs" });
     expect(rules.perceptions).toMatchObject({ inForce: false, why: "off" });
 
+    // Back on: the same run's next moment fires it.
     await b.put("chat", "config.yml", "off: []\n");
-    expect((await (await run()).runEnd.due({ agent: author, call: 1 })).map((f) => f.firing.rule)).toEqual(["perceptions-owed", "reply-missing"]);
+    expect((await r.runEnd.due({ agent: author, call: 2 })).map((f) => f.firing.rule)).toContain("perceptions-owed");
+  });
+
+  test("a rule edited in the middle of a run fires as it now reads, and one added starts firing", async () => {
+    b = await bench({ chat: { "rules/each.md": "---\ndescription: Each.\nagents: all\nat: run-end\nrepeat: always\n---\nAs first written.\n" } });
+    const r = await run();
+    expect((await r.runEnd.due({ agent: author, call: 1 })).map((f) => f.text.trim())).toEqual(["As first written."]);
+    await b.put("chat", "rules/each.md", "---\ndescription: Each.\nagents: all\nat: run-end\nrepeat: always\n---\nAs edited.\n");
+    await b.put("chat", "rules/added.md", "---\ndescription: Added.\nagents: all\nat: run-end\nrepeat: always\n---\nAdded.\n");
+    expect((await r.runEnd.due({ agent: author, call: 2 })).map((f) => f.text.trim())).toEqual(["Added.", "As edited."]);
   });
 
   test("a name nothing has, or a circle of rules, is reported, and holds the rule out of force", async () => {

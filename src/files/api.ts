@@ -403,8 +403,10 @@ export interface BriefingFired extends Fired {
 }
 
 /**
- * The user's triggered rules for one run (a turn, a job, a talk): the rules in force when it began,
- * which fire on the events the runner hands them, with their texts filled from the facts' fields.
+ * The user's triggered rules for one run (a turn, a job, a talk): the rules in force as the files
+ * stand at each moment one would fire (a turn's start, a tool call or result, a judged message, a
+ * run's end, before compaction; on the stream, as read at the start of the model call), which fire
+ * on the events the runner hands them, with their texts filled from the facts' fields.
  * Each method answers which rules fire and keeps to their `repeat:`; what happens next (stopping a
  * stream, another call, a held tool) is the runner's. On the stream a rule fires at most once in one model call.
  *
@@ -414,7 +416,7 @@ export interface BriefingFired extends Fired {
  * pattern's text there is filled from `matched` alone.
  */
 export interface RuleRun {
-  /** Rules whose `fact:` or text names a fact, a group or a field nobody gives (found when the run began), and rules whose facts could not be read (as it goes; the run goes on without them). */
+  /** Rules whose `fact:` or text names a fact, a group or a field nobody gives (each found when it is first read), and rules whose facts could not be read (as it goes; the run goes on without them). */
   readonly problems: Problem[];
   /** A turn begins: counts it, and gives what is due in the lead's briefing: rules `at: turn-start` whose fact holds, rules whose `every:` comes round, and texts held from the last turn. */
   turnStart(agent: AgentRef): Promise<BriefingFired[]>;

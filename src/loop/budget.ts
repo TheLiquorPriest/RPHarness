@@ -26,19 +26,19 @@ export function addUsage(into: Usage, usage: Usage): void {
 
 /**
  * How a budget counts, where not as its own: `used`, a count that budgets of the same spend share
- * (each of the user's jobs holds the day's to its own setting; a turn's later run, what its earlier
- * runs spent); and `cachedWeight`, the share of a token that a token read again from a provider's
- * cache counts as against `tokens` (1 when absent).
+ * (a turn's later run, what its earlier runs spent); `spent`, a count kept elsewhere that the budget
+ * reads as it stands and never counts into (the user's spend over the last 24 hours, which the usage
+ * book counts as each call ends); and `cachedWeight`, the share of a token that a token read again
+ * from a provider's cache counts as against `tokens` (1 when absent).
  */
 export interface BudgetCount {
   used?: Usage;
+  spent?: () => Usage;
   cachedWeight?: number;
 }
 
 /** What the next call is asked about its answer's room. */
 export interface RoomAsk {
-  /** The call's prompt, as estimated before it is sent: what the call spends of a limit on tokens sent and written together. */
-  prompt: number;
   /** The least room an answer is given (`limits.answerFloor`): with less left under a limit, no call is made. */
   floor: number;
   /** The other bounds on the answer, each absent where there is none: the model's longest reply (or the connection's entry), the call's own, the agent's answer per call. */
@@ -59,6 +59,7 @@ export class Budget {
   /** The budget whatever is counted here counts against too, and whose limits hold here as well. */
   readonly #over: Budget | undefined;
   readonly #cachedWeight: number;
+  readonly #spent: (() => Usage) | undefined;
 
   /** Each limit absent is no limit. */
   constructor(per: LimitHit["per"], max: Readonly<Partial<Record<Counted, number>>>, over?: Budget, count: BudgetCount = {}) {
@@ -66,6 +67,7 @@ export class Budget {
     this.#max = max;
     this.#over = over;
     this.used = count.used ?? emptyUsage();
+    this.#spent = count.spent;
     this.#cachedWeight = count.cachedWeight ?? 1;
   }
 
@@ -83,15 +85,17 @@ export class Budget {
 
   /**
    * The room of the next call's answer (§10.11; AuHarness-R43): the least of `ask.bounds` and of the
-   * tokens left under every limit on what is written, here and in every budget above (`tokensOut`;
-   * and `tokens`, once the call's prompt is counted in it). Under the floor, the tightest such limit.
+   * tokens left under every limit on what is written, here and in every budget above (`tokensOut`,
+   * and `tokens`, sent and written together, as it counts now). Under the floor, the tightest such
+   * limit.
    */
   room(agent: AgentRef, ask: RoomAsk): Room {
     let tightest: { left: number; hit: LimitHit } | undefined;
     for (let budget: Budget | undefined = this; budget !== undefined; budget = budget.#over) {
+      const used = budget.#counted();
       const written: [Counted, number][] = [
-        ["tokensOut", budget.used.output],
-        ["tokens", budget.#tokens() + ask.prompt],
+        ["tokensOut", used.output],
+        ["tokens", budget.#tokens(used)],
       ];
       for (const [limit, value] of written) {
         const max = budget.#max[limit];
@@ -105,18 +109,25 @@ export class Budget {
     return { room: bounds.length > 0 ? Math.min(...bounds) : undefined };
   }
 
+  /** Counts a call's usage here, where this budget keeps its own count, and in every budget above. */
   count(usage: Usage): void {
-    addUsage(this.used, usage);
+    if (this.#spent === undefined) addUsage(this.used, usage);
     this.#over?.count(usage);
+  }
+
+  /** What this budget holds to its limits: its own count, or the one kept elsewhere as it stands. */
+  #counted(): Usage {
+    return this.#spent?.() ?? this.used;
   }
 
   /** This budget's own limits reached, in the order they are counted. */
   #reachedHere(agent: AgentRef): LimitHit[] {
+    const used = this.#counted();
     const counts: [Counted, number][] = [
-      ["calls", this.used.calls],
-      ["tokensIn", this.used.input],
-      ["tokensOut", this.used.output],
-      ["tokens", this.#tokens()],
+      ["calls", used.calls],
+      ["tokensIn", used.input],
+      ["tokensOut", used.output],
+      ["tokens", this.#tokens(used)],
     ];
     return counts.flatMap(([limit, value]) => {
       const max = this.#max[limit];
@@ -125,8 +136,7 @@ export class Budget {
   }
 
   /** Tokens written, and sent without the cache, in full; a token read again from the cache at its weight; in whole tokens. */
-  #tokens(): number {
-    const { input, cacheRead, output } = this.used;
+  #tokens({ input, cacheRead, output }: Usage): number {
     return Math.round(input - cacheRead + cacheRead * this.#cachedWeight + output);
   }
 

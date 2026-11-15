@@ -49,7 +49,7 @@ import type { ModelTexts } from "./texts";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
-export { DEFAULT_CHARS_PER_TOKEN, callUsage, estimateOf, messageText, promptTokens, requestTokens, tokensOf } from "./tokens";
+export { callUsage, estimateOf, messageText, promptTokens, requestTokens, tokensOf } from "./tokens";
 export type { CallUsage, ProviderCount, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
 export { limitsOf } from "./limits";

@@ -11,10 +11,7 @@
 import type { Api, AssistantMessage, Message, Model, Tool } from "@earendil-works/pi-ai";
 import { contentText } from "@earendil-works/pi-ai";
 
-/** Characters per token for an estimate made before a provider reports its own count, where the setting gives none. */
-export const DEFAULT_CHARS_PER_TOKEN = 3.2;
-
-/** A text's tokens, estimated: whole tokens, rounded up. */
+/** A text's tokens, estimated at the ratio the user's `tokens.charsPerToken` gives: whole tokens, rounded up. */
 export function tokensOf(text: string, charsPerToken: number): number {
   return Math.ceil(text.length / charsPerToken);
 }

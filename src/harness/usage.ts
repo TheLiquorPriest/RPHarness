@@ -1,12 +1,56 @@
 // What runs spent (Appendix A `UsageApi`): calls and tokens per run and per agent, what each user's
-// runs spent on a day (kept in the host's store under the user alone, so it outlives a restart and
-// is never another user's), and how full each working agent's context is. Counted from the trace, as
-// each agent's work ends.
-import type { AgentRef, Clock, JsonValue, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
+// agents spent over the last 24 hours, which the daily caps count (§10.11; plan/CONTRACT.md
+// condition 5, READINGS R-35), and how full each working agent's context is. Everything is kept in
+// the host's store under the user alone, so it outlives a restart and is never another user's.
+//
+// Each call counts the moment it ends: it goes into the record of the user's spend at once, in
+// memory and in the store, in a document per UTC hour with its time, so a cap counts exactly the last
+// 24 hours and a crash loses at most the call in flight. What an agent's work spent beyond the calls
+// that ended whole (a call a stop or a limit cut off) counts as its work ends. A job's calls are
+// marked as a job's, so the jobs' own day cap reads the same record.
+//
+// A run's usage is counted from the trace as each agent's work ends; once the run is over it is kept
+// in the store for as many of the user's runs as his setting says, the oldest going past it, so it
+// can be asked for after a restart.
+//
+// Older day records (one per calendar day, kept before the hours were) count toward the 24 hours
+// they fall in, read once, the first time this process reads the user's spend: the day's usage of
+// every agent, and the day's job tokens, in each of their older forms. Read, they leave the store;
+// a job record keeps its counts of jobs.
+import type { AgentRef, Clock, FilesPort, JsonObject, JsonValue, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
 import { addUsage, emptyUsage } from "../loop/budget";
+import { readSettingsOf } from "./settings";
+import { USAGE } from "./settings/usage";
 
-/** How many finished runs' usage is kept to be asked for; the trace has every one. */
-const KEPT_RUNS = 1_000;
+/** One hour, the span of one stored document of spend: a stored form, not a setting. */
+const HOUR_MS = 3_600_000;
+/** The daily caps' window (condition 5): a day that rolls with the clock, with no time zone and no midnight. Not a setting: the caps are set per day. */
+const DAY_MS = 24 * HOUR_MS;
+
+const HOURS = "usage/hours/";
+const RUNS = "usage/runs/";
+/** The user's finished runs whose usage is kept, oldest first. */
+const KEPT = "usage/kept";
+/** The older records, one per calendar day: every agent's usage, and the jobs' counts with their tokens. */
+const OLD_DAYS = "usage/days/";
+const OLD_JOB_DAYS = "jobs/days/";
+
+/** What a spend counts into: a turn's call (every agent's spend), a job's (the jobs' too), or an older day record of every agent's spend or of the jobs' tokens alone. */
+type SpentIn = "turn" | "job" | "day" | "jobs";
+
+interface Spent {
+  at: number;
+  in: SpentIn;
+  usage: Usage;
+}
+
+/** What the user's agents spent over the last 24 hours, as it stands each time it is asked. */
+export interface DaySpend {
+  /** Every agent's, turns and jobs alike. */
+  all(): Usage;
+  /** His jobs' agents' alone. */
+  jobs(): Usage;
+}
 
 interface RunBook {
   run: string;
@@ -16,9 +60,19 @@ interface RunBook {
   agents: Map<string, { agent: AgentRef; usage: Usage }>;
 }
 
+/** A user's spend as this process holds it: every spend of the last 24 hours, and the hour last written, so older hours are let go once an hour. */
+interface Day {
+  spends: Spent[];
+  hour?: number;
+}
+
+function isObject(value: JsonValue | undefined): value is JsonObject {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /** A usage as the store keeps it: its counts, each 0 where it holds none. */
 function storedUsage(value: JsonValue | undefined): Usage {
-  const fields = typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+  const fields = isObject(value) ? value : {};
   const number = (name: string): number => {
     const n = fields[name];
     return typeof n === "number" ? n : 0;
@@ -27,26 +81,113 @@ function storedUsage(value: JsonValue | undefined): Usage {
   return { calls: number("calls"), input: number("input"), cacheRead: number("cacheRead"), cacheWrite: number("cacheWrite"), output: number("output"), ...(typeof reasoning === "number" ? { reasoning } : {}) };
 }
 
+/**
+ * An older day record's tokens for `user`: one number, its tokens, counted in full; its token parts,
+ * as a usage or under `tokens`; or, written before the store kept each user apart, a map by user
+ * whose entry for him is one of those. A job record that holds only its counts of jobs has none.
+ */
+function olderTokens(value: JsonValue | undefined, user: string): Usage | undefined {
+  if (typeof value === "number") return value > 0 ? { ...emptyUsage(), input: value } : undefined;
+  if (!isObject(value)) return undefined;
+  const tokens = value["tokens"];
+  if (isObject(tokens)) return storedUsage(tokens);
+  if (["calls", "input", "cacheRead", "cacheWrite", "output"].some((name) => typeof value[name] === "number")) return storedUsage(value);
+  if ("all" in value || "connections" in value) return undefined;
+  return Object.hasOwn(value, user) ? olderTokens(value[user], user) : undefined;
+}
+
+/** A spend as an hour's document keeps one; none where it is not one. */
+function spentOf(value: JsonValue): Spent | undefined {
+  if (!isObject(value) || typeof value["at"] !== "number") return undefined;
+  const kept = value["in"];
+  const at = value["at"];
+  return kept === "turn" || kept === "job" || kept === "day" || kept === "jobs" ? { at, in: kept, usage: storedUsage(value) } : undefined;
+}
+
+function spentValue(spent: Spent): JsonObject {
+  return { at: spent.at, in: spent.in, ...spent.usage };
+}
+
+/** The spends an hour's document holds. */
+function hourSpends(value: JsonValue | undefined): Spent[] {
+  const kept = isObject(value) ? value["spends"] : undefined;
+  return Array.isArray(kept) ? kept.flatMap((item) => spentOf(item) ?? []) : [];
+}
+
+/** The start of the UTC hour `at` falls in. */
+function hourOf(at: number): number {
+  return Math.floor(at / HOUR_MS) * HOUR_MS;
+}
+
+/** Where the spends of the UTC hour starting at `hour` are kept: `usage/hours/2026-05-01T13`. */
+function hourKey(hour: number): string {
+  return `${HOURS}${new Date(hour).toISOString().slice(0, 13)}`;
+}
+
+/** The last moment of the day an older record names (`2026-05-01`), counted as UTC; none for a key that names no day. */
+function dayEnd(day: string): number | undefined {
+  const start = Date.parse(`${day}T00:00:00Z`);
+  return Number.isNaN(start) ? undefined : start + DAY_MS - 1;
+}
+
+function isAgentRef(value: JsonValue | undefined): value is JsonObject & { id: string; definition: string } {
+  return isObject(value) && typeof value["id"] === "string" && typeof value["definition"] === "string";
+}
+
+/** A run's usage as the store keeps it; none where it is not one. */
+function runUsageOf(value: JsonValue | undefined, run: string): RunUsage | undefined {
+  if (!isObject(value) || value["run"] !== run || !Array.isArray(value["agents"])) return undefined;
+  const agents = value["agents"].flatMap((item) => {
+    if (!isObject(item) || !isAgentRef(item["agent"])) return [];
+    const { id, definition, parent, job } = item["agent"];
+    const agent: AgentRef = { id, definition, ...(typeof parent === "string" ? { parent } : {}), ...(typeof job === "string" ? { job } : {}) };
+    return [{ agent, usage: storedUsage(item["usage"]) }];
+  });
+  return { run, total: storedUsage(value["total"]), agents };
+}
+
+function runUsage(book: RunBook): RunUsage {
+  return { run: book.run, total: { ...book.total }, agents: [...book.agents.values()].map(({ agent, usage }) => ({ agent, usage: { ...usage } })) };
+}
+
+function sum(spends: readonly Spent[], counted: readonly SpentIn[]): Usage {
+  const total = emptyUsage();
+  for (const spent of spends) if (counted.includes(spent.in)) addUsage(total, spent.usage);
+  return total;
+}
+
 function gaugeKey(scope: Scope, agent: string): string {
   return JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null, agent]);
 }
 
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** What the usage book reaches the world through. */
+export interface UsageDeps {
+  store: StorePort;
+  clock: Pick<Clock, "now">;
+  log: Log;
+  /** For the user's setting of how many finished runs' usage is kept, read at the levels every chat shares. */
+  files: FilesPort;
+}
+
 export class UsageBook implements UsageApi {
-  readonly #store: StorePort;
-  readonly #clock: Clock;
-  readonly #log: Log;
+  readonly #d: UsageDeps;
   readonly #runs = new Map<string, RunBook>();
-  readonly #finished: string[] = [];
   readonly #gauges = new Map<string, WindowGauge>();
   /** Each run's agents with a gauge, so the gauges go when the run ends. */
   readonly #gauged = new Map<string, string[]>();
-  /** Writes to the day's totals not yet kept. */
+  /** Each user's spend, read from the store the first time this process asks. */
+  readonly #days = new Map<string, Promise<Day>>();
+  /** What each working agent's calls that ended whole have counted, by run and agent: its work's end counts the rest. */
+  readonly #ended = new Map<string, Usage>();
+  /** Writes not yet kept. */
   readonly #writing = new Set<Promise<unknown>>();
 
-  constructor(store: StorePort, clock: Clock, log: Log) {
-    this.#store = store;
-    this.#clock = clock;
-    this.#log = log;
+  constructor(deps: UsageDeps) {
+    this.#d = deps;
   }
 
   /** A run begins. */
@@ -67,10 +208,19 @@ export class UsageBook implements UsageApi {
     // A run is its user's, as its first record names him: the run and its user are the harness's, never the asker's.
     const book = this.#runs.get(record.run);
     if (book !== undefined) book.user ??= record.scope.user;
+    const working = JSON.stringify([record.run, record.agent.id]);
+    const kind: SpentIn = record.agent.job !== undefined ? "job" : "turn";
+    if (event.kind === "agent_started") {
+      this.#ended.set(working, emptyUsage());
+      return;
+    }
     if (event.kind === "call_ended") {
       const gauge = this.#gauges.get(gaugeKey(record.scope, record.agent.id));
       // What the call was sent is what the agent's context held.
       if (gauge !== undefined && event.usage.input > 0) gauge.used = event.usage.input;
+      const ended = this.#ended.get(working);
+      if (ended !== undefined) addUsage(ended, event.usage);
+      this.#spend(record.scope.user, { at: record.at, in: kind, usage: event.usage });
       return;
     }
     if (event.kind !== "agent_ended") return;
@@ -80,49 +230,158 @@ export class UsageBook implements UsageApi {
       addUsage(entry.usage, event.usage);
       book.agents.set(record.agent.id, entry);
     }
-    // The user's day's counts are his across his chats: they are kept under his scope alone.
-    const user = { user: record.scope.user };
-    const day = this.#clock.day(record.at);
-    const writing = this.#store
-      .update(user, `usage/days/${day}`, (current) => {
-        const total = storedUsage(current);
-        addUsage(total, event.usage);
-        return { ...total };
-      })
-      .catch((error: unknown) => this.#log.error("A day's usage could not be kept.", { day, error: error instanceof Error ? error.message : String(error) }));
-    this.#writing.add(writing);
-    void writing.finally(() => this.#writing.delete(writing));
+    // What its work spent beyond the calls that ended whole: a call a stop or a limit cut off.
+    const ended = this.#ended.get(working) ?? emptyUsage();
+    this.#ended.delete(working);
+    const rest: Usage = {
+      calls: Math.max(0, event.usage.calls - ended.calls),
+      input: Math.max(0, event.usage.input - ended.input),
+      cacheRead: Math.max(0, event.usage.cacheRead - ended.cacheRead),
+      cacheWrite: Math.max(0, event.usage.cacheWrite - ended.cacheWrite),
+      output: Math.max(0, event.usage.output - ended.output),
+    };
+    if (rest.calls + rest.input + rest.cacheRead + rest.cacheWrite + rest.output > 0) this.#spend(record.scope.user, { at: record.at, in: kind, usage: rest });
   }
 
-  /** A run ended: its usage is kept to be asked for, and its gauges go. */
+  /** A run ended: its usage is kept in the store, to be asked for after a restart, and its gauges go. */
   end(run: string): void {
     for (const key of this.#gauged.get(run) ?? []) this.#gauges.delete(key);
     this.#gauged.delete(run);
-    this.#finished.push(run);
-    while (this.#finished.length > KEPT_RUNS) {
-      const oldest = this.#finished.shift();
-      if (oldest !== undefined) this.#runs.delete(oldest);
+    const book = this.#runs.get(run);
+    const user = book?.user;
+    if (book === undefined || user === undefined) {
+      this.#runs.delete(run);
+      return;
     }
+    // Asked for while it is being kept, it answers from memory.
+    this.#pend(this.#keepRun(user, book).finally(() => this.#runs.delete(run)), "A run's usage could not be kept.", { run });
   }
 
-  /** Waits for the day's totals to be kept. */
+  /** Waits for what is being kept. */
   async settled(): Promise<void> {
-    await Promise.all([...this.#writing]);
+    while (this.#writing.size > 0) await Promise.all([...this.#writing]);
   }
 
   /** A run's usage, to the user whose run it is: asked with another user, it answers as for a run that is not there. */
   async run(user: string, run: string): Promise<RunUsage | undefined> {
     const book = this.#runs.get(run);
-    if (book === undefined || book.user !== user) return undefined;
-    return { run, total: { ...book.total }, agents: [...book.agents.values()].map(({ agent, usage }) => ({ agent, usage: { ...usage } })) };
+    if (book !== undefined) return book.user === user ? runUsage(book) : undefined;
+    return runUsageOf(await this.#d.store.get({ user }, `${RUNS}${run}`), run);
   }
 
-  async day(user: string, day?: string): Promise<Usage> {
-    return storedUsage(await this.#store.get({ user }, `usage/days/${day ?? this.#clock.day()}`));
+  /** What the user's agents spent over the last 24 hours. */
+  async day(user: string): Promise<Usage> {
+    return (await this.spend(user)).all();
+  }
+
+  /** The user's spend over the last 24 hours, as it stands each time it is asked: what the daily caps hold every turn and job to. */
+  async spend(user: string): Promise<DaySpend> {
+    const day = await this.#day(user);
+    const window = (): Spent[] => {
+      const since = this.#d.clock.now() - DAY_MS;
+      if (day.spends.some((spent) => spent.at <= since)) day.spends = day.spends.filter((spent) => spent.at > since);
+      return day.spends;
+    };
+    return { all: () => sum(window(), ["turn", "job", "day"]), jobs: () => sum(window(), ["job", "jobs"]) };
   }
 
   async window(scope: Scope, agent: string): Promise<WindowGauge | undefined> {
     const gauge = this.#gauges.get(gaugeKey(scope, agent));
     return gauge === undefined ? undefined : { ...gauge };
+  }
+
+  /** Counts a spend in the user's day at once and keeps it in its hour's document. */
+  #spend(user: string, spent: Spent): void {
+    const kept = this.#day(user).then(async (day) => {
+      day.spends.push(spent);
+      await this.#d.store.update({ user }, hourKey(hourOf(spent.at)), (current) => ({ spends: [...hourSpends(current).map(spentValue), spentValue(spent)] }));
+      const hour = hourOf(this.#d.clock.now());
+      if (day.hour !== hour) {
+        day.hour = hour;
+        await this.#letGo(user);
+      }
+    });
+    this.#pend(kept, "A call's usage could not be kept in the day's record.", { at: spent.at });
+  }
+
+  #day(user: string): Promise<Day> {
+    const known = this.#days.get(user);
+    if (known !== undefined) return known;
+    const read = this.#readDay(user);
+    this.#days.set(user, read);
+    // A read that failed is tried again by the next ask.
+    void read.catch(() => {
+      if (this.#days.get(user) === read) this.#days.delete(user);
+    });
+    return read;
+  }
+
+  /** The user's spend of the last 24 hours from the store, with his older day records read in once. */
+  async #readDay(user: string): Promise<Day> {
+    const { store } = this.#d;
+    const now = this.#d.clock.now();
+    const since = now - DAY_MS;
+    await this.#readOlder(user, since);
+    const hours: number[] = [];
+    for (let hour = hourOf(since); hour <= now; hour += HOUR_MS) hours.push(hour);
+    const docs = await Promise.all(hours.map((hour) => store.get({ user }, hourKey(hour))));
+    const spends = docs.flatMap((doc) => hourSpends(doc)).filter((spent) => spent.at > since);
+    await this.#letGo(user);
+    return { spends, hour: hourOf(now) };
+  }
+
+  /**
+   * The user's older day records: each counts toward the 24 hours it falls in, at the last moment of
+   * its day (now, for today's), kept in that hour's document; then it leaves the store, but for a
+   * job record's counts of jobs, which stay.
+   */
+  async #readOlder(user: string, since: number): Promise<void> {
+    const { store } = this.#d;
+    const now = this.#d.clock.now();
+    const older: [string, SpentIn][] = [...(await store.list({ user }, OLD_DAYS)).map((key): [string, SpentIn] => [key, "day"]), ...(await store.list({ user }, OLD_JOB_DAYS)).map((key): [string, SpentIn] => [key, "jobs"])];
+    for (const [key, kind] of older) {
+      const value = await store.get({ user }, key);
+      const end = dayEnd(key.slice(kind === "day" ? OLD_DAYS.length : OLD_JOB_DAYS.length));
+      const usage = olderTokens(value, user);
+      if (end !== undefined && end > since && usage !== undefined) {
+        const spent: Spent = { at: Math.min(end, now), in: kind, usage };
+        await store.update({ user }, hourKey(hourOf(spent.at)), (current) => ({ spends: [...hourSpends(current).map(spentValue), spentValue(spent)] }));
+      }
+      if (kind === "jobs" && isObject(value) && ("all" in value || "connections" in value)) {
+        const { tokens: _tokens, ...counts } = value;
+        await store.set({ user }, key, counts);
+      } else await store.delete({ user }, key);
+    }
+  }
+
+  /** Lets go of the user's hours that hold nothing of the last 24. */
+  async #letGo(user: string): Promise<void> {
+    const since = this.#d.clock.now() - DAY_MS;
+    const gone = (await this.#d.store.list({ user }, HOURS)).filter((key) => {
+      const start = Date.parse(`${key.slice(HOURS.length)}:00:00Z`);
+      return !Number.isNaN(start) && start + HOUR_MS <= since;
+    });
+    await Promise.all(gone.map((key) => this.#d.store.delete({ user }, key)));
+  }
+
+  /** Keeps a finished run's usage under its user, and lets the oldest go past the count his setting keeps. */
+  async #keepRun(user: string, book: RunBook): Promise<void> {
+    const { store, files, log } = this.#d;
+    const settings = await readSettingsOf([USAGE] as const, { layers: () => files.layers({ user }) }, files, { user }, log);
+    await store.set({ user }, `${RUNS}${book.run}`, runUsage(book) as unknown as JsonObject);
+    const gone: string[] = [];
+    await store.update({ user }, KEPT, (current) => {
+      const kept = (Array.isArray(current) ? current : []).filter((run): run is string => typeof run === "string" && run !== book.run);
+      kept.push(book.run);
+      gone.push(...kept.splice(0, Math.max(0, kept.length - settings.usage.keptRuns)));
+      return kept;
+    });
+    await Promise.all(gone.map((run) => store.delete({ user }, `${RUNS}${run}`)));
+  }
+
+  #pend(work: Promise<unknown>, message: string, fields: Record<string, JsonValue>): void {
+    const kept = work.catch((error: unknown) => this.#d.log.error(message, { ...fields, error: errorText(error) }));
+    this.#writing.add(kept);
+    void kept.finally(() => this.#writing.delete(kept));
   }
 }

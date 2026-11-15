@@ -17,28 +17,29 @@ function spent(fields: Partial<Usage>): Usage {
 
 describe("a call's room", () => {
   test("a call's room is the least of the model's longest reply, the answer per call and every budget's tokens out left; under the floor no call is made and the limit is named", () => {
-    const day = new Budget("day", { tokens: 100_000 }, undefined, { used: spent({ input: 90_000, output: 4_000 }) });
+    const day = new Budget("day", { tokens: 100_000 }, undefined, { used: spent({ input: 90_500, output: 4_000 }) });
     const turn = new Budget("turn", { tokensOut: 20_000 }, day);
     const agent = new Budget("agent", { tokensOut: 9_000 }, turn);
     agent.count(spent({ calls: 1, input: 1_000, output: 3_000 }));
-    // Agent: 6,000 out left; turn: 17,000; the day: 100,000 - (91,000 + 7,000) - the prompt's 500 = 1,500.
-    expect(agent.room(author, { prompt: 500, floor: 256, bounds: [8_192, undefined, 4_000] })).toEqual({ room: 1_500 });
+    // Agent: 6,000 out left; turn: 17,000; the day, sent and written together: 100,000 - (91,500 + 7,000) = 1,500.
+    expect(agent.room(author, { floor: 256, bounds: [8_192, undefined, 4_000] })).toEqual({ room: 1_500 });
     // A bound tighter than every budget's room is the room.
-    expect(agent.room(author, { prompt: 500, floor: 256, bounds: [1_024, undefined, undefined] })).toEqual({ room: 1_024 });
+    expect(agent.room(author, { floor: 256, bounds: [1_024, undefined, undefined] })).toEqual({ room: 1_024 });
     // No bound and no limit on what is written: nothing bounds the answer.
-    expect(new Budget("agent", { calls: 3 }).room(author, { prompt: 500, floor: 256, bounds: [undefined] })).toEqual({ room: undefined });
-    // The next prompt leaves the day under the floor: no call, the day's cap named with what it would stand at.
-    expect(agent.room(author, { prompt: 1_900, floor: 256, bounds: [8_192] })).toEqual({ hit: { limit: "tokens", per: "day", max: 100_000, value: 99_900 } });
+    expect(new Budget("agent", { calls: 3 }).room(author, { floor: 256, bounds: [undefined] })).toEqual({ room: undefined });
+    // A call that leaves the day under the floor: no further call, the day's cap named with what it stands at.
+    agent.count(spent({ calls: 1, input: 1_300 }));
+    expect(agent.room(author, { floor: 256, bounds: [8_192] })).toEqual({ hit: { limit: "tokens", per: "day", max: 100_000, value: 99_800 } });
     // The agent's own limit the tightest under the floor: it is the one named, with whose it is.
     const near = new Budget("agent", { tokensOut: 3_200 }, new Budget("turn", { tokensOut: 20_000 }));
     near.count(spent({ calls: 1, output: 3_000 }));
-    expect(near.room(author, { prompt: 0, floor: 256, bounds: [] })).toEqual({ hit: { limit: "tokensOut", per: "agent", max: 3_200, value: 3_000, agent: author } });
+    expect(near.room(author, { floor: 256, bounds: [] })).toEqual({ hit: { limit: "tokensOut", per: "agent", max: 3_200, value: 3_000, agent: author } });
   });
 
   test("a turn's later run counts on from what its earlier runs spent", () => {
     const earlier = spent({ calls: 39, input: 50_000, output: 9_800 });
     const turn = new Budget("turn", { calls: 40, tokensOut: 10_000 }, undefined, { used: earlier });
-    expect(turn.room(author, { prompt: 0, floor: 256, bounds: [] })).toEqual({ hit: { limit: "tokensOut", per: "turn", max: 10_000, value: 9_800 } });
+    expect(turn.room(author, { floor: 256, bounds: [] })).toEqual({ hit: { limit: "tokensOut", per: "turn", max: 10_000, value: 9_800 } });
     turn.count(spent({ calls: 1 }));
     expect(turn.reached(author).map((hit) => hit.limit)).toEqual(["calls"]);
     expect(earlier.calls).toBe(40);

@@ -19,8 +19,9 @@
 // What has no chat in view (a connection's test, a sign-in, a request passed through) reads its
 // settings at the levels every chat shares, through a read that names only the user (`UserScope`).
 
-import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Sampling, Scope, SettingTakes, UserScope } from "../../contract";
+import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
 import type { Guidance } from "../../files/api";
+import type { CallTerms } from "../../loop/types";
 import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
 import { COMPACTION } from "./compaction";
@@ -33,9 +34,10 @@ import { REPLY } from "./reply";
 import { RULES } from "./rules";
 import { TOOLS } from "./tools";
 import { TRACE } from "./trace";
+import { USAGE } from "./usage";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, JOBS, MODELS, CALLS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
+export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE };
@@ -443,7 +445,7 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
  * each call whose own settings give none. An agent of no definition (a judging call, the writer of
  * a narrator's reply, which takes the preset's) has no sampling of its own.
  */
-export function callTerms(settings: Settings, definition?: string): { charsPerToken: number; answerFloor: number; sampling?: Sampling } {
+export function callTerms(settings: Settings, definition?: string): CallTerms {
   const own = definition !== undefined && Object.hasOwn(settings.sampling, definition) ? settings.sampling[definition] : undefined;
   return { charsPerToken: settings.tokens.charsPerToken, answerFloor: settings.answerFloor, ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}) };
 }

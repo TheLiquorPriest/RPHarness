@@ -120,6 +120,8 @@ class Run implements RuleRun {
   /** Each question put, by its id: the name of the rule that asked it, which the answer finds as it reads then. */
   readonly #asked = new Map<string, string>();
   #questions = 0;
+  /** The read of the rules under way, which every moment that comes meanwhile waits on. */
+  #reading: Promise<void> | undefined;
 
   constructor(input: RuleRunInput) {
     this.#scope = input.scope;
@@ -152,9 +154,17 @@ class Run implements RuleRun {
     }
   }
 
-  /** The rules in force as the files stand now. */
-  async #now(): Promise<void> {
-    this.#take(await this.#inForce());
+  /**
+   * The rules in force as the files stand now. Moments that come while a read is under way share it,
+   * so they go on in the order they came, and two calls side by side fire a rule once, the first.
+   */
+  #now(): Promise<void> {
+    this.#reading ??= this.#inForce()
+      .then((rules) => this.#take(rules))
+      .finally(() => {
+        this.#reading = undefined;
+      });
+    return this.#reading;
   }
 
   #for(agent: AgentRef): Rule[] {

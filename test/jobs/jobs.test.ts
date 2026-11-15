@@ -6,10 +6,11 @@
 // and the host's word that cuts it off; and a restart that finds a job interrupted.
 // Everything here is invented.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { AgentRef, JobView, JsonValue, TraceRecord } from "../../src/contract";
+import type { AgentRef, JobView, JsonValue, StorePort, TraceRecord } from "../../src/contract";
 import { createHarness } from "../../src/index";
 import { type Answer, type Reply, scriptedModel } from "../../src/testing/rig";
 import { gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
+import { userHarness } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -364,6 +365,94 @@ describe("what stops a job", () => {
       expect((await again.jobs!.list({ user: USER, states: ["interrupted"] })).map((job) => job.id).sort()).toEqual(["crashed-1", id].sort());
     } finally {
       await again.close();
+    }
+  });
+});
+
+describe("a job and the user it is for", () => {
+  test("a store whose list fails once for the user, then a start, then a list: the job is told queued, running and done, never interrupted, and the store holds its true state", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [] }));
+    let failures = 1;
+    // Resolves once the store holds the job as running, so the search that runs again finds it there.
+    const kept = Promise.withResolvers<void>();
+    const flaky: StorePort = {
+      ...s.env.store,
+      list: async (scope, prefix) => {
+        if (failures > 0) {
+          failures -= 1;
+          throw new Error("The store did not answer.");
+        }
+        return s.env.store.list(scope, prefix);
+      },
+      set: async (scope, key, value) => {
+        await s.env.store.set(scope, key, value);
+        if (key.startsWith("jobs/all/") && typeof value === "object" && value !== null && !Array.isArray(value) && value["state"] === "running") kept.resolve();
+      },
+    };
+    const held = gate();
+    const { harness } = userHarness(s, { "": scriptedModel([{ pieces: [{ hold: held }, { text: "Counted seven." }] }], { clock: s.clock }) }, { store: flaky });
+    try {
+      // The search for what a restart cut off fails at this user's first call, and the start goes on.
+      const job = await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+      expect(s.logged.some((line) => line.message === "The jobs a restart cut off could not be found.")).toBe(true);
+      await kept.promise;
+      // The search runs again at his next call, while the job runs: it is no job a restart cut off.
+      expect((await harness.jobs!.list({ user: USER })).map((view) => [view.id, view.state])).toEqual([[job.id, "running"]]);
+
+      held.open();
+      await jobEnded(s, "done");
+      expect(toldJobs(s).map((view) => view.state)).toEqual(["queued", "running", "done"]);
+      expect(await harness.jobs!.get(USER, job.id)).toMatchObject({ state: "done", report: "Counted seven." });
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("a job's lead and its sub-agents are given a model choice naming the job's user", async () => {
+    const keeper = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [delegate]\n---\nFixture keeper: you count what you are asked to count.\n";
+    const clerk = "---\nname: clerk\ndescription: Fixture clerk.\nmodel: default\ntools: [todo]\n---\nFixture clerk: you note what you are asked to note.\n";
+    const s = (open = await stage({ files: { ".agents/keeper.md": keeper, ".agents/clerk.md": clerk }, answers: [] }));
+    // The keeper asks the clerk, who answers, and the keeper ends: three calls, one after the other.
+    const model = scriptedModel([{ pieces: [{ call: "delegate", args: { agent: "clerk", brief: "Note the bell count." } }] }, { pieces: [{ text: "Noted the count." }] }, { pieces: [{ text: "Counted and noted." }] }], { clock: s.clock });
+    const { harness, source } = userHarness(s, { "": model });
+    try {
+      await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+      await jobEnded(s, "done");
+
+      expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted and noted." });
+      // The job's lead and the clerk it started each asked for a model on the job's user's connections, and no other's.
+      expect(source.asked.map((choice) => [choice.user, choice.connectionId])).toEqual([
+        [USER, null],
+        [USER, null],
+      ]);
+    } finally {
+      await harness.close();
+    }
+  });
+
+  test("a running record in A's store that names B: A's first call neither writes it to B's store nor tells it to the host as B's", async () => {
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [] }));
+    const stray: JobView = { id: "stray-1", agent: "keeper", brief: BRIEF, state: "running", scope: { user: "second-reader", chat: "quay", session: "s9" }, startedBy: "user", started: 1, usage: { calls: 0, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 } };
+    await s.env.store.set({ user: USER }, "jobs/all/stray-1", stray as unknown as JsonValue);
+    const written: string[] = [];
+    const watched: StorePort = {
+      ...s.env.store,
+      set: async (scope, key, value) => {
+        written.push(`${scope.user}:${key}`);
+        return s.env.store.set(scope, key, value);
+      },
+    };
+    const { harness } = userHarness(s, {}, { store: watched });
+    try {
+      await harness.jobs!.list({ user: USER });
+
+      // Nothing was written, to either user's store, and the host was told nothing.
+      expect(written).toEqual([]);
+      expect(toldJobs(s)).toEqual([]);
+      expect(await s.env.store.get({ user: USER }, "jobs/all/stray-1")).toMatchObject({ state: "running", scope: { user: "second-reader" } });
+      expect(s.logged.filter((line) => line.level === "warn").map((line) => line.fields)).toEqual([{ job: "stray-1", user: USER, names: "second-reader" }]);
+    } finally {
+      await harness.close();
     }
   });
 });

@@ -2,12 +2,13 @@
 // what is outside the view, dropping an agent's writes, the session's tools, its records); and the
 // kit failing hosts wrapped to break the jail.
 
-import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AgentRef, Scope, ToolCtx, TraceRecord } from "../../src/contract/index";
-import type { FolderHost } from "../../src/hosts/folder/index";
+import { createFolderHost, type FolderHost } from "../../src/hosts/folder/index";
 import { KIT_SEED, runContractKit } from "../../src/testing/kit/index";
 import { folderKitFactory, KIT_MANIFEST, levelDir, makeFolderHost } from "./folder-kit";
 
@@ -157,8 +158,8 @@ describe("folder host", () => {
     await host.models.saveSecrets(scope, secrets);
     expect(await host.models.loadConnections(scope)).toEqual(connections);
     expect(await host.models.loadSecrets(scope)).toEqual(secrets);
-    expect((await stat(join(place, "host", "user", scope.user, "secrets", "secrets.json"))).mode & 0o777).toBe(0o600);
-    expect((await stat(join(place, "host", "user", scope.user, "secrets"))).mode & 0o777).toBe(0o700);
+    expect((await stat(join(place, "host", "user", createHash("sha256").update(scope.user).digest("hex"), "secrets", "secrets.json"))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(place, "host", "user", createHash("sha256").update(scope.user).digest("hex"), "secrets"))).mode & 0o777).toBe(0o700);
     const anywhere = await host.files.find(scope, { by: "grep", pattern: "sk-kit", path: "@global/" });
     expect(anywhere).toEqual([]);
   });
@@ -217,6 +218,105 @@ describe("folder host", () => {
     await expect(host.files.read({ ...scope, user: "someone-else" }, "AGENTS.md")).rejects.toThrow("serves the user");
     await expect(host.files.read({ ...scope, chat: "../kit-chat" }, "AGENTS.md")).rejects.toThrow("cannot keep a chat");
     await expect(host.files.read({ ...scope, turn: "../../x" }, "AGENTS.md")).rejects.toThrow("cannot keep a turn");
+  });
+});
+
+describe("the folder host's users", () => {
+  /** A user's folder under `host/user/`, as the layout names it: the SHA-256 of his name in hex. */
+  const folderOf = (name: string): string => createHash("sha256").update(name).digest("hex");
+  const places: string[] = [];
+  const hosts: FolderHost[] = [];
+  const DOC = { v: 1 as const, default: "kit-conn", connections: [{ id: "kit-conn", name: "Kit", provider: "deepseek", auth: "key" as const, model: "kit-model" }] };
+
+  afterEach(async () => {
+    for (const host of hosts.splice(0)) await host.close();
+    for (const dir of places.splice(0)) await rm(dir, { recursive: true, force: true });
+  });
+
+  async function made(): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), "rph-folder-users-"));
+    places.push(dir);
+    return dir;
+  }
+
+  async function hostFor(user: string, dir: string): Promise<FolderHost> {
+    const host = await createFolderHost({ dir, user });
+    hosts.push(host);
+    return host;
+  }
+
+  test("two folder hosts in one directory for Alice and alice: neither reads the other's saved key or lists the other's values", async () => {
+    const dir = await made();
+    const upper = await hostFor("Alice", dir);
+    const lower = await hostFor("alice", dir);
+    const secrets = { v: 1 as const, keys: { "conn-1": "sk-upper-0000000000000000" }, signins: {} };
+    await upper.models.saveSecrets({ user: "Alice" }, secrets);
+    await upper.store.set({ user: "Alice" }, "jobs/all/j1", { id: "j1", note: "Alice's" });
+
+    expect(await lower.models.loadSecrets({ user: "alice" })).toBeNull();
+    expect(await lower.store.list({ user: "alice" }, "")).toEqual([]);
+    expect(await lower.store.get({ user: "alice" }, "jobs/all/j1")).toBeUndefined();
+    expect(await upper.models.loadSecrets({ user: "Alice" })).toEqual(secrets);
+    await lower.store.set({ user: "alice" }, "jobs/all/j1", { id: "j1", note: "alice's" });
+    expect(await upper.store.get({ user: "Alice" }, "jobs/all/j1")).toEqual({ id: "j1", note: "Alice's" });
+    // One folder each, whatever the disk's rule on case, each holding the name it is for.
+    expect((await readdir(join(dir, "host", "user"))).sort()).toEqual([folderOf("Alice"), folderOf("alice")].sort());
+    expect(JSON.parse(await readFile(join(dir, "host", "user", folderOf("Alice"), "user.json"), "utf8"))).toEqual({ user: "Alice" });
+    expect(JSON.parse(await readFile(join(dir, "host", "user", folderOf("alice"), "user.json"), "utf8"))).toEqual({ user: "alice" });
+    // Each host serves its own user and no other.
+    await expect(upper.store.get({ user: "alice" }, "jobs/all/j1")).rejects.toThrow("serves the user");
+    await expect(lower.models.loadSecrets({ user: "Alice" })).rejects.toThrow("serves the user");
+  });
+
+  test("a folder host for 'first reader', 'reader@example.com', 'Zoë' and a 200-character name serves him at its files, store and models ports alike; an empty name is refused at each", async () => {
+    for (const name of ["first reader", "reader@example.com", "Zoë", "z".repeat(200)]) {
+      const seed = { ...KIT_SEED, scope: { ...KIT_SEED.scope, user: name } };
+      const named = await makeFolderHost(seed, await made());
+      hosts.push(named);
+      const own = seed.scope;
+      expect({ name, files: (await named.files.read(own, "persistent-workspace/story/threads.md")).status }).toEqual({ name, files: "read" });
+      await named.store.set({ user: name }, "jobs/all/j1", { id: "j1" });
+      expect({ name, keys: await named.store.list({ user: name }, "jobs/") }).toEqual({ name, keys: ["jobs/all/j1"] });
+      await named.models.saveConnections({ user: name }, DOC);
+      expect({ name, doc: await named.models.loadConnections({ user: name }) }).toEqual({ name, doc: DOC });
+    }
+
+    const nobody = { ...KIT_SEED, scope: { ...KIT_SEED.scope, user: "" } };
+    const none = await makeFolderHost(nobody, await made());
+    hosts.push(none);
+    await expect(none.files.read(nobody.scope, "persistent-workspace/story/threads.md")).rejects.toThrow("empty name");
+    await expect(none.store.get({ user: "" }, "jobs/all/j1")).rejects.toThrow("empty name");
+    await expect(none.store.list({ user: "" }, "")).rejects.toThrow("empty name");
+    await expect(none.models.loadConnections({ user: "" })).rejects.toThrow("empty name");
+    await expect(none.models.saveSecrets({ user: "" }, { v: 1, keys: {}, signins: {} })).rejects.toThrow("empty name");
+  });
+
+  test("two folder hosts in one directory keep each user's connections document in his own folder", async () => {
+    const dir = await made();
+    const first = await hostFor("first-reader", dir);
+    const second = await hostFor("second-reader", dir);
+    const other = { ...DOC, connections: [{ ...DOC.connections[0]!, id: "other-conn", name: "Other" }], default: "other-conn" };
+    await first.models.saveConnections({ user: "first-reader" }, DOC);
+    await second.models.saveConnections({ user: "second-reader" }, other);
+
+    expect(JSON.parse(await readFile(join(dir, "host", "user", folderOf("first-reader"), "models", "connections.json"), "utf8"))).toEqual(DOC);
+    expect(JSON.parse(await readFile(join(dir, "host", "user", folderOf("second-reader"), "models", "connections.json"), "utf8"))).toEqual(other);
+    expect(await second.models.loadConnections({ user: "second-reader" })).toEqual(other);
+    await expect(second.models.loadConnections({ user: "first-reader" })).rejects.toThrow("serves the user");
+  });
+
+  test("a folder that holds another user's name is refused, and a folder made under the name itself is not read", async () => {
+    const dir = await made();
+    await mkdir(join(dir, "host", "user", folderOf("reader")), { recursive: true });
+    await writeFile(join(dir, "host", "user", folderOf("reader"), "user.json"), JSON.stringify({ user: "someone-else" }));
+    await mkdir(join(dir, "host", "user", "tower-keeper", "store", "jobs", "all"), { recursive: true });
+    await writeFile(join(dir, "host", "user", "tower-keeper", "store", "jobs", "all", "old.json"), JSON.stringify({ id: "old" }));
+
+    const refused = await hostFor("reader", dir);
+    await expect(refused.store.get({ user: "reader" }, "jobs/all/j1")).rejects.toThrow('is kept for the user "someone-else", not for "reader"');
+
+    const keeper = await hostFor("tower-keeper", dir);
+    expect(await keeper.store.list({ user: "tower-keeper" }, "")).toEqual([]);
   });
 });
 

@@ -14,8 +14,10 @@
 //   host/facts.json                        the facts the host declares, and their values by chat
 //   host/tools.json                        the tools manifest, unless the host is given another
 //   host/maps/<preset>.json                prompt maps, one per preset
-//   host/user/<user>/models/, secrets/     the model layer's documents, each user's in his own folder
-//   host/user/<user>/store/                small durable state, each user's in his own folder
+//   host/user/<hash>/user.json             a user's folder is named by the SHA-256 of his name in hex, never by the name: two names never share a folder, whatever the disk's rule on case, and a name of any length or letters fits; the file keeps the name, checked when the folder is first used
+//   host/user/<hash>/models/, secrets/     the model layer's documents, each user's in his own folder
+//   host/user/<hash>/store/                small durable state, each user's in his own folder
+//   host/user/<name>/                      never read: folders made under the name itself are not this layout's, and only tests made them
 //   host/log.jsonl                         the log
 //
 // Not here: the host's other stores (`stores`), searchers for `gap_check` (none), the user's

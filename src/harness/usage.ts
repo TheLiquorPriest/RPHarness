@@ -11,6 +11,8 @@ const KEPT_RUNS = 1_000;
 interface RunBook {
   run: string;
   total: Usage;
+  /** The user whose run it is. */
+  user?: string;
   agents: Map<string, { agent: AgentRef; usage: Usage }>;
 }
 
@@ -62,6 +64,9 @@ export class UsageBook implements UsageApi {
   /** Every record of a run, as it happens. */
   record(record: TraceRecord): void {
     const { event } = record;
+    // A run is its user's, as its first record names him: the run and its user are the harness's, never the asker's.
+    const book = this.#runs.get(record.run);
+    if (book !== undefined) book.user ??= record.scope.user;
     if (event.kind === "call_ended") {
       const gauge = this.#gauges.get(gaugeKey(record.scope, record.agent.id));
       // What the call was sent is what the agent's context held.
@@ -69,7 +74,6 @@ export class UsageBook implements UsageApi {
       return;
     }
     if (event.kind !== "agent_ended") return;
-    const book = this.#runs.get(record.run);
     if (book !== undefined) {
       addUsage(book.total, event.usage);
       const entry = book.agents.get(record.agent.id) ?? { agent: record.agent, usage: emptyUsage() };
@@ -106,9 +110,10 @@ export class UsageBook implements UsageApi {
     await Promise.all([...this.#writing]);
   }
 
-  async run(run: string): Promise<RunUsage | undefined> {
+  /** A run's usage, to the user whose run it is: asked with another user, it answers as for a run that is not there. */
+  async run(user: string, run: string): Promise<RunUsage | undefined> {
     const book = this.#runs.get(run);
-    if (book === undefined) return undefined;
+    if (book === undefined || book.user !== user) return undefined;
     return { run, total: { ...book.total }, agents: [...book.agents.values()].map(({ agent, usage }) => ({ agent, usage: { ...usage } })) };
   }
 

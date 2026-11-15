@@ -228,7 +228,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
   const trace = new TraceRecorder();
   const env: Environment = { ...host, store: options.store?.(host.store) ?? host.store, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
   const models = Object.fromEntries(Object.entries(options.models).map(([name, answers]) => [name, scriptedModel(answers, { clock, id: name, contextWindow: 64_000, maxTokens: 4_000 })]));
-  const source = scriptedSource(models);
+  const source = scriptedSource(models, USER);
   const hub = new LiveHub();
   const usage = new UsageBook(env.store, clock, env.log);
   const progress: string[] = [];

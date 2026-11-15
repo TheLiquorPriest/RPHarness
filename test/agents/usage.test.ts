@@ -41,7 +41,7 @@ test("a sub-agent's calls are counted and shown under its own name", async () =>
   const gmUsage = { calls: 2, input: 940, cacheRead: 300, cacheWrite: 0, output: 27 };
   const leadUsage = { calls: 2, input: 2_200, cacheRead: 0, cacheWrite: 0, output: 70 };
   // The run's usage, by agent, and its total; the user's day counts both.
-  expect(await s.usage.run("t1")).toEqual({
+  expect(await s.usage.run(USER, "t1")).toEqual({
     run: "t1",
     total: { calls: 4, input: 3_140, cacheRead: 300, cacheWrite: 0, output: 97 },
     agents: [

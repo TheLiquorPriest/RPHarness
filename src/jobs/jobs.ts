@@ -111,6 +111,8 @@ export class Jobs implements JobsApi, JobsWork {
   readonly #days = new Map<string, Promise<DaySpend>>();
   /** For each user this process has acted for: settles once the jobs a restart found him under way are kept as interrupted. */
   readonly #recovered = new Map<string, Promise<void>>();
+  /** Every job this process made, running or ended: none is one a restart cut off, whatever a search of the store reads of it. */
+  readonly #made = new Set<string>();
 
   constructor(core: Omit<JobCore, "jobs">) {
     this.#core = core;
@@ -240,6 +242,7 @@ export class Jobs implements JobsApi, JobsWork {
       done: promise,
       settle: resolve,
     };
+    this.#made.add(id);
     this.#live.set(id, live);
     this.#queue.push(live);
     this.#changed(live);
@@ -412,14 +415,21 @@ export class Jobs implements JobsApi, JobsWork {
     return finding;
   }
 
-  /** After a restart: a job the store holds as the user's and under way was cut off by it. It is kept as interrupted, with what it had done, and told (§13.5). */
+  /**
+   * After a restart: a job the store holds as the user's and under way was cut off by it. It is kept as interrupted, with what it had done, and told (§13.5).
+   * A job this process made is passed over, so a search run again after a failed one marks only the jobs a restart truly cut off; so is a record in the user's store that names another user, which is neither kept nor told (it is logged).
+   */
   async #recover(user: string): Promise<void> {
-    const { store, clock } = this.#core.env;
+    const { store, clock, log } = this.#core.env;
     const scope = { user };
     const done: Promise<unknown>[] = [];
     for (const key of await store.list(scope, KEPT)) {
       const view = keptView(await store.get(scope, key).catch(() => undefined));
-      if (view === undefined || UNDER_WAY[view.state] !== true) continue;
+      if (view === undefined || UNDER_WAY[view.state] !== true || this.#made.has(view.id)) continue;
+      if (view.scope.user !== user) {
+        log.warn("A kept job names another user than the one whose store holds it, and is passed over.", { job: view.id, user, names: view.scope.user });
+        continue;
+      }
       const interrupted: JobView = { ...view, state: "interrupted", ended: clock.now() };
       done.push(this.#keep(interrupted), this.#tell(interrupted));
     }

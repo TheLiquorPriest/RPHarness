@@ -13,7 +13,7 @@ import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, AssistantMessageEventStream, CacheRetention, JsonObject, Message, Model, SimpleStreamOptions, TextContent, ThinkingContent, Tool, ToolCall, ToolChoice, Usage } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream, getCurrentTools } from "@earendil-works/pi-ai";
 import type { ModelLimits } from "../../contract";
-import type { AgentChoice, AgentModel, ModelSource } from "../../model/source";
+import type { AgentModel, ModelSource, UserChoice } from "../../model/source";
 import { FakeClock } from "./clock";
 
 /** Something the test opens: a call holding at it goes on once it is open. */
@@ -327,14 +327,27 @@ export function scriptedModel(answers: readonly Answer[], options: ScriptedOptio
   };
 }
 
+/** Scripted models in the model layer's place, and every choice they were asked for. */
+export interface ScriptedSource extends ModelSource {
+  /** Each call's choice, in order, as the harness made it: the user it names and the connection and model it picks. For a test to read. */
+  readonly asked: readonly UserChoice[];
+}
+
 /**
- * Scripted models in the model layer's place: an agent's choice is answered by the model its
- * `model` names (else its `connectionId`), and one no script names is refused in words, as the
- * layer refuses a connection that isn't there.
+ * Scripted models in the model layer's place, made for one user: a choice that names another is
+ * refused in words, as the layer's own desk refuses a model made for another user's choice, so a
+ * test fails where an agent, a job or a judge is given the wrong user's. Otherwise an agent's choice
+ * is answered by the model its `model` names (else its `connectionId`), and one no script names is
+ * refused in words, as the layer refuses a connection that isn't there. Every choice asked for is
+ * kept in `asked`, the refused ones too.
  */
-export function scriptedSource(models: Readonly<Record<string, ScriptedModel>>): ModelSource {
+export function scriptedSource(models: Readonly<Record<string, ScriptedModel>>, user: string): ScriptedSource {
+  const asked: UserChoice[] = [];
   return {
-    async agentModel(choice: AgentChoice) {
+    asked,
+    async agentModel(choice: UserChoice) {
+      asked.push(choice);
+      if (choice.user !== user) throw new Error(`The scripted models are made for the user ${JSON.stringify(user)}, and this choice names ${JSON.stringify(choice.user)}.`);
       const name = choice.model ?? choice.connectionId ?? "";
       const found = Object.hasOwn(models, name) ? models[name] : undefined;
       if (found === undefined) throw new Error(`No scripted model is named "${name}".`);

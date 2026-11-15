@@ -181,13 +181,16 @@ describe("the script", () => {
     expect(lastAnswer(agent)).toMatchObject({ stopReason: "error", errorMessage: "The script has no answer for call 2." });
   });
 
-  test("a rig of scripted models answers an agent's choice by the model it names, and refuses one no script names", async () => {
+  test("a rig of scripted models answers an agent's choice by the model it names, and refuses one no script names or one that names another user", async () => {
     const author = scriptedModel([{ pieces: [{ text: "Hm." }] }], { id: "author", contextWindow: 200_000 });
-    const source = scriptedSource({ author });
+    const source = scriptedSource({ author }, "reader");
     const chosen = await source.agentModel({ user: "reader", connectionId: null, model: "author", effort: "high" });
     expect([chosen.model.id, chosen.thinkingLevel, chosen.limits.contextWindow?.tokens]).toEqual(["author", "high", 200_000]);
     expect(chosen.streamFn).toBe(author.streamFn);
     await expect(source.agentModel({ user: "reader", connectionId: null, model: "gm" })).rejects.toThrow('No scripted model is named "gm".');
+    await expect(source.agentModel({ user: "someone-else", connectionId: null, model: "author" })).rejects.toThrow('The scripted models are made for the user "reader", and this choice names "someone-else".');
+    // Every choice asked for is kept, the refused ones too, for a test to read.
+    expect(source.asked.map((choice) => [choice.user, choice.model])).toEqual([["reader", "author"], ["reader", "gm"], ["someone-else", "author"]]);
   });
 
   test("work that waits on what no timer brings is said to, rather than left hanging", async () => {

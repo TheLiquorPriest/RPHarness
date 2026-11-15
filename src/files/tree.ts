@@ -2,7 +2,7 @@
 // holds, their texts, and what the levels' config files switch off, add, add to stacks and pin. The
 // names of the levels, their folders and their config files are the host's; nothing here names one.
 
-import type { FileText, FilesPort, GuidanceKind, Layer, LayerLevel, Scope } from "../contract/index";
+import type { FileText, FilesPort, GuidanceKind, Layer, LayerLevel, Scope, UserScope } from "../contract/index";
 import type { Problem } from "./api";
 import { CONFIG_KEYS } from "./api";
 import type { At } from "./header";
@@ -112,7 +112,7 @@ function nameOf(listing: Listing, rest: string): string | undefined {
 
 export class Tree {
   readonly files: FilesPort;
-  readonly scope: Scope;
+  readonly scope: Scope | UserScope;
   /** What went wrong reading: a refusal, or a port that failed. */
   readonly problems: Problem[] = [];
   #layers: Promise<Layer[]> | undefined;
@@ -120,7 +120,7 @@ export class Tree {
   readonly #reads = new Map<string, Promise<FileText | undefined>>();
   #config: Promise<Config> | undefined;
 
-  constructor(files: FilesPort, scope: Scope) {
+  constructor(files: FilesPort, scope: Scope | UserScope) {
     this.files = files;
     this.scope = scope;
   }

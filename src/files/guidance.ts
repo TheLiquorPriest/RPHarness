@@ -3,7 +3,7 @@
 // agent's definition and stack, the skills' index, prompt parts, tool descriptions, the rules as the
 // Rules page lists them, and one run's rule engine. Each file is read and parsed once.
 
-import type { DefinitionView, FileHit, FileText, FilesPort, Refused, RuleView, Scope, StackLeft, StackPart } from "../contract/index";
+import type { DefinitionView, FileHit, FileText, FilesPort, Refused, RuleView, Scope, StackLeft, StackPart, UserScope } from "../contract/index";
 import type { AgentDefinition, Guidance, LoadGuidance, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
@@ -75,13 +75,13 @@ interface RuleState {
 export const loadGuidance: LoadGuidance = (files, scope) => new TreeGuidance(files, scope);
 
 class TreeGuidance implements Guidance {
-  readonly scope: Scope;
+  readonly scope: Scope | UserScope;
   readonly #tree: Tree;
   /** What parsing found, each file's once. */
   readonly #problems: Problem[] = [];
   readonly #memo = new Map<string, Promise<unknown>>();
 
-  constructor(files: FilesPort, scope: Scope) {
+  constructor(files: FilesPort, scope: Scope | UserScope) {
     this.scope = scope;
     this.#tree = new Tree(files, scope);
   }
@@ -545,6 +545,8 @@ class TreeGuidance implements Guidance {
       const rule = s.found.item?.rule;
       return s.inForce && rule !== undefined && rule.when.trigger !== "always" ? [rule] : [];
     });
-    return createRuleRun({ scope: this.scope, rules, facts: options.facts, ...(options.memory !== undefined ? { memory: options.memory } : {}), ...(options.window !== undefined ? { window: options.window } : {}) });
+    const scope = this.scope;
+    if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
+    return createRuleRun({ scope, rules, facts: options.facts, ...(options.memory !== undefined ? { memory: options.memory } : {}), ...(options.window !== undefined ? { window: options.window } : {}) });
   }
 }

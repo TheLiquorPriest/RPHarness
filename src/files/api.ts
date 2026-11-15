@@ -59,7 +59,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 
 // ---------------------------------------------------------------- where things come from
@@ -444,7 +444,8 @@ export const CONFIG_KEYS = {
 
 /** The guidance of one scope, read through the host's `FilesPort` as it stands now. Each answer is read once and kept: ask a new one to see later changes. */
 export interface Guidance {
-  readonly scope: Scope;
+  /** A scope that names only the user has no chat in view: its levels are the shipped and global ones, and it has no rules to run. */
+  readonly scope: Scope | UserScope;
   layers(): Promise<Layer[]>;
   /** Every problem found in every file of the tree, and in what its configs name. Loads everything. */
   problems(): Promise<Problem[]>;
@@ -484,7 +485,7 @@ export interface Guidance {
 // ---------------------------------------------------------------- the ways in (each exported from `./index` by this name)
 
 /** `loadGuidance`: the guidance of a scope. Nothing is read until it is asked for. */
-export type LoadGuidance = (files: FilesPort, scope: Scope) => Guidance;
+export type LoadGuidance = (files: FilesPort, scope: Scope | UserScope) => Guidance;
 
 /** `createFacts`: RPH's own facts, read by `own` at each moment, and the host's through its port. */
 export type CreateFacts = (host: FactsPort, own: OwnFactsReader) => Facts;

@@ -1,7 +1,7 @@
 // What only the owner's own presses may do (C-5, C-19, C-24; §13.5 "Nothing starts a job but an
 // agent's `job_start` or you. Code does not"): pause, let go and say something to a run; start and
 // cancel a job, switch jobs off or hold them all, hold one that waits, start one again, answer a job
-// that asks; compact a session on his word. The helpers module lists those members once, and both
+// that asks; compact a session on his word; make the opening blocks afresh (Apply now). The helpers module lists those members once, and both
 // repositories' tests read the list: here, that every name on it is a member of the harness, and
 // that no source of RPH but the folder host's command line calls one. Everything here is invented.
 import { afterEach, expect, test } from "bun:test";
@@ -20,7 +20,7 @@ const SRC = join(import.meta.dir, "..", "..", "src");
 /** The one place a press may come from inside RPH: the folder host's command line. */
 const COMMAND_LINE = /^src\/hosts\/folder\/(command|cli)/;
 /** The names a harness member is held under in RPH's own source: the live view's hub too. */
-const HELD_AS: Record<string, string[]> = { live: ["live", "hub"], jobs: ["jobs"], sessions: ["sessions"] };
+const HELD_AS: Record<string, string[]> = { live: ["live", "hub"], jobs: ["jobs"], sessions: ["sessions"], definitions: ["definitions"] };
 
 /** A source without its comments, which may name a member without calling it. */
 function code(source: string): string {
@@ -57,6 +57,8 @@ test("no RPH source but the folder host's command line calls a member of the own
   const s = (open = await stage({ answers: [] }));
   const harness = s.harness as unknown as Record<string, Record<string, unknown>>;
   expect(OWNER_ONLY.length).toBeGreaterThan(0);
+  // "Apply now" is the owner's press too: no source of RPH calls it (the harness's `index.ts` only defines it).
+  expect(OWNER_ONLY).toContain("definitions.apply");
   for (const entry of OWNER_ONLY) {
     const [api = "", name = ""] = entry.split(".");
     expect({ entry, member: typeof harness[api]?.[name] }).toEqual({ entry, member: "function" });

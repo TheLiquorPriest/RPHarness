@@ -14,6 +14,7 @@
 import type { AgentRef, BodyFields, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
+import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { RequestPoint } from "../loop/types";
@@ -291,7 +292,7 @@ export class Team implements TeamWork {
       thinkingLevel: model.thinkingLevel,
       ...(instructions !== "" ? { instructions } : {}),
       // Its brief and what it was given go with each of its requests from pi's request hook, after its opening block (§10.2).
-      context: [userMessage(joined([brief]), d.trace.clock.now())],
+      context: [placed(userMessage(joined([brief]), d.trace.clock.now()), "brief")],
       tools: held.tools,
       texts: d.texts(),
       limits: definition.limits,

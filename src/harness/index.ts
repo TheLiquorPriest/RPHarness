@@ -10,8 +10,7 @@
 // restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
-import type { Template } from "../files/api";
-import { createModelLayer, runOf } from "../model";
+import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { Jobs } from "../jobs";
 import { sessionsApi } from "../sessions/api";
@@ -19,7 +18,6 @@ import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { Sessions } from "./sessions";
 import { readModelSettings, readSettings } from "./settings";
-import { shippedTemplate } from "./shipped";
 import { Turn, type TurnCore } from "./turn";
 import { UsageBook } from "./usage";
 
@@ -42,14 +40,6 @@ function turnKey(scope: Scope): string {
 
 export function createHarness(env: Environment, options: CreateHarnessOptions = {}): Harness {
   const ids = options.ids ?? (() => crypto.randomUUID());
-  // The mark of a system message sent in place is asked for with no chat in view, as each call goes out: RPH's own file.
-  let mark: Template | undefined;
-  const ready = shippedTemplate("system-note").then(
-    (loaded) => {
-      mark = loaded;
-    },
-    (error: unknown) => env.log.error("RPH's own mark for a system message sent in place could not be read; such messages go unmarked.", { error: error instanceof Error ? error.message : String(error) }),
-  );
   const layer = createModelLayer({
     store: env.models,
     now: () => env.clock.now(),
@@ -60,8 +50,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     setTimeout: (run, ms) => env.clock.setTimeout(run, ms),
     clearTimeout: (handle) => env.clock.clearTimeout(handle),
     appName: options.appName ?? env.id,
-    testPrompt: async () => (await shippedTemplate("connection-test")).render().text,
-    markNote: (text) => (mark === undefined ? text : mark.render({ text }).text),
+    texts: (scope) => modelTexts(env.files, scope),
     settings: (scope) => readModelSettings(env.files, scope, env.log),
   });
   const hub = new LiveHub({ log: env.log });
@@ -74,7 +63,6 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
   return {
     async answer(req, sink, signal) {
-      await ready;
       const turn = new Turn(core, req, sink);
       const key = turnKey(req.scope);
       turns.set(key, turn);

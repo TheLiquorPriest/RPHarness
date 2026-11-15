@@ -126,7 +126,7 @@ export class Judges implements QuestionRules {
     const untrack = d.track({ runner, work });
     const outcome = await work.done.finally(() => {
       untrack();
-      d.models.ended?.(session);
+      d.models.ended?.(d.trace.scope.user, session);
     });
     return outcome.status === "done" && saysYes(outcome.text, yes);
   }

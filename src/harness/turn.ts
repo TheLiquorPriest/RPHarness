@@ -39,7 +39,7 @@ import { Judges } from "./judge";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
-import { requestPath, sentMessages } from "./requests";
+import { placed, requestPath, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
@@ -425,10 +425,10 @@ export class Turn {
     // A request that carries no prompt (a run that writes nothing into the chat) is given no frame introducing one.
     if (opening.given.some((ref) => ref.startsWith("prompt:*")) && req.prompt.length > 0) {
       const framing = joined([template(frame)?.render().text ?? ""]);
-      if (framing !== "") messages.push(systemMessage(framing, at));
+      if (framing !== "") messages.push(placed(systemMessage(framing, at), "frame"));
       const prompt = promptMessages(req.prompt, model.model, at);
       this.#picturesLeft(this.#lead, undefined, prompt.pictures);
-      messages.push(...prompt.messages);
+      messages.push(...prompt.messages.map((message) => placed(message, "prompt")));
     }
     // What the session carries, from where this run's work starts: fixed for the turn, after the prompt, so it never moves the cached front (§10.2).
     const layout = template(carried);
@@ -439,17 +439,17 @@ export class Turn {
     if (opening.given.includes("session:carry") && layout !== undefined) {
       carriedNow = await carriedFields(carry);
       const text = carriedNow === undefined ? "" : joined([layout.render(carriedNow).text]);
-      if (text !== "") carriedAt = messages.push(systemMessage(text, at)) - 1;
+      if (text !== "") carriedAt = messages.push(placed(systemMessage(text, at), "session:carry")) - 1;
     }
     if (opening.given.includes("briefing")) {
       const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places);
-      if (text !== undefined) messages.push(systemMessage(joined([text]), at));
+      if (text !== undefined) messages.push(placed(systemMessage(joined([text]), at), "briefing"));
     }
     // Every other name the lead is given, found as a sub-agent's is, after the briefing.
     const named = opening.given.filter((ref) => !ref.startsWith("prompt:*") && ref !== "session:carry" && ref !== "briefing");
     if (named.length > 0) {
       const text = await this.#given(guidance, named, slice);
-      if (text !== "") messages.push(systemMessage(text, at));
+      if (text !== "") messages.push(placed(systemMessage(text, at), named.join(", ")));
     }
     const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, definition, declared, rules, settings, at } : undefined;
     if (compacting !== undefined) await this.#compact(compacting, false);
@@ -620,7 +620,7 @@ export class Turn {
     c.carry = { ...carry, compacted };
     const after = await carriedFields(c.carry);
     c.carried = after ?? {};
-    messages[c.carriedAt] = systemMessage(joined([after === undefined ? "" : c.layout.render(after).text]), c.at);
+    messages[c.carriedAt] = placed(systemMessage(joined([after === undefined ? "" : c.layout.render(after).text]), c.at), "session:carry");
     this.#trace.event(this.#lead, undefined, { kind: "compacted", session: this.scope.session, before, after: sent(), keptTurns: plan.keptTurns });
     return true;
   }
@@ -655,7 +655,7 @@ export class Turn {
       outcome = await work.done;
     } finally {
       this.#working.delete(entry);
-      this.#c.models.ended?.(session);
+      this.#c.models.ended?.(this.scope.user, session);
     }
     if (this.#ended()) return undefined;
     const summary = outcome.status === "done" ? outcome.text.trim() : "";
@@ -880,10 +880,10 @@ export class Turn {
     const turn = this.#places?.turn;
     if (which === "none" || turn === undefined) return {};
     const { env } = this.#c;
-    const keep: KeepRequest = (call, messages) => {
+    const keep: KeepRequest = (call, messages, opening) => {
       if (which === "first" && call !== 1) return undefined;
       const path = requestPath(turn, agent, call);
-      const written = env.files.write(this.scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages) }) }, "harness").then((done) => {
+      const written = env.files.write(this.scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages, opening) }) }, "harness").then((done) => {
         if (done.status !== "written") env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, status: done.status });
       });
       this.#tell(written);
@@ -1013,11 +1013,11 @@ export class Turn {
       const prompt = req.prefill !== undefined && last?.role === "assistant" && promptText(last) === req.prefill ? req.prompt.slice(0, -1) : req.prompt;
       const converted = promptMessages(prompt, model.model, at);
       this.#picturesLeft(ref, parent, converted.pictures);
-      messages.push(...converted.messages);
+      messages.push(...converted.messages.map((message) => placed(message, "prompt")));
     }
-    if (instructions !== "") messages.push(systemMessage(instructions, at));
-    messages.push(userMessage(brief, at));
-    if (givesPrompt && req.prefill !== undefined && req.prefill !== "") messages.push(assistantMessage(req.prefill, model.model, at));
+    if (instructions !== "") messages.push(placed(systemMessage(instructions, at), "opening"));
+    messages.push(placed(userMessage(brief, at), "brief"));
+    if (givesPrompt && req.prefill !== undefined && req.prefill !== "") messages.push(placed(assistantMessage(req.prefill, model.model, at), "prompt"));
     const rules = this.#rulesRun();
     const streamRules = rules.stream(ref);
     const second = words("second_reply");
@@ -1061,7 +1061,7 @@ export class Turn {
     // Each later stretch of the writer's work, which a message sets going, ends its run as well: its draft is kept, and its session let go.
     const stretchEnded = (ended: AgentOutcome): void => {
       if (!live) this.#drafted(ref, ended);
-      this.#c.models.ended?.(session);
+      this.#c.models.ended?.(this.scope.user, session);
     };
     // The writer stands in the team as a sub-agent does: the user's limits hold for it and for what it
     // starts, and its question comes back as this call's answer, for the agent that called to answer.
@@ -1081,7 +1081,7 @@ export class Turn {
     } finally {
       this.#working.delete(entry);
       ctx.signal.removeEventListener("abort", stop);
-      this.#c.models.ended?.(session);
+      this.#c.models.ended?.(this.scope.user, session);
     }
     if (outcome.status === "asked" && this.#team !== undefined) return this.#team.asked(ref, outcome);
     // Why there is no reply is the file's to say, by how the writer's work ended; the error's own words are the model layer's or the provider's, for whoever runs the host.

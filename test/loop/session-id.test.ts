@@ -5,6 +5,7 @@
 // calls). No request leaves the process: the model layer's HTTP is scripted. Everything here is invented.
 import { afterEach, describe, expect, test } from "bun:test";
 import { AgentRunner, type LoopTool, RunTrace } from "../../src/loop";
+import { sessionKey } from "../../src/model";
 import { anthropicStream, anthropicTurn, bodyOf, eventStream, type Rig, rig } from "../model/support";
 import { replyMissing, rigAgent, said, scope, texts, tool, TraceRecorder, user } from "./support";
 
@@ -54,7 +55,7 @@ describe("the session's id on every request", () => {
 
     expect(outcome.status).toBe("done");
     expect(r.sent).toHaveLength(1);
-    expect(bodyOf(r.sent[0])["prompt_cache_key"]).toBe("scene-7");
+    expect(bodyOf(r.sent[0])["prompt_cache_key"]).toBe(sessionKey(scope.user, "scene-7"));
   });
 
   test("a connection that turns Anthropic's message threads on: the session's later calls go on its thread, and once the layer is told the session with the runner's id ended, its next call starts anew", async () => {
@@ -67,7 +68,7 @@ describe("the session's id on every request", () => {
     expect(r.sent.map((sent) => bodyOf(sent)["thread"])).toEqual([{ type: "create" }, { type: "continue", previous_message_id: "msg_1" }]);
 
     // What the session's close tells the model layer (PlanHarnessTools-21 makes that call), with the session the runner was given.
-    r.layer.ended("scene-7");
+    r.layer.ended(scope.user, "scene-7");
     expect((await runner.start({ message: "And the door?" }).done).status).toBe("done");
     expect(bodyOf(r.sent[2])["thread"]).toEqual({ type: "create" });
   });

@@ -120,10 +120,11 @@ export interface CallRequest {
 
 /**
  * Keeps what a call is sent, where the user's setting asks for it (`trace.requests`): given the
- * call's number and its messages as sent, the path of the file they are kept in, which the call's
- * `call_started` names; undefined when this call's are not kept.
+ * call's number, its messages as sent, and the agent's opening block among them (none when it has
+ * none), the path of the file they are kept in, which the call's `call_started` names; undefined
+ * when this call's are not kept.
  */
-export type KeepRequest = (call: number, messages: readonly Message[]) => string | undefined;
+export type KeepRequest = (call: number, messages: readonly Message[], opening: Message | undefined) => string | undefined;
 
 /**
  * The run's point before each of an agent's requests (§11): it is shown the request as it would go,

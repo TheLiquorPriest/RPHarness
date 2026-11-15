@@ -287,7 +287,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
       await options.modelAsked?.(asked);
       return model.agentModel(choice.effort === undefined || choice.effort === "auto" || choice.effort === "inherit" ? "off" : choice.effort);
     },
-    ended: (session: string) => options.ended?.(session),
+    ended: (_user: string, session: string) => options.ended?.(session),
   };
   const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: scripted }), ids: () => `id-${(next += 1)}` });
 

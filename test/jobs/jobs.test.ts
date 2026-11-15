@@ -82,7 +82,7 @@ describe("a job an agent starts", () => {
     expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ state: "done", report: done.report });
     // Its run is its own, hung under the call that started it.
     const own = s.trace.records.filter((record: TraceRecord) => record.run === id);
-    expect(own.find((record) => record.event.kind === "agent_started")?.parent).toEqual({ agent: (running!.startedBy as AgentRef).id, run: "t1", call: "start-1" });
+    expect(own.find((record) => record.event.kind === "agent_started")?.parent).toEqual({ agent: (running!.startedBy as AgentRef).id, run: s.trace.of("run_started").find((record) => record.event.run === "turn")!.run, call: "start-1" });
 
     const since = `Fixture since-item: job ${id} ended. ${done.report}`;
     expect((await s.turn(request("t2", { lead: "lead", since: [{ kind: "job", text: since, turn: "t1" }] }))).outcome.status).toBe("released");

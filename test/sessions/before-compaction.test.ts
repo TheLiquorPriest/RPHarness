@@ -32,7 +32,7 @@ async function notices(): Promise<string> {
 function replyTools(s: Stage, turnId: string): [string, string, boolean][] {
   return s.trace
     .of("tool_ended")
-    .filter((record) => record.run === turnId && (record.event.tool === "write_reply" || record.event.tool === "reply_release"))
+    .filter((record) => record.scope.turn === turnId && (record.event.tool === "write_reply" || record.event.tool === "reply_release"))
     .map((record) => [record.event.tool, record.event.result.content.map((part) => (part.type === "text" ? part.text : "")).join(""), record.event.result.error === true]);
 }
 
@@ -60,7 +60,7 @@ test("in the tag form, the call before compaction releases nothing: both reply t
     ["reply_release", "Fixture: reply_release waits for the turn's own work.", true],
   ]);
   // One release in the turn, by its own work, after the compaction.
-  const kinds = s.trace.records.filter((record) => record.run === "t4").map((record) => record.event.kind);
+  const kinds = s.trace.records.filter((record) => record.scope.turn === "t4").map((record) => record.event.kind);
   expect(kinds.filter((kind) => kind === "released")).toHaveLength(1);
   expect(kinds.indexOf("compacted")).toBeLessThan(kinds.indexOf("released"));
 });
@@ -77,7 +77,7 @@ test("in the two-step form, what the lead writes in the call before compaction i
 
   expect(outcome).toMatchObject({ status: "released", reply: "Reply 4." });
   expect(sink.text).toBe("Reply 4.");
-  expect(s.trace.of("compacted").map((record) => record.run)).toEqual(["t4"]);
+  expect(s.trace.of("compacted").map((record) => record.scope.turn)).toEqual(["t4"]);
 });
 
 /**
@@ -100,8 +100,8 @@ test("the call before compaction is one model call, whose tools run: it cannot s
   const { s, outcome, saves } = await saving(`limits:\n  turn:\n    calls: 4\n${KEEP_TWO}`);
   expect(outcome).toMatchObject({ status: "released", reply: "Reply 4." });
   expect(saves).toBe(1);
-  expect(s.trace.of("tool_ended").filter((record) => record.run === "t4" && record.event.tool === "file_read")).toHaveLength(1);
-  expect(s.trace.of("compacted").map((record) => record.run)).toEqual(["t4"]);
+  expect(s.trace.of("tool_ended").filter((record) => record.scope.turn === "t4" && record.event.tool === "file_read")).toHaveLength(1);
+  expect(s.trace.of("compacted").map((record) => record.scope.turn)).toEqual(["t4"]);
 });
 
 test("the user's setting gives the call before compaction more model calls", async () => {

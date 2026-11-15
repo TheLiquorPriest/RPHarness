@@ -91,7 +91,7 @@ describe("the narrator", () => {
     // The lead read the draft.
     expect(lastToolResult(s.model.requests[2]!.messages)).toBe(" has not come, Wren says, and turns back to the brass.");
     const narratorStarted = s.trace.of("agent_started").find((record) => record.agent.definition === "narrator");
-    expect(narratorStarted?.parent).toEqual({ agent: "id-1", run: "t1", call: "call_1_1" });
+    expect(narratorStarted?.parent).toEqual({ agent: s.trace.of("run_started")[0]?.agent.id, run: s.trace.of("run_started")[0]?.run, call: "call_1_1" });
   });
 
   test("draft first, under a rule on the reply that names the narrator: the rule sees the draft as it is written, the phrase never reaches the lead, and the narrator goes on under the rule's text", async () => {

@@ -19,7 +19,7 @@ async function outOfTime(s: Stage): Promise<void> {
   await play(s, ["t1", "t2", "t3"]);
   await s.harness.sessions!.compact(S1);
   const answering = s.turn(turn("t4", { parent: "t3" }));
-  await s.trace.seen((record) => record.run === "t4" && record.event.kind === "call_started");
+  await s.trace.seen((record) => record.scope.turn === "t4" && record.event.kind === "call_started");
   s.clock.advance(1_500);
   const { outcome } = await answering;
   expect(outcome).toMatchObject({ status: "limit", limit: { limit: "time", per: "turn", max: 1_000 } });

@@ -196,7 +196,8 @@ export class Turn {
     this.#c = core;
     this.#req = req;
     this.#sink = sink;
-    this.run = req.scope.turn;
+    // Each run of the turn (its first, a continue, a "Settle now") has an id of its own, so its records are told apart by this id; the turn stays in their scope.
+    this.run = core.ids();
     this.scope = req.scope;
     this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock);
     this.#trace.watch((record) => this.#watch(record));
@@ -219,7 +220,7 @@ export class Turn {
     try {
       outcome = await this.#play();
     } catch (error) {
-      env.log.error("A turn failed in the harness.", { turn: this.run, error: errorWords(error) });
+      env.log.error("A turn failed in the harness.", { turn: this.scope.turn, run: this.run, error: errorWords(error) });
       outcome = this.#outcome({ status: "failed", error: { code: "failed", detail: errorWords(error) } });
     } finally {
       signal.removeEventListener("abort", onAbort);
@@ -406,7 +407,7 @@ export class Turn {
       const framing = joined([template(frame)?.render().text ?? ""]);
       if (framing !== "") messages.push(systemMessage(framing, at));
       const prompt = promptMessages(req.prompt, model.model, at);
-      if (prompt.picturesLeft > 0) env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.run, pictures: prompt.picturesLeft });
+      if (prompt.picturesLeft > 0) env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.scope.turn, run: this.run, pictures: prompt.picturesLeft });
       messages.push(...prompt.messages);
     }
     // What the session carries, from where this run's work starts: fixed for the turn, after the prompt, so it never moves the cached front (§10.2).
@@ -533,8 +534,8 @@ export class Turn {
     // The mode "nothing" carries only what the session opened with, which no summary makes smaller.
     const plan = current === undefined || carry.carry === "nothing" ? undefined : compactionAt(file.log, carry.from, current, settings.compaction.keepTurns, carry.compacted);
     if (current === undefined || plan === undefined) {
-      if (refused) env.log.warn("The provider refused the lead's first call as too long, and its session has no earlier turn left to summarize.", { turn: this.run, tokens: before, window });
-      else if (tight) env.log.warn("The lead's first call would not fit its model's window less the reserve, and its session has no earlier turn left to summarize; the call goes out as it is.", { turn: this.run, tokens: before, window, reserve: settings.compaction.reserve });
+      if (refused) env.log.warn("The provider refused the lead's first call as too long, and its session has no earlier turn left to summarize.", { turn: this.scope.turn, run: this.run, tokens: before, window });
+      else if (tight) env.log.warn("The lead's first call would not fit its model's window less the reserve, and its session has no earlier turn left to summarize; the call goes out as it is.", { turn: this.scope.turn, run: this.run, tokens: before, window, reserve: settings.compaction.reserve });
       return false;
     }
 
@@ -543,7 +544,7 @@ export class Turn {
     const instructions = joined([part?.render().text ?? ""]);
     const material = await compactionMaterial(carry, plan.turns);
     if (instructions === "" || material.turns.length === 0) {
-      env.log.warn("The session's earlier turns cannot be summarized: the compaction part, or what it would summarize, is empty. They are carried as they were.", { turn: this.run });
+      env.log.warn("The session's earlier turns cannot be summarized: the compaction part, or what it would summarize, is empty. They are carried as they were.", { turn: this.scope.turn, run: this.run });
       return false;
     }
 
@@ -634,7 +635,7 @@ export class Turn {
     if (this.#ended()) return undefined;
     const summary = outcome.status === "done" ? outcome.text.trim() : "";
     if (summary !== "") return summary;
-    this.#c.env.log.warn("The session's earlier turns could not be summarized; they are carried as they were.", { turn: this.run, status: outcome.status, ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
+    this.#c.env.log.warn("The session's earlier turns could not be summarized; they are carried as they were.", { turn: this.scope.turn, run: this.run, status: outcome.status, ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
     return undefined;
   }
 
@@ -1158,7 +1159,7 @@ export class Turn {
 
   /** Tells the host something, or writes for the turn, without waiting: a failure is logged, and the turn's end waits for it to settle. */
   #tell(promise: Promise<unknown>): Promise<unknown> {
-    const told = promise.catch((error: unknown) => this.#c.env.log.error("The host could not be told what the turn did.", { turn: this.run, error: errorWords(error) }));
+    const told = promise.catch((error: unknown) => this.#c.env.log.error("The host could not be told what the turn did.", { turn: this.scope.turn, run: this.run, error: errorWords(error) }));
     this.#pending.add(told);
     void told.finally(() => this.#pending.delete(told));
     return told;

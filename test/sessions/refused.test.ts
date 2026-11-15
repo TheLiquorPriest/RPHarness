@@ -28,7 +28,7 @@ test("a first call the provider refuses as too long is a call that would not fit
   const four = carried(again!);
   expect(inOrder(four, ["Fixture summary: the tide was checked.", "Intent 2.", "Intent 3."])).toBe(true);
   expect(four).not.toContain("Intent 1.");
-  expect(s.trace.of("compacted").map((record) => record.run)).toEqual(["t4"]);
+  expect(s.trace.of("compacted").map((record) => record.scope.turn)).toEqual(["t4"]);
 
   // The next turn starts from the summary, with no compaction of its own.
   await play(s, ["t5"], "t4");

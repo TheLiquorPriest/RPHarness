@@ -29,7 +29,7 @@ test("a compaction asked for while a turn runs leaves the session where that tur
   }));
   for (const id of ["t1", "t2", "t3"]) expect((await s.turn(turn(id))).outcome.status).toBe("released");
   const four = s.turn(turn("t4"));
-  await s.trace.seen((record) => record.run === "t4" && record.event.kind === "call_started");
+  await s.trace.seen((record) => record.scope.turn === "t4" && record.event.kind === "call_started");
   expect(await s.harness.sessions!.compact(S1)).toMatchObject({ compactAsked: true });
   held.open();
   expect((await four).outcome.status).toBe("released");

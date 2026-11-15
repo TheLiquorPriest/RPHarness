@@ -125,7 +125,7 @@ export type TraceKind = TraceEvent["kind"];
 export interface TraceRecord {
   /** Its number within its run, from 1, with no gap. */
   seq: number;
-  /** The run: a turn's id for a turn, else the job's or the talk's own run id. */
+  /** The run's own id, made by the harness's `ids` when the run starts: each run of a turn (its first, a continue, a "Settle now"), a job's, a talk's. Never the turn's id; the turn is in `scope`. */
   run: string;
   scope: Scope;
   at: number;

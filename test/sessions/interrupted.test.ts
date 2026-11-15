@@ -34,7 +34,7 @@ async function stopped(s: Stage): Promise<void> {
   await s.harness.sessions!.compact(S1);
   const stop = new AbortController();
   const answering = s.turn(turn("t4", { parent: "t3" }), new WatchedSink(s.clock), stop.signal);
-  await s.trace.seen((record) => record.run === "t4" && record.event.kind === "call_started");
+  await s.trace.seen((record) => record.scope.turn === "t4" && record.event.kind === "call_started");
   stop.abort();
   const { outcome, sink } = await answering;
   expect(outcome.status).toBe("stopped");

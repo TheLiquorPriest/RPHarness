@@ -40,6 +40,7 @@ import { isRecord } from "./json";
 import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
 import { passRequest } from "./pass";
+import { Refusals } from "./refusals";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
 import type { ModelTexts } from "./texts";
@@ -199,7 +200,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
     const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
     for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts };
+    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, id: deps.id, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts, refusals: new Refusals() };
     // A sign-in has no chat in view: its settings are the levels every chat shares.
     const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: () => deps.settings({ user }), appName: deps.appName });
     // A model made for another user's agent is none of this desk's: its call goes on no connection of his.

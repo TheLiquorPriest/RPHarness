@@ -465,6 +465,8 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
         // A request passed through belongs to no session; it keeps a prompt as `calls.cacheRetention` says.
         cacheRetention: settings.cacheRetention,
         ...(Object.keys(extras).length > 0 ? { extras } : {}),
+        // A request passed through goes as it came: its tools natively, whatever its provider says of them.
+        toolsAs: "native",
         carried: {},
       },
       unmarked,

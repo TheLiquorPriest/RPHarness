@@ -28,15 +28,22 @@
 // at the head of the system prompt is replaced by the file's, or taken out where the file gives none;
 // a tool answer with no text is given the file's words for it. The session a call names to pi-ai, and
 // so to the provider's cache, is the user's session alone (`sessionKey`).
+//
+// An agent's tools go natively, or as text (tools-text.ts) where its definition says so, or where
+// its model's connection refused native tools within `calls.toolRefusalMinutes`: a call refused for
+// its native tools is made again at once with them as text. A call whose transcript ends on the
+// model's own message (a preset's prefill) is sent so that its provider continues it: on Anthropic's
+// API that message goes last as it is; on DeepSeek it is marked `prefix: true` and goes to DeepSeek's
+// prefix path, as Lumiverse's own DeepSeek provider sends it; anywhere else it goes as sent.
 
 import { createHash } from "node:crypto";
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
-import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
-import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
+import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Message, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, getCurrentTools } from "@earendil-works/pi-ai";
 import { DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS, clampReasoning } from "@earendil-works/pi-ai/api/simple-options";
 import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
-import type { JsonObject, ModelLimits, Scope, UserScope } from "../contract";
+import type { JsonObject, ModelLimits, Scope, ToolsAs, UserScope } from "../contract";
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import type { Book, Connection } from "./book";
@@ -45,8 +52,10 @@ import { isRecord, isTokenCount, own } from "./json";
 import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
 import { limitsOf } from "./limits";
+import type { Refusals } from "./refusals";
 import type { AgentChoice, ModelEffort, UserChoice } from "./source";
 import type { ModelTexts } from "./texts";
+import { asText, refusesTools, withWrittenCalls } from "./tools-text";
 import { answered, compatSays, inPlace, keepsSystemInPlace } from "./transcript";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
@@ -58,12 +67,16 @@ export interface CallDeps {
   /** How HTTP goes out, where pi-ai's client for the API takes it. */
   fetch: typeof globalThis.fetch;
   now(): number;
+  /** A new id, for a call read back from an answer's text. */
+  id(): string;
   setTimeout(run: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
   /** The model layer's settings at a scope's levels, read as each call is made. */
   settings(scope: Scope | UserScope): Promise<ModelSettings>;
   /** The model layer's texts at a scope's levels, read as each call is made. */
   texts(scope: Scope | UserScope): Promise<ModelTexts>;
+  /** Which of the user's connections' models refused native tools, and when. */
+  refusals: Refusals;
 }
 
 /** What a call is made under, read at its scope's levels as it is made: the layer's settings and its texts. */
@@ -110,6 +123,8 @@ export interface CallAsk {
   cacheRetention: CacheRetention;
   /** The agent session the call belongs to: its calls share the provider's prompt cache. */
   sessionId?: string;
+  /** How the agent's tools are offered; absent: `auto`. */
+  toolsAs?: ToolsAs;
   /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's own count, else `calls.retries`. */
   retries?: number;
   /** Fields of a passed request sent as they came, where the call speaks the request's own API (OpenAI's chat completions). */
@@ -186,12 +201,24 @@ export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: Agent
   return { connection, kind, model, limits, reasoning: level === "off" ? undefined : level, providerDefault: false };
 }
 
+/** The unit `calls.toolRefusalMinutes` is in. */
+const MINUTE_MS = 60_000;
+
+/** DeepSeek's own host: a call there that continues the model's message goes to its prefix path, a beta of DeepSeek's. */
+const DEEPSEEK_HOST = "api.deepseek.com";
+
+/** A DeepSeek model at its prefix path where it is at DeepSeek's own address, as Lumiverse's DeepSeek provider sends a prefix; a proxy's address, or one already on the path, as it is. */
+function onPrefixPath(model: Model<Api>): Model<Api> {
+  const url = URL.parse(model.baseUrl);
+  return url?.hostname === DEEPSEEK_HOST ? { ...model, baseUrl: `${url.origin}/beta` } : model;
+}
+
 /** Sets payload fields from `values`, by the payload's own name for each, leaving out any value that isn't there. */
 function setAll(payload: Record<string, unknown>, values: Partial<Record<string, unknown>>, names: Readonly<Record<string, string>>): void {
   for (const [ours, theirs] of Object.entries(names)) if (values[ours] !== undefined) payload[theirs] = values[ours];
 }
 
-/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, the fields a passed request sent, and the sign-in line. */
+/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, the fields a passed request sent, the sign-in line, and DeepSeek's prefix mark. */
 interface PayloadChanges {
   sampling: Partial<Record<SamplingName, unknown>>;
   serial: boolean;
@@ -203,11 +230,13 @@ interface PayloadChanges {
   uncapped: boolean;
   /** A call on an Anthropic sign-in: the line pi-ai puts first in the system prompt is this one, or none where it is undefined. */
   signin?: { line: string | undefined };
+  /** A call to DeepSeek whose transcript ends on the model's own message: that message is marked for DeepSeek to continue it, carrying the thinking it continues only where it has some, as Lumiverse sends one. */
+  prefix: boolean;
 }
 
 function changePayload(api: string, payload: unknown, changes: PayloadChanges): unknown {
   if (!isRecord(payload)) return undefined;
-  const { sampling, serial, providerDefault, thinking, extras, uncapped, signin } = changes;
+  const { sampling, serial, providerDefault, thinking, extras, uncapped, signin, prefix } = changes;
   const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
   switch (api) {
     case "anthropic-messages":
@@ -227,6 +256,13 @@ function changePayload(api: string, payload: unknown, changes: PayloadChanges): 
       if (uncapped) for (const cap of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) delete payload[cap];
       if (serial && hasTools) payload.parallel_tool_calls = false;
       if (api === "openai-completions" && extras !== undefined) for (const [k, v] of Object.entries(extras)) if (!(k in payload)) payload[k] = v;
+      if (prefix && Array.isArray(payload.messages)) {
+        const last: unknown = payload.messages.at(-1);
+        if (isRecord(last) && last.role === "assistant") {
+          last.prefix = true;
+          if (last.reasoning_content === "") delete last.reasoning_content;
+        }
+      }
       break;
     case "google-generative-ai": {
       const config = isRecord(payload.config) ? payload.config : {};
@@ -402,7 +438,17 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       delete taken.top_p;
     }
     const { temperature, ...rest } = taken;
-    const messages = inPlace(answered(context.messages, texts.emptyAnswer, texts.picturesAnswer), keepsSystemInPlace(model), texts.markNote);
+    const given = answered(context.messages, texts.emptyAnswer, texts.picturesAnswer);
+    /** The transcript as sent, its tools native or as text. */
+    const sent = (toolsText: boolean): Message[] => inPlace(toolsText ? asText(given, texts.toolsText) : given, keepsSystemInPlace(model), texts.markNote);
+    // Tools go as text where the agent's definition says so, or where its model's connection refused native tools within the set time.
+    const offersTools = getCurrentTools(context.messages).length > 0;
+    const refusal = JSON.stringify([connection.id, model.id]);
+    let toolsAsText = offersTools && (ask.toolsAs === "text" || (ask.toolsAs !== "native" && deps.refusals.stands(refusal, deps.now(), settings.toolRefusalMinutes * MINUTE_MS)));
+    let messages = sent(toolsAsText);
+    // A transcript that ends on the model's own message: DeepSeek is asked to continue it, on its prefix path.
+    const prefix = kind.id === "deepseek" && context.messages.at(-1)?.role === "assistant";
+    const sentTo = prefix ? onPrefixPath(model) : model;
     // Under the provider's own default its model may think, so what thinking refuses is left out then too.
     const changes: PayloadChanges = {
       sampling: openAI ? {} : rest,
@@ -412,6 +458,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       extras: ask.extras,
       uncapped: room === undefined,
       ...(connection.auth === "signin" && model.api === "anthropic-messages" ? { signin: { line: texts.signinLine } } : {}),
+      prefix,
     };
     const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
     watch = watching;
@@ -430,7 +477,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       ...(openAI && Object.keys(rest).length > 0 ? { samplingParams: rest } : {}),
       ...(apiKey !== undefined ? { apiKey } : {}),
       ...(headers !== undefined ? { headers } : {}),
-      ...(ask.toolChoice !== undefined ? { toolChoice: ask.toolChoice } : {}),
+      ...(ask.toolChoice !== undefined && !toolsAsText ? { toolChoice: ask.toolChoice } : {}),
       cacheRetention: ask.cacheRetention,
       ...(ask.sessionId !== undefined ? { sessionId: sessionKey(deps.user, ask.sessionId) } : {}),
       maxRetries: 0,
@@ -452,7 +499,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     };
     /** One go at the call: `out` ended, or the failure of a go that received nothing, which may be made again. */
     const attempt = async (): Promise<AssistantMessage | undefined> => {
-      const events = deps.pi.streamSimple(model, { messages }, options);
+      const events = deps.pi.streamSimple(sentTo, { messages }, options);
       const iterator = events[Symbol.asyncIterator]();
       /** The answer as far as it came. */
       let partial: AssistantMessage | undefined;
@@ -487,9 +534,14 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
           continue;
         }
         receive();
-        if (event.type === "done") watching.stop();
+        if (event.type === "done") {
+          watching.stop();
+          // Tools as text: the calls the answer's text holds are made its calls.
+          const answer = toolsAsText ? withWrittenCalls(event.message, context.messages, deps.id) : event.message;
+          out.push(answer === event.message ? event : { ...event, reason: "toolUse", message: answer });
+          return undefined;
+        }
         out.push(event);
-        if (event.type === "done") return undefined;
       }
       const result = await events.result();
       if (result.stopReason === "error" || result.stopReason === "aborted") {
@@ -499,7 +551,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       }
       receive();
       watching.stop();
-      out.end(result);
+      out.end(toolsAsText ? withWrittenCalls(result, context.messages, deps.id) : result);
       return undefined;
     };
 
@@ -509,6 +561,15 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       delete wire.unreached;
       const failed = await attempt();
       if (failed === undefined) return;
+      // A provider that refuses native tools is sent the same call at once with them as text, and its model is offered them so until the set time has passed.
+      if (offersTools && !toolsAsText && ask.toolsAs !== "native" && refusesTools(failed.errorMessage)) {
+        deps.refusals.note(refusal, deps.now());
+        toolsAsText = true;
+        messages = sent(true);
+        delete options.toolChoice;
+        tried -= 1;
+        continue;
+      }
       if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) return endWith(out, await failure(failed));
       const { promise: waited, resolve: wake } = Promise.withResolvers<void>();
       const timer = deps.setTimeout(wake, settings.retryWait * 2 ** tried);
@@ -539,8 +600,8 @@ function samplingOf(options: SimpleStreamOptions): Sampling {
   return out;
 }
 
-/** What pi's loop asks of a call, from the options it hands its stream function; the prompt cache is kept as `calls.cacheRetention` says. */
-function askOf(options: SimpleStreamOptions, shape: CallShape, settings: ModelSettings): CallAsk {
+/** What pi's loop asks of a call, from the options it hands its stream function and the agent's choice; the prompt cache is kept as `calls.cacheRetention` says. */
+function askOf(options: SimpleStreamOptions, choice: UserChoice, shape: CallShape, settings: ModelSettings): CallAsk {
   const { identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload } = options;
   const carried = Object.fromEntries(Object.entries({ identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload }).filter(([, v]) => v !== undefined)) as CallAsk["carried"];
   return {
@@ -552,6 +613,7 @@ function askOf(options: SimpleStreamOptions, shape: CallShape, settings: ModelSe
     serialTools: shape.connection.serialTools === true,
     cacheRetention: settings.cacheRetention,
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
+    ...(choice.toolsAs !== undefined ? { toolsAs: choice.toolsAs } : {}),
     carried,
   };
 }
@@ -571,7 +633,7 @@ export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => 
         if (choice === undefined) throw new Error("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
         const shape = await shapeOf(deps, choice);
         const terms = await termsOf(deps, choice.scope ?? { user: choice.user });
-        await makeCall(deps, shape, context, askOf(options, shape, terms.settings), terms, options.signal, out);
+        await makeCall(deps, shape, context, askOf(options, choice, shape, terms.settings), terms, options.signal, out);
       } catch (error) {
         endWith(out, emptyAnswer(model, options.signal?.aborted === true ? "aborted" : "error", errorWords(error), deps.now()));
       }

@@ -13,7 +13,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import type { ConnectionInput, UserScope } from "../../src/contract";
 import type { ModelEffort } from "../../src/model";
 import type { Rig, Script } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, MemoryStore, rig, USER } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, MemoryStore, rig, textOf, USER } from "./support";
 
 const ANTHROPIC_KEY = "sk-ant-api03-Ilse0123456789abcdefOkoro";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -374,5 +374,33 @@ describe("each user's desk", () => {
     }
     expect(store.secretReads.filter((user) => user === STRANGER).length).toBe(2);
     expect(store.secretReads.filter((user) => user === USER).length).toBe(1);
+  });
+});
+
+describe("a call that ends on the model's own message", () => {
+  test("a narrator's call with a prefill: on Anthropic the prefill is the last message; on DeepSeek it carries `prefix: true` and goes to the prefix path; elsewhere it goes as sent", async () => {
+    const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
+    const prefilled: Message[] = [
+      { role: "system", content: "You narrate a harbour town.", timestamp: 1 },
+      { role: "user", content: "The bell rings.", timestamp: 1 },
+      { role: "assistant", content: [{ type: "text", text: "Wren looks up at the tower and" }], api: "openai-completions", provider: "fixture", model: "fixture-model", usage, stopReason: "stop", timestamp: 1 },
+    ];
+    const chatAnswer: Script = () => eventStream(chatStream([chunk({ role: "assistant", content: " counts the strokes." }), chunk({}, "stop")]));
+    const sentFor = async (script: Script, connection: ConnectionInput, key: string): Promise<{ url: string; last: Record<string, unknown> }> => {
+      const made = rig({ script });
+      r = made;
+      const saved = await made.layer.api.save(USER, connection, key);
+      expect((await call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), prefilled)).errorMessage).toBeUndefined();
+      const last = (bodyOf(made.sent[0]).messages as Record<string, unknown>[]).at(-1) ?? {};
+      await made.done();
+      r = undefined;
+      return { url: made.sent[0]?.url ?? "", last };
+    };
+    const anthropic = await sentFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    expect([anthropic.last.role, textOf(anthropic.last.content)]).toEqual(["assistant", "Wren looks up at the tower and"]);
+    const deepseek = await sentFor(chatAnswer, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-chat" }, "sk-0123456789abcdefghijklmn");
+    expect(deepseek).toEqual({ url: "https://api.deepseek.com/beta/chat/completions", last: { role: "assistant", content: "Wren looks up at the tower and", prefix: true } });
+    const local = await sentFor(chatAnswer, { name: "Local", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" }, SERVER_KEY);
+    expect(local).toEqual({ url: "http://127.0.0.1:8080/v1/chat/completions", last: { role: "assistant", content: "Wren looks up at the tower and" } });
   });
 });

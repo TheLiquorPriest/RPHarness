@@ -272,8 +272,8 @@ export function rig(options: RigOptions = {}): Rig {
   };
   const log: Log = { debug: said, info: said, warn: said, error: said };
   let ids = 0;
-  // The texts a host reads from its files; the test's own here: the sign-in line as shipped, the host's mark where a test gives one.
-  const texts: ModelTexts = { signinLine: SIGNIN_LINE, markNote: options.markNote, testPrompt: TEST_PROMPT, emptyAnswer: undefined, picturesAnswer: undefined };
+  // The texts a host reads from its files; the test's own here: the sign-in line as shipped, the host's mark where a test gives one, no words for tools as text unless a test gives them.
+  const texts: ModelTexts = { signinLine: SIGNIN_LINE, markNote: options.markNote, testPrompt: TEST_PROMPT, emptyAnswer: undefined, picturesAnswer: undefined, toolsText: undefined };
   const layer = createModelLayer({
     store,
     now: clock.now,

@@ -17,11 +17,12 @@ export const SKILLS_PART = "skills";
 
 /**
  * The skills in force, each by its name and the description its header gives, laid out by the
- * skills part, for an agent among whose tools is `skill_load`, which loads them by those names.
- * Empty for an agent without it, while no skill is in force, or when the part is not a template.
+ * skills part, for an agent that can call `skill_load`, which loads them by those names: it holds
+ * it, or it holds `tool_use` and the skills' family is in its reach (the caller says which). Empty
+ * for any other agent, while no skill is in force, or when the part is not a template.
  */
-export async function skillsIndex(guidance: Pick<Guidance, "part" | "skills">, tools: readonly { name: string }[]): Promise<string> {
-  if (!tools.some((tool) => tool.name === SKILL_LOAD)) return "";
+export async function skillsIndex(guidance: Pick<Guidance, "part" | "skills">, canLoad: boolean): Promise<string> {
+  if (!canLoad) return "";
   const [part, skills] = await Promise.all([guidance.part(SKILLS_PART), guidance.skills()]);
   if (part?.format !== "template" || skills.length === 0) return "";
   return part.render({ skills: skills.map(({ name, description }) => ({ name, description })) }).text;

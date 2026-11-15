@@ -12,6 +12,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./contract": "./src/contract/index.ts",
+    "./helpers": "./src/helpers.ts",
     "./hosts/folder": "./src/hosts/folder/index.ts",
     "./testing/rig": "./src/testing/rig/index.ts",
     "./testing/kit": "./src/testing/kit/index.ts",

@@ -1,0 +1,12 @@
+// The one module of pure helpers a host may import from RPH, as `rp-harness/helpers` (§13.1, Appendix
+// A): beside the contract's types and `createHarness`, the values and functions by which a host agrees
+// with RPH without reaching into it. Each is data that does not change or a function that reads only
+// what it is given. Nothing else of RPH's is a host's to import.
+//
+// - `SETTINGS`: every setting RPH reads, as a config file writes it, with its name and what it is for
+//   (§5.4 "Config", §14), so a host's Settings page shows and edits exactly those, and a setting RPH
+//   adds reaches the page with nothing copied by hand.
+// - `mergedConfig`: the merge of levels RPH reads every setting by (the contract's `MergeLevels`), so
+//   a host reading the same config files reads what RPH reads.
+
+export { mergedConfig, SETTINGS } from "./harness/settings";

@@ -22,8 +22,9 @@
 import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
 import type { Guidance } from "../../files/api";
 import { checkSettingValue, valueWords } from "./check";
+import { CALLS } from "./calls";
 import { COMPACTION } from "./compaction";
-import { CONNECTION, frozen, type Group, type ListedSetting, type SettingEntry } from "./entry";
+import { CONNECTION, DEFINITION, frozen, type Group, isNamed, type ListedSetting, type SettingEntry } from "./entry";
 import { JOBS } from "./jobs";
 import { LIMITS } from "./limits";
 import { MODELS, MODELS_GONE } from "./models";
@@ -34,7 +35,7 @@ import { TOOLS } from "./tools";
 import { TRACE } from "./trace";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, JOBS, MODELS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
+export const GROUPS = [LIMITS, JOBS, MODELS, CALLS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE };
@@ -58,10 +59,10 @@ type Taken<D extends SettingEntry> = TakenBy<D["takes"]> | (D extends { readonly
 /** A setting's value: one a level sets, or its default, which is one it takes or none (null). */
 type ValueOf<D extends SettingEntry> = Taken<D> | (null extends D["default"] ? null : never);
 
-/** Where a value lands at the path `P` of `Settings`: none leaves the field out, so a field that may be none is optional; connections are keyed by name, as the files write them. */
-type Land<P extends string, V> = P extends `${typeof CONNECTION}.${infer Rest}`
+/** Where a value lands at the path `P` of `Settings`: none leaves the field out, so a field that may be none is optional; connections and definitions are keyed by name, as the files write them. */
+type Land<P extends string, V> = P extends `${typeof CONNECTION | typeof DEFINITION}.${infer Rest}`
   ? Readonly<Record<string, Land<Rest, V>>>
-  : P extends typeof CONNECTION
+  : P extends typeof CONNECTION | typeof DEFINITION
     ? Readonly<Record<string, Exclude<V, null>>>
     : P extends `${infer Head}.${infer Rest}`
       ? { readonly [K in Head]: Land<Rest, V> }
@@ -95,8 +96,8 @@ export type ReplyFormSetting = (typeof REPLY.form.takes.values)[number];
 /** Which model calls have what they were sent kept in the turn's folder: each agent's first, every one, or none. */
 export type RequestsSetting = (typeof TRACE.requests.takes.values)[number];
 
-/** The model layer's settings (`calls.*`), times in milliseconds; an absent silent wait is no limit. */
-export type ModelSettings = Settings["calls"];
+/** The model layer's settings (`calls.*`), times in milliseconds; an absent silent wait is no limit; with the characters per token its counts are made at (`tokens.charsPerToken`). */
+export type ModelSettings = Settings["calls"] & { charsPerToken: number };
 
 /** Where a scope's levels come from: a chat's guidance, or, with no chat in view, the file port's levels for the user alone. */
 type LevelSource = Pick<Guidance, "layers">;
@@ -163,12 +164,12 @@ function decides(config: JsonObject, path: readonly string[]): boolean {
   return true;
 }
 
-/** Each value a config sets at a key's path, with the path it is set at: one for each connection it names, where the key has `<connection>`. */
+/** Each value a config sets at a key's path, with the path it is set at: one for each connection or definition it names, where the key has `<connection>` or `<definition>`. */
 function valuesAt(config: JsonValue, parts: readonly string[], path: readonly string[] = []): { path: string[]; value: JsonValue }[] {
   if (parts.length === 0) return [{ path: [...path], value: config }];
   if (!isMapping(config)) return [];
   const [part, ...rest] = parts as [string, ...string[]];
-  return (part === CONNECTION ? Object.keys(config) : [part]).flatMap((name) => {
+  return (isNamed(part) ? Object.keys(config) : [part]).flatMap((name) => {
     const next = config[name];
     return next === undefined ? [] : valuesAt(next, rest, [...path, name]);
   });
@@ -200,8 +201,8 @@ export class SettingsRead {
   taken<D extends SettingEntry>(def: D, connection?: string): Taken<D> | undefined {
     this.#unread(def);
     const { levels, config } = this.#merged(def);
-    // The key as the path of mappings a config file holds it at; a connection's name stays whole, dots and all.
-    const path = def.key.split(".").map((part) => (part === CONNECTION && connection !== undefined ? connection : part));
+    // The key as the path of mappings a config file holds it at; a connection's or a definition's name stays whole, dots and all.
+    const path = def.key.split(".").map((part) => (isNamed(part) && connection !== undefined ? connection : part));
     let at: JsonValue = config;
     for (const [i, part] of path.entries()) {
       if (!isMapping(at)) {
@@ -223,14 +224,15 @@ export class SettingsRead {
   }
 
   /**
-   * The names or ids a setting set per connection is set under, as the files write them. Where its
-   * key goes on past `<connection>`, only those holding a mapping: another value there is passed over.
+   * The names or ids a setting set per connection (or per definition) is set under, as the files
+   * write them. Where its key goes on past the name, only those holding a mapping: another value
+   * there is passed over.
    */
   named(def: SettingEntry): string[] {
     this.#unread(def);
     const { levels, config } = this.#merged(def);
     const parts = def.key.split(".");
-    const before = parts.slice(0, parts.indexOf(CONNECTION));
+    const before = parts.slice(0, parts.findIndex(isNamed));
     const more = parts.length > before.length + 1;
     let at: JsonValue = config;
     for (const [i, part] of before.entries()) {
@@ -310,7 +312,7 @@ export class SettingsRead {
     for (const entry of entries) {
       const parts = entry.key.split(".");
       const parent = parts.slice(0, -1).join(".");
-      if (parts.at(-1) === CONNECTION) anyName.add(parent);
+      if (isNamed(parts.at(-1))) anyName.add(parent);
       else sections.set(parent, (sections.get(parent) ?? new Set<string>()).add(parts.at(-1)!));
     }
     for (const entry of entries) {
@@ -378,7 +380,7 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
     for (const entry of Object.values(group)) {
       const path = entry.at.split(".");
       const land = (to: readonly string[], value: unknown): void => own(holder(to.slice(0, -1)), to.at(-1)!, entry.ms === true ? (value as number) * 1000 : value);
-      const named = path.indexOf(CONNECTION);
+      const named = path.findIndex(isNamed);
       if (named === -1) {
         holder(path.slice(0, -1));
         // None leaves the field out.
@@ -423,7 +425,8 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
  * user, the levels every chat shares.
  */
 export async function readModelSettings(files: FilesPort, scope: Scope | UserScope, log: Log): Promise<ModelSettings> {
-  return (await readSettingsOf([MODELS] as const, { layers: () => files.layers(scope) }, files, scope, log)).calls;
+  const read = await readSettingsOf([MODELS, CALLS] as const, { layers: () => files.layers(scope) }, files, scope, log);
+  return { ...read.calls, charsPerToken: read.tokens.charsPerToken };
 }
 
 /** The form a connection's reply takes, and whether a two-step connection streams anyway, by the connection's name or id. */

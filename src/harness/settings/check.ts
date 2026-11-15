@@ -3,7 +3,7 @@
 // two take and refuse the same values, for the same reason.
 
 import type { JsonValue, SettingDef } from "../../contract";
-import { CONNECTION } from "./entry";
+import { isNamed } from "./entry";
 
 /** What a check of a value finds: the value as the setting reads it; or why the setting takes no such value, with what of it is read all the same. */
 export type SettingCheck = { readonly ok: true; readonly value: JsonValue } | { readonly ok: false; readonly why: string; readonly kept?: JsonValue };
@@ -40,10 +40,10 @@ function takesWords(def: SettingDef): string {
  * `~` (null) where the setting takes that. A list with an item that is not a name (not text, or blank) is refused with its
  * names kept, as the contract's `texts` says: a reader reads the names and passes the other items
  * over; a page refuses the list. `connection` is the name the key is set under, where the key has
- * `<connection>`.
+ * `<connection>` or `<definition>`.
  */
 export function checkSettingValue(def: SettingDef, value: JsonValue, connection?: string): SettingCheck {
-  const key = connection === undefined ? def.key : def.key.split(".").map((part) => (part === CONNECTION ? connection : part)).join(".");
+  const key = connection === undefined ? def.key : def.key.split(".").map((part) => (isNamed(part) ? connection : part)).join(".");
   const refused: SettingCheck = { ok: false, why: `${key} takes ${takesWords(def)}, not ${valueWords(value)}.` };
   if (value === null) return def.orNone === true ? { ok: true, value: null } : refused;
   const t = def.takes;

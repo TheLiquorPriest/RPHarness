@@ -43,6 +43,7 @@ import { passRequest } from "./pass";
 import { Refusals } from "./refusals";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
+import { tokensOf } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
@@ -329,6 +330,12 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     },
     async limits(user, connectionId, model) {
       return (await shapeOf(deskOf(user).calls, { connectionId, model: model ?? null })).limits;
+    },
+    async count(scope, connectionId, prompt) {
+      // The connection must be one the call could go on; the count is the chat's own measure, as RPH's own calls are measured before a provider counts them.
+      await shapeOf(deskOf(scope.user).calls, { connectionId, model: null });
+      const { charsPerToken } = await deps.settings(scope);
+      return prompt.reduce((tokens, m) => tokens + tokensOf(typeof m.content === "string" ? m.content : m.content.map((part) => (part.type === "text" ? part.text : "")).join("\n"), charsPerToken), 0);
     },
     signIn: (user) => deskOf(user).signIn,
     pass: (user, request, sink, signal) => passRequest(deskOf(user).calls, request, sink, signal),

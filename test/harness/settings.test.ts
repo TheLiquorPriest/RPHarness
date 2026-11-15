@@ -457,8 +457,8 @@ test("a connection named like an object's own fields gets no form or counts but 
 });
 
 test("a key in a section only the harness's settings use that names none of them is logged once with its file, and every setting is read as before", async () => {
-  // `limits.turn.cals` for `calls`, and a connection's `atOnc`; `limits` itself, and a section no entry lives in, are another reader's.
-  const global: JsonObject = { limits: { turn: { cals: 12, calls: 30 }, body: 5 }, lantern: { wick: 3 } };
+  // `limits.turn.cals` for `calls`, and a connection's `atOnc`; a section no entry lives in is another reader's.
+  const global: JsonObject = { limits: { turn: { cals: 12, calls: 30 } }, lantern: { wick: 3 } };
   const chat: JsonObject = { jobs: { connections: { [CONNECTION]: { atOnc: 1, perDay: 2 } } }, limits: { turn: { cals: 12 } } };
   const read = await settingsOf({ global, chat });
   expect({ turn: read.settings.turn, counts: read.settings.jobs.connections[CONNECTION] }).toEqual({ turn: { calls: 30 }, counts: { perDay: 2 } });

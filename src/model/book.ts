@@ -121,15 +121,15 @@ function isHeaderNames(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((v) => typeof v === "string");
 }
 
-/** Limits by model id, as kept: each a window and a longest reply in tokens, either one there; null when it isn't that. */
+/** Limits by model id, as kept: each a window and a longest reply in tokens and whether it takes pictures, any of them there; null when it isn't that. */
 function limitRecord(value: unknown): Record<string, ModelLimitsEntry> | null {
   if (!isRecord(value)) return null;
   const out: Record<string, ModelLimitsEntry> = {};
   for (const [model, entry] of Object.entries(value)) {
     if (!isRecord(entry)) return null;
-    const { contextWindow, maxTokens } = entry;
-    if ((contextWindow !== undefined && !isTokenCount(contextWindow)) || (maxTokens !== undefined && !isTokenCount(maxTokens))) return null;
-    if (contextWindow !== undefined || maxTokens !== undefined) out[model] = { ...(contextWindow !== undefined ? { contextWindow } : {}), ...(maxTokens !== undefined ? { maxTokens } : {}) };
+    const { contextWindow, maxTokens, pictures } = entry;
+    if ((contextWindow !== undefined && !isTokenCount(contextWindow)) || (maxTokens !== undefined && !isTokenCount(maxTokens)) || (pictures !== undefined && typeof pictures !== "boolean")) return null;
+    if (contextWindow !== undefined || maxTokens !== undefined || pictures !== undefined) out[model] = { ...(contextWindow !== undefined ? { contextWindow } : {}), ...(maxTokens !== undefined ? { maxTokens } : {}), ...(pictures !== undefined ? { pictures } : {}) };
   }
   return out;
 }

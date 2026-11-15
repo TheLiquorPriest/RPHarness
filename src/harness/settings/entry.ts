@@ -21,7 +21,7 @@ export type ListedSetting = SettingDef & SettingWords;
  * every value by its entry and the type of what it reads follows from the entries.
  */
 export interface Landing {
-  /** The path of field names, dotted; `<connection>` where a setting set per connection names its connection. A value that is none is left out. */
+  /** The path of field names, dotted; `<connection>` or `<definition>` where a setting set per connection or per agent definition names it. A value that is none is left out. */
   readonly at: string;
   /** A number of seconds, kept as milliseconds. */
   readonly ms?: true;
@@ -29,6 +29,14 @@ export interface Landing {
 
 /** Where the key of a setting set per connection names its connection. */
 export const CONNECTION = "<connection>";
+
+/** Where the key of a setting set per agent definition names the definition. */
+export const DEFINITION = "<definition>";
+
+/** Whether a part of a key stands for a name a file chooses: a connection's or a definition's. */
+export function isNamed(part: string | undefined): boolean {
+  return part === CONNECTION || part === DEFINITION;
+}
 
 /**
  * A setting as its group's module declares it: everything but its words, which only its words file

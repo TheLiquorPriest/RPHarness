@@ -23,7 +23,7 @@ export type SettingTakes =
 
 /** A setting as the code that reads it declares it: what a page needs to show it, to check a value before writing it, and to say what it is for. */
 export interface SettingDef {
-  /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection. */
+  /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection, `<definition>` where a setting set per agent definition names the definition (`sampling.<definition>.temperature`). */
   readonly key: string;
   readonly takes: SettingTakes;
   /** What holds where no level sets it, as a config file writes it: null for nothing, whose meaning `none` gives. */

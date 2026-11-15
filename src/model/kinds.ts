@@ -117,10 +117,11 @@ export function builtInProviders(): Provider[] {
 }
 
 /**
- * A model nobody's catalogue lists: it may reason and see images, and its limits are unknown, which
- * pi-ai reads as 0 and fits nothing to. The layer puts in what the connection reported or the user
- * entered, where there is either (limits.ts).
+ * A model nobody's catalogue lists: it may reason, it is not known to take pictures, and its limits
+ * are unknown, which pi-ai reads as 0 and fits nothing to. The layer puts in what the connection
+ * reported or the user entered, where there is either (limits.ts). Its reasoning stays possible: an
+ * agent's effort is its definition's, sent as asked, and a server that has none answers without it.
  */
 export function unlistedModel(id: string, api: Api, provider: string, baseUrl: string): Model<Api> {
-  return { id, name: id, api, provider, baseUrl, reasoning: true, input: ["text", "image"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 0, maxTokens: 0 };
+  return { id, name: id, api, provider, baseUrl, reasoning: true, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 0, maxTokens: 0 };
 }

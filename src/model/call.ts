@@ -186,8 +186,8 @@ export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: Agent
   if (id === undefined || id === "") throw new Error(`The connection "${connection.name}" names no model, and neither does this agent: pick one on the Connections page or in the agent's settings.`);
   const { model: found, listed } = modelFor(deps.pi, kind, connection, id);
   const limits = limitsOf(listed, own(connection.reported, id), own(connection.limits, id));
-  // pi-ai fits a call's room to the window, and an Anthropic call's to the longest reply, by these two: they are the limits as resolved, 0 where nobody knows one.
-  let model: Model<Api> = { ...found, contextWindow: limits.contextWindow?.tokens ?? 0, maxTokens: limits.maxTokens?.tokens ?? 0 };
+  // pi-ai fits a call's room to the window, and an Anthropic call's to the longest reply, by these two: they are the limits as resolved, 0 where nobody knows one. It takes pictures where someone said it does.
+  let model: Model<Api> = { ...found, contextWindow: limits.contextWindow?.tokens ?? 0, maxTokens: limits.maxTokens?.tokens ?? 0, input: limits.pictures?.takes === true ? ["text", "image"] : ["text"] };
   // On OpenAI's two APIs a system message may stand anywhere, as a chat application's custom connection sends it, and a compatible server is sent the `system` role every server knows, not OpenAI's newer `developer`. Both APIs' flags have these fields.
   if (model.api === "openai-completions" || model.api === "openai-responses") model = { ...model, compat: { ...(model.compat as OpenAICompletionsCompat | OpenAIResponsesCompat | undefined), supportsMidConvoSystemMessages: true, ...(kind.needsBaseUrl ? { supportsDeveloperRole: false } : {}) } };
   // Every request carries everything (see the head of this file); a connection that turns threads on gets pi-ai's own default, which is Anthropic's own endpoint alone.

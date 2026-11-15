@@ -6,8 +6,9 @@
 // names the user it acts for (READINGS R-52; Appendix B: every table carries the user): one user's
 // connections, keys and sign-ins are never listed, used or changed for another.
 
-import type { Effort, Usage, UserScope } from "./common";
+import type { Effort, Scope, Usage, UserScope } from "./common";
 import type { JsonObject, JsonValue } from "./json";
+import type { PromptMessage } from "./prompt";
 
 /** How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing (a local server that asks for none). */
 export type ConnectionAuth = "key" | "signin" | "none";
@@ -20,10 +21,11 @@ export type ConnectionAuth = "key" | "signin" | "none";
  */
 export type ToolsAs = "auto" | "native" | "text";
 
-/** A model's limits as entered or reported: its context window and its longest answer, in tokens. */
+/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures. */
 export interface ModelLimitsEntry {
   contextWindow?: number;
   maxTokens?: number;
+  pictures?: boolean;
 }
 
 /** A connection as the layer keeps it. */
@@ -182,14 +184,27 @@ export interface ModelLimit {
   from: "user" | "pi" | "connection";
 }
 
+/** Whether a model takes pictures, and where that came from. */
+export interface ModelPictures {
+  takes: boolean;
+  from: "user" | "pi" | "connection";
+}
+
+/** A figure of a model the Connections page asks for where nobody has given it. */
+export type ModelFigure = "contextWindow" | "maxTokens" | "pictures";
+
 /**
  * A model's limits as RPH uses them (§13.3, Y33), each found on its own: the user's entry, else
  * pi's catalog, else what the connection's server reported. Null: nobody knows it, so the page asks
- * (§18.1 row 0.10).
+ * (§18.1 row 0.10); none is assumed. A model nobody has said takes pictures is not known to (C26):
+ * RPH leaves no picture out by itself, and the host leaves them out of what it gives that agent.
  */
 export interface ModelLimits {
   contextWindow: ModelLimit | null;
   maxTokens: ModelLimit | null;
+  pictures: ModelPictures | null;
+  /** The figures nobody has given, in this order: the ones the page asks for. */
+  asked: ModelFigure[];
 }
 
 /** The providers RPH can sign in to (§13.2). */
@@ -280,6 +295,12 @@ export interface ModelsApi {
   models(user: string, connection: string | null): Promise<ModelChoice[]>;
   /** A model's limits as RPH uses them; the connection's own model when `model` is absent. */
   limits(user: string, connection: string | null, model?: string): Promise<ModelLimits>;
+  /**
+   * The tokens of a prompt going to a connection of the user's (null: his default) in a chat (C-M7),
+   * counted as RPH counts its own calls' prompts before a provider does: at the chat's
+   * `tokens.charsPerToken`. Rejects, in words that say what to do, where the connection can't be used.
+   */
+  count(scope: Scope, connection: string | null, prompt: readonly PromptMessage[]): Promise<number>;
   // `embed`, for search by meaning (§9.4, §10.5), comes here with the search lane, so a host's
   // indexes are built through RPH's model layer and never by the host calling a model.
   /** The user's sign-ins: their tokens are his alone. */

@@ -11,7 +11,7 @@ import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
 import { requestPath, sentMessages } from "../harness/requests";
-import { readSettings, type Settings } from "../harness/settings";
+import { callTerms, readSettings, type Settings } from "../harness/settings";
 import type { UsageBook } from "../harness/usage";
 import { type AgentOutcome, type AgentRunner, Budget, type GateCall, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type ToolGate, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
@@ -206,6 +206,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     budget: () => budget,
     settings: () => settings.subAgents,
     perCall: () => settings.perCall,
+    terms: (definition) => callTerms(settings, definition),
     track: (entry) => {
       working.add(entry);
       return () => working.delete(entry);

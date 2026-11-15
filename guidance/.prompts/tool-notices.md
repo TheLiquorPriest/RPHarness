@@ -29,11 +29,19 @@ wrote: Wrote {{path}} ({{bytes}} bytes).
 appended: Added to {{path}} ({{bytes}} bytes now).
 edited: Changed {{path}} ({{bytes}} bytes now).
 deleted: Deleted {{path}}.
+now_text: {{path}} now reads ({{lines}} lines):
+now_stretch: Lines {{from}} to {{to}} of {{path}} now read:
+now_line: {{line}}: {{text}}
+now_removed: The lines were taken out of {{path}}. It now has {{lines}} lines; the cut is at line {{at}}.
 needs: {{op}} needs {{fields}}.
 none_found: Nothing found.
 hit_file: {{path}}
 hit_folder: {{path}}/
 hit_line: {{path}}:{{line}}: {{text}}
+stopped_limit: This stopped at {{max}} results, and there are more. Narrow it: {{#list}}give the path of a deeper folder.{{/list}}{{#glob}}give the path of a folder, or a closer glob.{{/glob}}{{#grep}}give the path of a folder, a glob for the files, or a closer pattern.{{/grep}}
+stopped_large: {{files}} files over {{bytes}} bytes were not searched. Read one with file_read, a few lines at a time, or give the path of the file.
+stopped_cut: {{lines}} of these lines were cut to {{chars}} characters. Read the file at that line with file_read to see it whole.
+stopped_time: This ran out of time after {{ms}} milliseconds, so it did not look everywhere. Narrow it: give the path of a folder{{#grep}}, a glob for the files, or a closer pattern{{/grep}}.
 bad_pattern: {{pattern}} is not a pattern that can be searched for.
 todo: {{open}} open, {{done}} done.
 no_writer: No reply was written: {{^writer}}your definition names no agent to write it{{/writer}}{{#writer}}{{writer}}, the agent your definition names to write it, {{#missing}}has no definition{{/missing}}{{#off}}is switched off{{/off}}{{#broken}}has a definition that does not load{{/broken}}{{^missing}}{{^off}}{{^broken}}cannot be used{{/broken}}{{/off}}{{/missing}}{{/writer}}.

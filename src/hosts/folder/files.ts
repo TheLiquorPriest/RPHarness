@@ -5,7 +5,7 @@
 
 import { appendFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
 import type { Serial } from "./disk";
 import { codeOf, sha256, writeWhole } from "./disk";
 import type { JournalLine } from "./shape";
@@ -27,6 +27,13 @@ export const FIND_LIMIT = 200;
 export const GREP_MAX_BYTES = 1024 * 1024;
 /** A grep hit's line is cut to this many UTF-16 code units. */
 export const GREP_LINE_MAX = 1000;
+
+/** A find's answer: the hits and why it stopped, and, while the callers move to `Found`, the array of the hits too (its own fields not counted among its items). */
+function answered(hits: FileHit[], stopped?: FindStopped): Found & FileHit[] {
+  const answer = [...hits];
+  Object.defineProperties(answer, { status: { value: "found" }, hits: { value: hits }, ...(stopped !== undefined ? { stopped: { value: stopped } } : {}) });
+  return answer as Found & FileHit[];
+}
 
 /** The journal of agents' writes in a turn. */
 export function journalPath(site: Site, chat: string, turn: string): string {
@@ -166,20 +173,27 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     return { status: "refused", path, reason, writable: writer === undefined ? places.writable : writableFor(places, writer) };
   }
 
-  async function find(scope: Scope | UserScope, query: FileQuery): Promise<FileHit[] | Refused> {
+  async function find(scope: Scope | UserScope, query: FileQuery): Promise<(Found & FileHit[]) | Refused> {
     const loc = await locationOf(scope);
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
     const limit = query.limit ?? FIND_LIMIT;
     const hits: FileHit[] = [];
-    if (at.is === "none" || limit <= 0) return hits;
+    if (at.is === "none" || limit <= 0) return answered(hits);
     const top = await topView(loc, at.level);
+    // One hit past the limit is looked for, so that a find stopped at its limit knows that more were there and says so.
+    const room = limit + 1;
+    const found = (all: FileHit[], stopped: FindStopped = {}) => {
+      const more = all.length > limit;
+      const why: FindStopped = { ...stopped, ...(more ? { limit: { max: limit } } : {}) };
+      return answered(more ? all.slice(0, limit) : all, Object.keys(why).length > 0 ? why : undefined);
+    };
 
     if (query.by === "list") {
-      if (at.is === "file") return [await fileHit(at.level, at.rest, at.disk)];
+      if (at.is === "file") return found([await fileHit(at.level, at.rest, at.disk)]);
       for await (const e of walk(at.level, at.rest, at.disk, query.depth ?? 1, top)) {
-        if (hits.length >= limit) break;
+        if (hits.length >= room) break;
         hits.push(e.folder ? { path: viewPath(at.level, e.rest), type: "folder", level: at.level, kind: kindOf(at.level, e.rest) } : await fileHit(at.level, e.rest, e.disk));
       }
       // The root shows where the other levels are mounted; listing a mount shows what is in it.
@@ -187,35 +201,45 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
         for (const level of ["shipped", "global", "character"] as const) hits.push({ path: MOUNTS[level], type: "folder", level, kind: "yours" });
         hits.sort((a, b) => byPath({ name: a.path, folder: a.type === "folder" }, { name: b.path, folder: b.type === "folder" }));
       }
-      return hits.slice(0, limit);
+      return found(hits);
     }
 
     if (query.by === "glob") {
       const glob = new Bun.Glob(query.pattern);
       for await (const f of filesAt(at, top)) {
-        if (hits.length >= limit) break;
+        if (hits.length >= room) break;
         if (glob.match(below(at, f.rest))) hits.push(await fileHit(at.level, f.rest, f.disk));
       }
-      return hits;
+      return found(hits);
     }
 
     const pattern = new RegExp(query.literal === true ? query.pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : query.pattern, query.ignoreCase === true ? "i" : "");
     const only = query.glob === undefined ? undefined : new Bun.Glob(query.glob);
+    /** The files over the grep's size that it passed over, and the hits whose line it cut. */
+    let large = 0;
+    const cutLines = new Set<FileHit>();
     for await (const f of filesAt(at, top)) {
-      if (hits.length >= limit) break;
+      if (hits.length >= room) break;
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;
-      if (bytes > GREP_MAX_BYTES) continue;
+      if (bytes > GREP_MAX_BYTES) {
+        large += 1;
+        continue;
+      }
       const data = await readFile(f.disk);
       if (data.includes(0)) continue;
       const lines = data.toString("utf8").split("\n");
       if (lines.at(-1) === "") lines.pop();
       for (const [i, line] of lines.entries()) {
-        if (hits.length >= limit) break;
-        if (pattern.test(line)) hits.push({ path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, GREP_LINE_MAX) });
+        if (hits.length >= room) break;
+        if (!pattern.test(line)) continue;
+        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, GREP_LINE_MAX) };
+        hits.push(hit);
+        if (line.length > GREP_LINE_MAX) cutLines.add(hit);
       }
     }
-    return hits;
+    const cut = hits.slice(0, limit).filter((hit) => cutLines.has(hit)).length;
+    return found(hits, { ...(large > 0 ? { large: { files: large, bytes: GREP_MAX_BYTES } } : {}), ...(cut > 0 ? { cut: { lines: cut, chars: GREP_LINE_MAX } } : {}) });
   }
 
   return {

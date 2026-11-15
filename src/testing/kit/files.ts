@@ -4,9 +4,9 @@
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "bun:test";
-import type { AgentRef, FileOp, LayerLevel, UserScope, Writer } from "../../contract/index";
+import type { AgentRef, FileOp, LayerLevel, Scope, UserScope, Writer } from "../../contract/index";
 import type { KitContext } from "./context";
-import { hitsOf, KIT_OTHER_USER, landed, mountOf, sha256, unlessRefused, viewPicture } from "./context";
+import { foundOf, hitsOf, KIT_OTHER_USER, landed, mountOf, sha256, unlessRefused, viewPicture } from "./context";
 
 const ORDER: LayerLevel[] = ["shipped", "global", "character", "chat"];
 
@@ -15,6 +15,11 @@ function chatOnlyLine(ctx: KitContext<"files">): string {
   const agents = ctx.seed.files.find((f) => f.level === "chat" && f.path === "AGENTS.md");
   if (agents === undefined) throw new Error("The seed has no chat-level AGENTS.md.");
   return agents.text.split("\n")[0] ?? "";
+}
+
+/** The kit's scope with no turn in it: what is written under it is not recorded against a turn. */
+function withoutTurn(ctx: KitContext<"files">): Scope {
+  return { user: ctx.scope.user, chat: ctx.scope.chat, session: ctx.scope.session };
 }
 
 /** The agent the kit writes as: a sub-agent of the turn's lead. */
@@ -88,6 +93,76 @@ export function fileCases(ctx: KitContext<"files">): void {
     expect(literal.map((h) => h.path)).toEqual(["persistent-workspace/story/threads.md"]);
     expect(hitsOf(await ctx.env.files.find(ctx.scope, { by: "grep", pattern: "harbor", glob: "persistent-workspace/**" }))).toEqual([]);
     expect(hitsOf(await ctx.env.files.find(ctx.scope, { by: "glob", pattern: "**/*.md", limit: 1 }))).toHaveLength(1);
+  });
+
+  test("a find stopped by its limit, by a file's size or by a line's length says so", async () => {
+    const scope = withoutTurn(ctx);
+    const folder = `${(await ctx.env.files.places(scope)).notes}kit-stopped/`;
+    const mark = `kit-stopped-${randomUUID()}`;
+    const line = `${mark} ${"z".repeat(5_000)}`;
+    // Bigger than a host's own bound on what a grep reads, as far as a host sets one: one that reads it still has to give its line.
+    const big = `${mark} first\n${"filler line of the big note\n".repeat(80_000)}`;
+    const notes: Record<string, string> = { "a.md": `${mark}\n`, "b.md": `${mark}\n`, "c.md": `${mark}\n`, "big.log": big, "long.log": `${line}\n` };
+    const grep = async (extra: { glob: string; limit?: number }) => foundOf(await ctx.env.files.find(scope, { by: "grep", pattern: mark, literal: true, path: folder, ...extra }));
+    try {
+      for (const [name, text] of Object.entries(notes)) expect(await ctx.env.files.write(scope, `${folder}${name}`, { op: "write", text }, KIT_AGENT)).toMatchObject({ status: "written" });
+
+      // The limit: reached with more behind it, it says so; reached with nothing behind it, or not reached, it says nothing.
+      const two = await grep({ glob: "*.md", limit: 2 });
+      expect(two.hits).toHaveLength(2);
+      expect(two.stopped?.limit).toEqual({ max: 2 });
+      const three = await grep({ glob: "*.md", limit: 3 });
+      expect(three.hits).toHaveLength(3);
+      expect(three.stopped).toBeUndefined();
+      expect(foundOf(await ctx.env.files.find(scope, { by: "glob", pattern: "*.md", path: folder, limit: 2 })).stopped?.limit).toEqual({ max: 2 });
+      const listed = foundOf(await ctx.env.files.find(scope, { by: "list", path: folder, limit: 4 }));
+      expect(listed.hits).toHaveLength(4);
+      expect(listed.stopped?.limit).toEqual({ max: 4 });
+      expect(foundOf(await ctx.env.files.find(scope, { by: "list", path: folder, limit: 5 })).stopped).toBeUndefined();
+      expect((await grep({ glob: "a.md" })).stopped).toBeUndefined();
+
+      // A file larger than the host's grep reads is read, or named as passed over, with the bound it passed.
+      const bigAnswer = await grep({ glob: "big.log" });
+      const readBig = bigAnswer.hits.some((hit) => hit.path === `${folder}big.log`);
+      if (!readBig) {
+        expect(bigAnswer.stopped?.large?.files).toBeGreaterThanOrEqual(1);
+        expect(bigAnswer.stopped?.large?.bytes).toBeLessThan(Buffer.byteLength(big));
+      }
+
+      // A line longer than the host's grep gives is given whole, or is cut and says how many were, and to how many characters.
+      const cutAnswer = await grep({ glob: "long.log" });
+      const hit = cutAnswer.hits.find((h) => h.path === `${folder}long.log`);
+      expect(hit).toMatchObject({ line: 1 });
+      if (hit?.text !== line) {
+        expect(line.startsWith(hit?.text ?? "\0")).toBe(true);
+        expect(cutAnswer.stopped?.cut?.lines).toBeGreaterThanOrEqual(1);
+        expect(cutAnswer.stopped?.cut?.chars).toBeLessThan(line.length);
+      }
+    } finally {
+      for (const name of Object.keys(notes)) await ctx.env.files.write(scope, `${folder}${name}`, { op: "delete" }, KIT_AGENT);
+    }
+  });
+
+  test("a find with no cap over more files than the host's own cap gives every hit or says it stopped", async () => {
+    const scope = withoutTurn(ctx);
+    const folder = `${(await ctx.env.files.places(scope)).notes}kit-many/`;
+    // More files than a host's own cap on a find that names no limit (200 by default).
+    const names = Array.from({ length: 230 }, (_, i) => `note-${String(i).padStart(3, "0")}.md`);
+    try {
+      for (let i = 0; i < names.length; i += 23) await Promise.all(names.slice(i, i + 23).map((name) => ctx.env.files.write(scope, `${folder}${name}`, { op: "write", text: "kit-many\n" }, KIT_AGENT)));
+      const nameless = foundOf(await ctx.env.files.find(scope, { by: "list", path: folder }));
+      expect(nameless.hits.length === names.length || nameless.stopped?.limit !== undefined).toBe(true);
+      for (const limit of [Number.POSITIVE_INFINITY, Number.MAX_SAFE_INTEGER, 10_000]) {
+        for (const query of [{ by: "list" }, { by: "glob", pattern: "*.md" }, { by: "grep", pattern: "kit-many", literal: true }] as const) {
+          const answer = foundOf(await ctx.env.files.find(scope, { ...query, path: folder, limit }));
+          // Whole, or stopped at a limit that is the number it gave.
+          if (answer.hits.length < names.length) expect({ limit, by: query.by, stopped: answer.stopped?.limit?.max }).toEqual({ limit, by: query.by, stopped: answer.hits.length });
+          else expect(answer.stopped?.limit).toBeUndefined();
+        }
+      }
+    } finally {
+      for (let i = 0; i < names.length; i += 23) await Promise.all(names.slice(i, i + 23).map((name) => ctx.env.files.write(scope, `${folder}${name}`, { op: "delete" }, KIT_AGENT)));
+    }
   });
 
   test("the three kinds of file", async () => {
@@ -204,7 +279,7 @@ export function fileCases(ctx: KitContext<"files">): void {
     for (const name of ["chats", "CHATS", "Chats", "chat\u017F", "defaults", "DEFAULTS", "Defaults", "default\u017F"]) {
       for (const query of [{ by: "list", depth: 4 }, { by: "glob", pattern: "**/*" }, { by: "grep", pattern: "." }] as const) {
         const found = await ctx.env.files.find(ctx.scope, { ...query, path: `${global}${name}` });
-        expect({ name, by: query.by, found: Array.isArray(found) ? found.map((h) => h.path) : [] }).toEqual({ name, by: query.by, found: [] });
+        expect({ name, by: query.by, found: found.status === "found" ? found.hits.map((h) => h.path) : [] }).toEqual({ name, by: query.by, found: [] });
       }
     }
     const line = chatOnlyLine(ctx);
@@ -225,7 +300,7 @@ export function fileCases(ctx: KitContext<"files">): void {
       if (read?.status === "read" && read.text === f.text) leaks.push(path);
     }
     const found = await unlessRefused(ctx.env.files.find(foreign, { by: "grep", pattern: chatOnlyLine(ctx), literal: true }));
-    if (Array.isArray(found)) leaks.push(...found.map((h) => h.path));
+    if (found?.status === "found") leaks.push(...found.hits.map((h) => h.path));
     expect(leaks).toEqual([]);
   });
 

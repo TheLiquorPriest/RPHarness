@@ -107,9 +107,10 @@ export type FileRead = FileText | FileMissing | Refused;
 
 /**
  * What `find` looks for. `path` is the folder to look under (the root when absent); `limit` caps
- * the hits (the host's own cap when absent). Under the root, `list` shows each other level's mount
- * as a folder, while `glob` and `grep` look in the chat's own level only; under a mount, a find
- * looks in that level only.
+ * the hits (the host's own cap when absent): a limit above the host's own cap, `Infinity` included,
+ * asks for every hit, which the host gives whole or answers as stopped at its cap (`FindStopped`).
+ * Under the root, `list` shows each other level's mount as a folder, while `glob` and `grep` look
+ * in the chat's own level only; under a mount, a find looks in that level only.
  */
 export type FileQuery =
   | { by: "list"; path?: string; /** How many folders deep to list; 1 when absent. */ depth?: number; limit?: number }
@@ -142,6 +143,30 @@ export interface FileHit {
   line?: number;
   /** For `grep`: the line's text. */
   text?: string;
+}
+
+/**
+ * Why a find stopped before it had looked everywhere, each way that happened with its counts: the
+ * hits reached the limit and more were there; a grep passed over the files larger than it reads;
+ * a grep cut the lines it gave at its line limit; it ran out of time. The host's own bounds are
+ * facts here, never words: RPH tells the agent in the words of a file, and how to narrow the search.
+ */
+export interface FindStopped {
+  /** The hits reached `max` (the query's limit, or the host's own cap) and more were there. */
+  limit?: { max: number };
+  /** A grep passed over `files` files larger than `bytes` bytes, which it does not read. */
+  large?: { files: number; bytes: number };
+  /** A grep cut `lines` of the lines it gave to `chars` characters each. */
+  cut?: { lines: number; chars: number };
+  /** It ran out of the `ms` milliseconds it was given. */
+  time?: { ms: number };
+}
+
+/** What a find gives: the hits, and, when it stopped before it had looked everywhere, why. A host that stops in silence fails the kit. */
+export interface Found {
+  status: "found";
+  hits: FileHit[];
+  stopped?: FindStopped;
 }
 
 /**
@@ -231,9 +256,14 @@ export interface FilesPort {
    * Lists a folder, matches paths by a glob, or finds lines by a pattern. Hits come in the order of
    * their paths, a folder's path read with "/" after it. Links are never followed. A `path` that
    * leaves the view is refused; with a scope that names only the user, so is one at a character's or
-   * a chat's level, the root among them. An invalid `pattern` rejects with a `SyntaxError`.
+   * a chat's level, the root among them. An invalid `pattern` rejects with a `SyntaxError`. The answer
+   * gives the hits, and, when the host stopped before it had looked everywhere, why (`FindStopped`):
+   * a host never gives a part as if it were the whole.
+   *
+   * Until the callers have moved to `Found`, the answer is also the array of its hits (`Found &
+   * FileHit[]`), so a caller written either way compiles; that second form goes with the last caller.
    */
-  find(scope: Scope | UserScope, query: FileQuery): Promise<FileHit[] | Refused>;
+  find(scope: Scope | UserScope, query: FileQuery): Promise<(Found & FileHit[]) | Refused>;
   /**
    * Changes one file. A place this writer may not write is `Refused`, and nothing changes (§5.1).
    * Every write of an agent is recorded against `scope.turn` where there is one (§5.1: "notes

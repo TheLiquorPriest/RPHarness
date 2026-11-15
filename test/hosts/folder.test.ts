@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { AgentRef, Scope, ToolCtx, TraceRecord } from "../../src/contract/index";
 import { createFolderHost, type FolderHost } from "../../src/hosts/folder/index";
+import { hitsOf } from "../../src/testing/kit/context";
 import { KIT_SEED, runContractKit } from "../../src/testing/kit/index";
 import { folderKitFactory, KIT_MANIFEST, levelDir, makeFolderHost } from "./folder-kit";
 
@@ -47,8 +48,8 @@ describe("folder host", () => {
     expect(await stat(join(place, "elsewhere", "planted.md")).catch(() => null)).toBeNull();
 
     const listed = await host.files.find(scope, { by: "list", path: "persistent-workspace", depth: 5 });
-    expect(Array.isArray(listed) ? listed.map((h) => h.path) : listed).toEqual(["persistent-workspace/story", "persistent-workspace/story/threads.md"]);
-    expect(await host.files.find(scope, { by: "grep", pattern: "oil store" })).toEqual([]);
+    expect(hitsOf(listed).map((h) => h.path)).toEqual(["persistent-workspace/story", "persistent-workspace/story/threads.md"]);
+    expect(hitsOf(await host.files.find(scope, { by: "grep", pattern: "oil store" }))).toEqual([]);
   });
 
   test("another chat, the levels' own chats, the shipped folder and the host's records are outside the view", async () => {
@@ -59,7 +60,7 @@ describe("folder host", () => {
     expect(await host.files.read(scope, "@character/other-chat/AGENTS.md")).toMatchObject({ status: "refused", reason: "outside" });
     expect(await host.files.read(scope, "@character/other-chat")).toMatchObject({ status: "refused", reason: "outside" });
     const character = await host.files.find(scope, { by: "list", path: "@character/" });
-    expect(Array.isArray(character) ? character.map((h) => h.path) : character).toEqual(["@character/AGENTS.md"]);
+    expect(hitsOf(character).map((h) => h.path)).toEqual(["@character/AGENTS.md"]);
     expect(await host.files.read(scope, `@global/chats/${KIT_SEED.character}/${scope.chat}/AGENTS.md`)).toMatchObject({ status: "refused", reason: "outside" });
     expect(await host.files.read(scope, "@global/defaults/TURN.md")).toMatchObject({ status: "refused", reason: "outside" });
     // "../host" from a mount lands in the chat's own folder, where there is no such thing.
@@ -77,14 +78,14 @@ describe("folder host", () => {
       expect({ path, text: read.status === "read" ? read.text : null }).toEqual({ path, text: null });
       for (const query of [{ by: "list", depth: 5 }, { by: "glob", pattern: "**/*" }, { by: "grep", pattern: "quillfeather" }] as const) {
         const found = await host.files.find(scope, { ...query, path: `@global/${chats}` });
-        expect({ chats, by: query.by, found: Array.isArray(found) ? found.map((h) => h.path) : [] }).toEqual({ chats, by: query.by, found: [] });
+        expect({ chats, by: query.by, found: found.status === "found" ? found.hits.map((h) => h.path) : [] }).toEqual({ chats, by: query.by, found: [] });
       }
     }
     for (const defaults of ["defaults", "DEFAULTS", "default\u017F"]) {
       const read = await host.files.read(scope, `@global/${defaults}/TURN.md`);
       expect({ defaults, text: read.status === "read" ? read.text : null }).toEqual({ defaults, text: null });
     }
-    expect(await host.files.find(scope, { by: "grep", pattern: "quillfeather", path: "@global/" })).toEqual([]);
+    expect(hitsOf(await host.files.find(scope, { by: "grep", pattern: "quillfeather", path: "@global/" }))).toEqual([]);
   });
 
   test("dropping an agent's writes puts back what it wrote this turn, and keeps a file someone changed after it", async () => {
@@ -161,7 +162,7 @@ describe("folder host", () => {
     expect((await stat(join(place, "host", "user", createHash("sha256").update(scope.user).digest("hex"), "secrets", "secrets.json"))).mode & 0o777).toBe(0o600);
     expect((await stat(join(place, "host", "user", createHash("sha256").update(scope.user).digest("hex"), "secrets"))).mode & 0o777).toBe(0o700);
     const anywhere = await host.files.find(scope, { by: "grep", pattern: "sk-kit", path: "@global/" });
-    expect(anywhere).toEqual([]);
+    expect(hitsOf(anywhere)).toEqual([]);
   });
 
   test("lore is read as its reader may know it: a character reads what anyone may know, what it is named for, and what is behind a gate that holds", async () => {
@@ -349,5 +350,13 @@ describe("the kit fails a host that breaks the jail, or shows one user another's
     for (const area of ["files", "chat", "lore", "prompt"]) expect(output).toMatch(new RegExp(`\\(fail\\) .*> ${area} > another user's scope reads none of this user's`));
     // Its four areas' cases, and the files' read that names no chat, which sees another user's global files.
     expect(output).toMatch(/\b5 fail\b/);
+  }, 30_000);
+
+  test("a find that stops without saying so, at its limit, at a large file, at a long line or at a cap of its own", async () => {
+    const { code, output } = await runKit("./test/hosts/leaky-silent.kit.ts");
+    expect(code).not.toBe(0);
+    expect(output).toMatch(/\(fail\) .*a find stopped by its limit, by a file's size or by a line's length says so/);
+    expect(output).toMatch(/\(fail\) .*a find with no cap over more files than the host's own cap gives every hit or says it stopped/);
+    expect(output).toMatch(/\b2 fail\b/);
   }, 30_000);
 });

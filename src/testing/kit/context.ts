@@ -4,7 +4,7 @@
 import { createHash } from "node:crypto";
 import { access, readdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { Environment, FileHit, FilesPort, Layer, LayerLevel, Refused, Scope } from "../../contract/index";
+import type { Environment, FileHit, FilesPort, Found, Layer, LayerLevel, Refused, Scope } from "../../contract/index";
 import type { KitSeed } from "./seed";
 
 /** A host made for the kit. */
@@ -81,10 +81,15 @@ export function mountOf(layers: readonly Layer[], level: LayerLevel): string {
   return layer.mount;
 }
 
-/** Whether `find` gave hits rather than a refusal. */
-export function hitsOf(found: FileHit[] | Refused): FileHit[] {
-  if (!Array.isArray(found)) throw new Error(`find was refused (${found.reason}) at ${found.path}.`);
+/** What `find` found, whole: a refusal throws. */
+export function foundOf(found: Found | Refused): Found {
+  if (found.status === "refused") throw new Error(`find was refused (${found.reason}) at ${found.path}.`);
   return found;
+}
+
+/** Whether `find` gave hits rather than a refusal. */
+export function hitsOf(found: Found | Refused): FileHit[] {
+  return foundOf(found).hits;
 }
 
 /** Every file in the view, at every level, with its hash: what a refused write must leave as it was. */

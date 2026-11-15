@@ -2,7 +2,7 @@
 // The port holds the one rule on writes (agents write only in the notes and this turn's own
 // folders); these tools put its answers into the words of the tool answers' file, and say where the
 // agent may write when a write is refused.
-import type { FileHit, FileOp, FileQuery, FilesPort, Refused, Scope, Written } from "../contract";
+import type { FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, Refused, Scope, Written } from "../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, type ToolText, whole, type Words } from "./kit";
 
 /** What the file tools are made with. */
@@ -84,7 +84,7 @@ export function fileFind(deps: FileToolsDeps): OwnTool {
           : by === "glob"
             ? { by: "glob", pattern: pattern ?? "", ...where }
             : { by: "grep", pattern: pattern ?? "", ...where, ...(given["literal"] === true ? { literal: true } : {}), ...(given["ignore_case"] === true ? { ignoreCase: true } : {}), ...(glob !== undefined ? { glob } : {}) };
-      let found: FileHit[] | Refused;
+      let found: Found | Refused;
       try {
         found = await deps.files.find(ctx.scope, query);
       } catch (error) {
@@ -92,15 +92,33 @@ export function fileFind(deps: FileToolsDeps): OwnTool {
         if (error instanceof SyntaxError) return answer(deps.words("bad_pattern", { pattern: pattern ?? "" }), true);
         throw error;
       }
-      if (!Array.isArray(found)) return refusal(deps.words, found);
-      if (found.length === 0) return answer(deps.words("none_found"));
-      const lines = found.flatMap((hit) => {
+      if (found.status === "refused") return refusal(deps.words, found);
+      const hitLines = found.hits.flatMap((hit) => {
         const line = hit.line !== undefined ? deps.words("hit_line", { path: hit.path, line: hit.line, text: hit.text ?? "" }) : deps.words(hit.type === "folder" ? "hit_folder" : "hit_file", { path: hit.path });
         return line === undefined ? [] : [line];
       });
+      const none = deps.words("none_found");
+      const lines = [...(found.hits.length === 0 ? (none === undefined ? [] : [none]) : hitLines), ...stoppedLines(deps.words, by === "list" || by === "glob" ? by : "grep", found.stopped)];
       return { content: lines.length === 0 ? [] : [{ type: "text", text: lines.join("\n") }] };
     },
   };
+}
+
+/**
+ * What a find that stopped before it had looked everywhere tells the agent: a line of the tool
+ * answers' file for each way it stopped, with its counts, and `by` (`list`, `glob` or `grep`, as a
+ * field of its own) so that the file's words say how that kind of search is narrowed.
+ */
+function stoppedLines(words: Words, by: "list" | "glob" | "grep", stopped: FindStopped | undefined): string[] {
+  if (stopped === undefined) return [];
+  const kind = { [by]: true };
+  const lines = [
+    stopped.limit === undefined ? undefined : words("stopped_limit", { ...kind, max: stopped.limit.max }),
+    stopped.large === undefined ? undefined : words("stopped_large", { ...kind, files: stopped.large.files, bytes: stopped.large.bytes }),
+    stopped.cut === undefined ? undefined : words("stopped_cut", { ...kind, lines: stopped.cut.lines, chars: stopped.cut.chars }),
+    stopped.time === undefined ? undefined : words("stopped_time", { ...kind, ms: stopped.time.ms }),
+  ];
+  return lines.filter((line): line is string => line !== undefined);
 }
 
 /** What each change is answered with when it went through. */
@@ -142,11 +160,58 @@ export function fileWrite(deps: FileToolsDeps): OwnTool {
         if (old === undefined || replacement === undefined) return answer(deps.words("needs", { op, fields: [...(old === undefined ? ["old"] : []), ...(replacement === undefined ? ["new"] : [])] }), true);
         change = { op, old, new: replacement, ...(given["all"] === true ? { all: true } : {}) };
       } else change = { op: "delete" };
+      // An edit is placed by the file as it was, so its changed lines can be found in the file as it is.
+      const before = change.op === "edit" ? await deps.files.read(ctx.scope, path) : undefined;
       const done = await deps.files.write(ctx.scope, path, change, ctx.agent);
       if (done.status === "refused") return refusal(deps.words, done);
       if (done.status === "unapplied") return answer(deps.words(UNAPPLIED[done.reason], { path: done.path, ...(done.matches !== undefined ? { matches: done.matches } : {}) }), true);
       await deps.written?.(ctx.scope, ctx.agent, done);
-      return answer(deps.words(DONE[done.op], { path: done.path, bytes: done.bytes }));
+      const lines = [...said(deps.words(DONE[done.op], { path: done.path, bytes: done.bytes })), ...(await nowReads(deps, ctx.scope, done, before))];
+      return { content: lines.length === 0 ? [] : [{ type: "text", text: lines.join("\n") }] };
     },
   };
+}
+
+/** A line of the tool answers' file as a list: empty when the file has no such line. */
+function said(line: string | undefined): string[] {
+  return line === undefined ? [] : [line];
+}
+
+/** The lines of a text, a final line break ending the last line and not starting another. */
+function linesOf(text: string): string[] {
+  return text === "" ? [] : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n");
+}
+
+/** The stretch of lines an edit changed: where it starts (1-based), the lines of the new text it holds, and whether lines were taken out and none put in. */
+function changedLines(before: string, now: string): { from: number; shown: string[]; removed: boolean } {
+  const was = linesOf(before);
+  const is = linesOf(now);
+  let head = 0;
+  while (head < was.length && head < is.length && was[head] === is[head]) head++;
+  let tail = 0;
+  while (tail < was.length - head && tail < is.length - head && was[was.length - 1 - tail] === is[is.length - 1 - tail]) tail++;
+  const shown = is.slice(head, is.length - tail);
+  return { from: head + 1, shown, removed: shown.length === 0 && is.length < was.length };
+}
+
+/**
+ * What a change that went through made of the file, read back from the port: after a write or an
+ * append, the text it now holds; after an edit, the lines it changed, each with its number; after
+ * a delete, nothing. A tool's answer is clipped as every tool's is, so a long file is not given whole.
+ */
+async function nowReads(deps: FileToolsDeps, scope: Scope, done: Written, before: FileRead | undefined): Promise<string[]> {
+  if (done.op === "delete") return [];
+  const now = await deps.files.read(scope, done.path);
+  if (now.status !== "read") return [];
+  const fields = { path: done.path, lines: now.lines, bytes: done.bytes };
+  if (done.op === "edit" && before?.status === "read") {
+    const changed = changedLines(before.text, now.text);
+    if (changed.shown.length > 0) {
+      const numbered = changed.shown.flatMap((line, at) => said(deps.words("now_line", { line: changed.from + at, text: line })));
+      return [...said(deps.words("now_stretch", { ...fields, from: changed.from, to: changed.from + changed.shown.length - 1 })), ...numbered];
+    }
+    return changed.removed ? said(deps.words("now_removed", { ...fields, at: changed.from })) : [];
+  }
+  if (now.text === "") return [];
+  return [...said(deps.words("now_text", fields)), now.text.endsWith("\n") ? now.text.slice(0, -1) : now.text];
 }

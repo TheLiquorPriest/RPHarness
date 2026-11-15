@@ -1,9 +1,12 @@
 ---
-description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it was not run or its tool failed, what a tool's answer that holds no words says, a search that stopped before it looked everywhere, and what the player said to an agent at work. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)". Delete said and the player's words go to the agent bare, with nothing to say they are his.
+description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it was not run, never started or its tool failed, the notes shown beside a tool's own answer when a rule on it could not be asked or its whole could not be kept, what a tool's answer that holds no words says, a search that stopped before it looked everywhere, and what the player said to an agent at work. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer; a note beside a tool's own answer is left out, and the answer stands as it is. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)". Delete said and the player's words go to the agent bare, with nothing to say they are his.
 format: lines
 ---
 failed: {{tool}} failed.
 unfinished: {{tool}} was stopped before it finished. It may have done its work, or not.
+not_started: {{tool}} did not run: a limit was already spent when it was called, so it never started.
+rule_unasked: A rule on what {{tool}} answered could not be asked. The answer stands as it is.
+not_kept: The whole of {{tool}}'s answer could not be kept, so no file holds what was left out.
 said: The player said to you while you were at work: {{words}}
 not_held: You hold no tool named {{tool}}.
 invalid: {{tool}} was not run: the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}

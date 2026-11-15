@@ -136,6 +136,18 @@ test("what the player said to an agent at work is told as his; an answer of noth
   expect(part.line("pictures_answer", { tool: "lookup" })).toBe("lookup answered with these pictures alone.");
 });
 
+test("a call a spent limit kept from starting says it did not run, apart from one stopped part-way; the two notes beside a tool's own answer say what could not be done and that the answer stands", async () => {
+  const part = await lines();
+  const never = part.line("not_started", { tool: "file_write" }) ?? "";
+  expect(never).toBe("file_write did not run: a limit was already spent when it was called, so it never started.");
+  expect(never).not.toMatch(/may have done|work/i);
+  expect(part.line("unfinished", { tool: "file_write" })).toContain("It may have done its work, or not.");
+  expect(part.line("rule_unasked", { tool: "lookup" })).toBe("A rule on what lookup answered could not be asked. The answer stands as it is.");
+  expect(part.line("not_kept", { tool: "lookup" })).toBe("The whole of lookup's answer could not be kept, so no file holds what was left out.");
+  // "never started" is the fact itself, so the check is for words that ask.
+  for (const name of ["not_started", "rule_unasked", "not_kept"]) expect({ name, asks: /\b(must|should|please|make sure|remember to)\b/i.test(part.line(name, { tool: "lookup" }) ?? ""), unfilled: (part.line(name, { tool: "lookup" }) ?? "").includes("{{") }).toEqual({ name, asks: false, unfilled: false });
+});
+
 test("a search that stopped says how it stopped, with its numbers, and how that kind of search is narrowed", async () => {
   const part = await lines();
   const by = { list: { list: true }, glob: { glob: true }, grep: { grep: true } };

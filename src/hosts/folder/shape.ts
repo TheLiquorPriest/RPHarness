@@ -60,8 +60,14 @@ function object(where: string, value: unknown, field: string): Record<string, un
   return value;
 }
 
-function role(where: string, value: unknown): PromptRole {
+function role(where: string, value: unknown): ChatRole {
   if (value !== "system" && value !== "user" && value !== "assistant") throw new ShapeError(where, `"role" must be "system", "user" or "assistant"`);
+  return value;
+}
+
+/** A prompt message's role: a chat's three, or a tool's answer the chat application sent. */
+function promptRole(where: string, value: unknown): PromptRole {
+  if (value !== "system" && value !== "user" && value !== "assistant" && value !== "tool") throw new ShapeError(where, `"role" must be "system", "user", "assistant" or "tool"`);
   return value;
 }
 
@@ -218,6 +224,7 @@ function promptContent(where: string, value: unknown): string | PromptPart[] {
   return value.map((raw, i): PromptPart => {
     const p = object(where, raw, `content[${i}]`);
     if (p.type === "text") return { type: "text", text: text(where, p.text, `content[${i}].text`) };
+    if (p.type === "image" && p.url !== undefined) return { type: "image", url: text(where, p.url, `content[${i}].url`) };
     if (p.type === "image") return { type: "image", data: text(where, p.data, `content[${i}].data`), mimeType: text(where, p.mimeType, `content[${i}].mimeType`) };
     throw new ShapeError(where, `"content[${i}].type" must be "text" or "image"`);
   });
@@ -233,7 +240,7 @@ function givenMessage(where: string, value: unknown): GivenMessage {
     const s = object(where, v.source, "source");
     source = { id: text(where, s.id, "source.id"), index: count(where, s.index, "source.index") };
   }
-  return { role: role(where, v.role), content: promptContent(where, v.content), ...(name !== undefined ? { name } : {}), ...(kind !== undefined ? { kind } : {}), ...(source !== undefined ? { source } : {}) };
+  return { role: promptRole(where, v.role), content: promptContent(where, v.content), ...(name !== undefined ? { name } : {}), ...(kind !== undefined ? { kind } : {}), ...(source !== undefined ? { source } : {}) };
 }
 
 export function givenPrompt(where: string, value: unknown): GivenPrompt {

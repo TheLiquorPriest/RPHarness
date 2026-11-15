@@ -66,7 +66,7 @@ import type { Hold, Throttle, Throttles } from "./throttle";
 import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
-import { answered, compatSays, inPlace, keepsSystemInPlace } from "./transcript";
+import { addressed, answered, compatSays, holdsAddress, inPlace, keepsSystemInPlace } from "./transcript";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export interface CallDeps {
@@ -257,7 +257,7 @@ function setAll(payload: Record<string, unknown>, values: Partial<Record<string,
   for (const [ours, theirs] of Object.entries(names)) if (values[ours] !== undefined) payload[theirs] = values[ours];
 }
 
-/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, the fields a passed request sent, the sign-in line, and DeepSeek's prefix mark. */
+/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, the fields a passed request sent, the sign-in line, DeepSeek's prefix mark, and pictures given by address sent by it. */
 interface PayloadChanges {
   sampling: Partial<Record<SamplingName, unknown>>;
   serial: boolean;
@@ -270,11 +270,14 @@ interface PayloadChanges {
   signin?: { line: string | undefined };
   /** A call to DeepSeek whose transcript ends on the model's own message: that message is marked for DeepSeek to continue it, carrying the thinking it continues only where it has some, as Lumiverse sends one. */
   prefix: boolean;
+  /** The transcript holds a picture given by its web address (`PICTURE_ADDRESS`): each is sent by that address. */
+  addresses: boolean;
 }
 
 function changePayload(api: string, payload: unknown, changes: PayloadChanges): unknown {
   if (!isRecord(payload)) return undefined;
-  const { sampling, serial, providerDefault, thinking, uncapped, signin, prefix } = changes;
+  const { sampling, serial, providerDefault, thinking, uncapped, signin, prefix, addresses } = changes;
+  if (addresses) addressed(payload);
   const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
   switch (api) {
     case "anthropic-messages":
@@ -502,6 +505,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       uncapped: room === undefined,
       ...(connection.auth === "signin" && model.api === "anthropic-messages" ? { signin: { line: texts.signinLine } } : {}),
       prefix,
+      addresses: holdsAddress(context.messages),
     };
     const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
     watch = watching;

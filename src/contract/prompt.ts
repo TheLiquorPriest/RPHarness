@@ -5,11 +5,16 @@
 
 import type { AgentRef, Scope } from "./common";
 
-/** A message's role in a prompt. */
-export type PromptRole = "system" | "user" | "assistant";
+/**
+ * A message's role in a prompt: the three every model's API places, and `tool`, a tool's answer the
+ * chat application sent with the call it answers made earlier in its own conversation. No model's
+ * API places that one without its call, so it goes to the model in its own place as a marked note
+ * (`.prompts/role-note.md`), never given another role.
+ */
+export type PromptRole = "system" | "user" | "assistant" | "tool";
 
-/** A piece of a message: text, or a picture the request carried (base64, with its type). */
-export type PromptPart = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
+/** A piece of a message: text, or a picture the request carried, by its data (base64, with its type) or by its web address. */
+export type PromptPart = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string } | { type: "image"; url: string };
 
 /**
  * One message of the assembled prompt, as the chat application sent it (§10.2: every message, in

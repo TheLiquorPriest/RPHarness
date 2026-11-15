@@ -40,7 +40,7 @@ import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
-import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
+import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
 import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { callTerms, DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
@@ -174,6 +174,8 @@ export class Turn {
   #words: Words = () => undefined;
   #texts: RunnerTexts = { continueAfterRule: () => "" };
   #guidance: Guidance | undefined;
+  /** The note a prompt message whose role no model's API places goes as (`.prompts/role-note.md`), read as the turn starts. */
+  #roleMark: RoleMark | undefined;
   #rules: RuleRun | undefined;
   #registry: Registry | undefined;
   /** The turn's sub-agents, the writer among them once `write_reply` starts it. */
@@ -291,7 +293,7 @@ export class Turn {
     const scope = this.scope;
     const guidance = loadGuidance(env.files, scope);
     this.#guidance = guidance;
-    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, closing, file] = await Promise.all([
+    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, closing, file] = await Promise.all([
       readSettings(guidance, env.files, scope, env.log),
       env.files.places(scope),
       guidance.definition(req.lead),
@@ -303,10 +305,12 @@ export class Turn {
       guidance.part("briefing"),
       guidance.part("carried"),
       guidance.part("continue-after-rule"),
+      guidance.part("role-note"),
       guidance.tool("closing"),
       (this.#holding = this.#c.book.hold(scope)).then((held) => held.file),
     ]);
     this.#settings = settings;
+    this.#roleMark = roleMark(roleNote);
     this.#places = places;
     this.#runs = new AgentRuns({
       env,
@@ -480,7 +484,7 @@ export class Turn {
     if (opening.given.some((ref) => ref.startsWith("prompt:*")) && req.prompt.length > 0) {
       const framing = joined([template(frame)?.render().text ?? ""]);
       if (framing !== "") messages.push(placed(systemMessage(framing, at), "frame"));
-      const prompt = promptMessages(req.prompt, model.model, at);
+      const prompt = promptMessages(req.prompt, model.model, at, this.#roleMark);
       this.#picturesLeft(this.#lead, undefined, prompt.pictures);
       messages.push(...prompt.messages.map((message) => placed(message, "prompt")));
       handed.push(...opening.given.filter((ref) => ref.startsWith("prompt:*")));
@@ -956,13 +960,11 @@ export class Turn {
 
   /**
    * Pictures of the prompt an agent's request cannot carry: pi's system and assistant messages hold
-   * text alone (§10.2). Which message held them and how many are the host's to hear, by the trace,
-   * and to word for the agent if it will; RPH says nothing of them to any agent.
+   * text alone (§10.2). Which message held them and how many are the host's to hear, by the trace
+   * alone, and to word for the agent if it will; RPH says nothing of them to any agent.
    */
   #picturesLeft(agent: AgentRef, parent: ParentCall | undefined, pictures: readonly { message: number; count: number }[]): void {
-    if (pictures.length === 0) return;
-    this.#trace.event(agent, parent, { kind: "prompt_notices", notices: [], pictures: [...pictures] });
-    this.#c.env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.scope.turn, run: this.run, agent: agent.id, pictures: pictures.reduce((sum, left) => sum + left.count, 0) });
+    if (pictures.length > 0) this.#trace.event(agent, parent, { kind: "prompt_notices", notices: [], pictures: [...pictures] });
   }
 
   /** The lead's intent record, the moment its tag closed (§10.3): to the host, to the trace, and into the turn's folder. Never read, and nothing waits for it. */
@@ -1070,7 +1072,7 @@ export class Turn {
       // A prefilled start is the prompt's last message; it is kept for the very end, where the writer goes on from it.
       const last = req.prompt.at(-1);
       const prompt = req.prefill !== undefined && last?.role === "assistant" && promptText(last) === req.prefill ? req.prompt.slice(0, -1) : req.prompt;
-      const converted = promptMessages(prompt, model.model, at);
+      const converted = promptMessages(prompt, model.model, at, this.#roleMark);
       this.#picturesLeft(ref, parent, converted.pictures);
       messages.push(...converted.messages.map((message) => placed(message, "prompt")));
       if (req.prompt.length > 0) handed.push(...definition.given.filter((given) => given.startsWith("prompt:*")));

@@ -66,3 +66,37 @@ export function answered(messages: readonly Message[], empty: ((tool: string) =>
     return words === undefined ? m : { ...m, content: [{ type: "text" as const, text: words }, ...images] };
   });
 }
+
+/**
+ * The type a picture given by its web address goes to pi-ai under, its address standing as its data:
+ * pi-ai carries a picture by its data alone, and `addressed` puts the address back in the request.
+ */
+export const PICTURE_ADDRESS = "x-rph/address";
+const ADDRESS_DATA = `data:${PICTURE_ADDRESS};base64,`;
+
+/** Whether a call's messages hold a picture given by its web address. */
+export function holdsAddress(messages: readonly Message[]): boolean {
+  return messages.some((m) => (m.role === "user" || m.role === "toolResult") && Array.isArray(m.content) && m.content.some((part) => part.type === "image" && part.mimeType === PICTURE_ADDRESS));
+}
+
+/**
+ * The request pi-ai built, each picture given by its web address sent by that address as its API
+ * takes one: a data address (OpenAI's two APIs, Mistral's) becomes the address itself, Anthropic's
+ * base64 source its `url` source, Gemini's inline data its file data by address. Changed in place.
+ */
+export function addressed(value: unknown): unknown {
+  if (typeof value === "string") return value.startsWith(ADDRESS_DATA) ? value.slice(ADDRESS_DATA.length) : value;
+  if (Array.isArray(value)) {
+    for (const [i, item] of value.entries()) value[i] = addressed(item);
+    return value;
+  }
+  if (!isRecord(value)) return value;
+  if (value.type === "base64" && value.media_type === PICTURE_ADDRESS && typeof value.data === "string") return { type: "url", url: value.data };
+  const inline = value.inlineData;
+  if (isRecord(inline) && inline.mimeType === PICTURE_ADDRESS && typeof inline.data === "string") {
+    const { inlineData: _, ...rest } = value;
+    return { ...rest, fileData: { fileUri: inline.data } };
+  }
+  for (const [key, item] of Object.entries(value)) value[key] = addressed(item);
+  return value;
+}

@@ -88,6 +88,44 @@ test("a note pinned for the keeper in a chat's RPE.yml and one in RPE-global.yml
   expect(s.trace.of("agent_ended").filter((record) => record.agent.definition === "keeper").map((record) => record.event.status)).toEqual(["done", "done", "done", "done"]);
 });
 
+test("the lead's pins are read at each run's start: a pin added in the middle of a scene reaches its next run, one taken out is handed no more, and one gone is logged by the run that misses it", async () => {
+  const chief = "---\nname: chief\ndescription: Fixture lead.\nmodel: default\ntools: []\ngiven: [prompt:*]\n---\nFixture chief: you run the turn.\n";
+  const reply = { pieces: [{ text: "<reply>Wren counts the candles.</reply>" }] };
+  const s = (open = await stage({
+    files: { ".agents/chief.md": chief, [`${CHAT}persistent-workspace/plan.md`]: `${PLAN}\n` },
+    answers: [reply, reply, reply, reply],
+  }));
+  const files = join(s.dir, "files");
+  /** One turn of the scene: what the chief's run started with, and the whole of its first request. */
+  const chiefRun = async (turn: string, parent?: string) => {
+    const before = s.model.requests.length;
+    const { outcome } = await s.turn(request(turn, { lead: "chief", ...(parent !== undefined ? { parent } : {}) }));
+    expect(outcome.status).toBe("released");
+    const started = s.trace.of("agent_started").filter((record) => record.agent.definition === "chief");
+    return { given: started.at(-1)?.event.given ?? [], sent: s.model.requests[before]!.messages.map(textOf).join("\n") };
+  };
+
+  const first = await chiefRun("t1");
+  expect(first.given).not.toContain("file:persistent-workspace/plan.md");
+  expect(first.sent).not.toContain(PLAN);
+
+  await writeFile(join(files, CHAT, "config.yml"), "pins:\n  - { file: persistent-workspace/plan.md, agent: chief }\n");
+  const second = await chiefRun("t2", "t1");
+  expect(second.given).toContain("file:persistent-workspace/plan.md");
+  expect(second.sent).toContain(PLAN);
+
+  await writeFile(join(files, CHAT, "config.yml"), "pins: []\n");
+  const third = await chiefRun("t3", "t2");
+  expect(third.given).not.toContain("file:persistent-workspace/plan.md");
+  expect(third.sent).not.toContain(PLAN);
+
+  await writeFile(join(files, CHAT, "config.yml"), "pins:\n  - { file: persistent-workspace/gone.md, agent: chief }\n");
+  const fourth = await chiefRun("t4", "t3");
+  expect(fourth.given).not.toContain("file:persistent-workspace/gone.md");
+  const gone = "The file pinned for chief, persistent-workspace/gone.md, is not there, so chief is handed nothing for it.";
+  expect(s.logged.filter((line) => line.fields?.problem === gone).map((line) => line.fields?.agent)).toEqual(["chief"]);
+});
+
 test("a pin that is not a file and an agent, a `pins:` that is no list, and a pin for an agent no definition has are each said, and hand nothing", async () => {
   b = await bench({
     global: { "config.yml": "pins: persistent-workspace/plan.md\n", ".agents/keeper.md": KEEPER },

@@ -20,8 +20,7 @@ import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type Loo
 import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
-import { canLoadSkills } from "../harness/opening";
-import { skillsIndex } from "../tools/base";
+import { openingOf, pinsOf } from "../harness/opening";
 import { attach, joined, type Wanted } from "./attachments";
 import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
 
@@ -161,35 +160,6 @@ function questionFields(question: JsonValue | undefined): { question: string; fo
   return { question: typeof text === "string" ? text : "", found: typeof searched === "string" ? searched : "" };
 }
 
-/**
- * An agent's instructions, made as the lead's opening block is, without the reply contract: the
- * files of its stack's opening (its definition's body filled in), then the guide of each family of
- * tools it holds that has a file of its own (`.tools/<family>.md`), then the skills in force when it
- * holds `skill_load`.
- */
-async function instructionsOf(guidance: Guidance, definition: AgentDefinition, tools: readonly HeldTool[], isTool: (name: string) => boolean, fields: Fields, log: Log): Promise<string> {
-  const stack = await guidance.stack(definition.name);
-  for (const problem of stack.problems) log.warn("A file of a sub-agent's stack cannot be used.", { agent: definition.name, path: problem.path, problem: problem.message });
-  const texts: string[] = [];
-  for (const entry of stack.entries) {
-    if (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined) continue;
-    if (entry.kind !== "definition") {
-      texts.push(entry.text);
-      continue;
-    }
-    const rendered = definition.instructions.render(fields);
-    if (rendered.missing.length > 0) log.warn("An agent's definition names fields nothing fills.", { agent: definition.name, fields: rendered.missing });
-    texts.push(rendered.text);
-  }
-  for (const family of new Set(tools.map((tool) => tool.family))) {
-    if (isTool(family)) continue;
-    const guide = template(await guidance.tool(family))?.render().text;
-    if (guide !== undefined) texts.push(guide);
-  }
-  texts.push(await skillsIndex(guidance, canLoadSkills(tools, definition.outOfReach)));
-  return joined(texts);
-}
-
 export class Team implements TeamWork {
   readonly #d: TeamDeps;
   /** Every sub-agent started this turn, by its handle. */
@@ -271,8 +241,11 @@ export class Team implements TeamWork {
     const fields = fieldsOf(ref);
     const held = d.hold(definition.tools);
     if (held.missing.length > 0) d.unregistered(definition.name, held.missing);
-    const instructions = await instructionsOf(d.guidance, definition, held.tools, (name) => d.hold([name]).tools.length > 0, fields, d.env.log);
-    const wanted: Wanted[] = [...definition.given.map((name) => ({ ref: name, from: "definition" as const })), ...call.attach.map((name) => ({ ref: name, from: "delegate" as const }))];
+    // Its opening block, made as every agent's is (§5.2), by the one builder.
+    const block = await openingOf({ guidance: d.guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => d.hold([name]).tools.length > 0, fields, log: d.env.log });
+    const instructions = block.text;
+    // What its definition names, what the call that starts it attaches, and each file pinned for it, read whole now (R-174).
+    const wanted: Wanted[] = [...definition.given.map((name) => ({ ref: name, from: "definition" as const })), ...call.attach.map((name) => ({ ref: name, from: "delegate" as const })), ...(await pinsOf(d.guidance, definition.name, d.env.log))];
     const slice = d.slice?.bind(d);
     const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
     const attachments = given.blocks.map((block) => ({ name: block.name, text: block.text }));
@@ -306,7 +279,8 @@ export class Team implements TeamWork {
       ...(point !== undefined ? { point } : {}),
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
-    return { ref, runner, given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
+    // Its start record names only what it was handed.
+    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {

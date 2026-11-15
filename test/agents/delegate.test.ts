@@ -49,7 +49,7 @@ describe("delegate", () => {
     // Its own model, its own tools, as its definition lists them.
     expect(first.model).toBe("gm-model");
     expect(first.tools.map((tool) => tool.name)).toEqual(["file_read", "ask_author", "roll"]);
-    // Its own instructions: its definition, then the rules it reads.
+    // Its own instructions, in §5.2's order: the rules it reads, then its definition.
     const system = first.messages[0];
     expect(system?.role).toBe("system");
     expect(textOf(system ?? { content: "" })).toContain("Fixture GM: rule on what you are asked");

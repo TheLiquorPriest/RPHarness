@@ -105,7 +105,7 @@ describe("levels", () => {
       expect((await g.rules()).find((r) => r.name === "tidy")).toMatchObject({ level: "chat", inForce: false, why: "off" });
       expect(await g.skills()).toEqual([]);
       expect(await g.skill("mapping")).toBeUndefined();
-      expect((await g.stackParts("scribe"))[0]).toMatchObject({ part: "agents/scribe", left: "off", where: "opening" });
+      expect((await g.stack("scribe")).entries[0]).toMatchObject({ part: "agents/scribe", left: "off", where: "opening" });
     }
     await b.put("global", "config.yml", "off: []\n");
     await b.put("chat", "config.yml", "# nothing off\n");
@@ -131,7 +131,7 @@ describe("levels", () => {
     expect(problems.find((p) => p.path === "agents/scribe.md")?.message).toStartWith("Line 4 of the header cannot be read");
     expect(problems).toContainEqual(expect.objectContaining({ path: "rules/loose.md", line: 4, message: expect.stringContaining("`repeat:` is `once per turn`") }));
     expect(problems).toContainEqual(expect.objectContaining({ path: "rules/open-block.md", line: 6, message: expect.stringContaining("never closed") }));
-    expect((await g.stackParts("scribe"))[0]).toMatchObject({ part: "agents/scribe", path: "agents/scribe.md", left: "broken" });
+    expect((await g.stack("scribe")).entries[0]).toMatchObject({ part: "agents/scribe", path: "agents/scribe.md", left: "broken" });
     const rules = await g.rules();
     expect(rules.find((r) => r.name === "loose")).toMatchObject({ inForce: false, why: "broken", trigger: "moment", agents: "all" });
     expect(rules.find((r) => r.name === "open-block")).toMatchObject({ inForce: false, why: "broken" });
@@ -193,6 +193,7 @@ describe("a definition's header", () => {
       out_of_reach: "[maps]",
       reads: "[ALL-AGENTS, rules]",
       given: "[chat:history[scene], world:scene(full, map)]",
+      opening: "[map:drawn]",
       limits: "{ calls: 4, time: 30 }",
       writer: "teller",
     };
@@ -211,6 +212,7 @@ describe("a definition's header", () => {
       outOfReach: ["maps"],
       reads: ["ALL-AGENTS", "rules"],
       given: ["chat:history[scene]", "world:scene(full, map)"],
+      opening: ["map:drawn"],
       limits: { calls: 4, time: 30_000 },
       writer: "teller",
     });

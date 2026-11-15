@@ -23,7 +23,7 @@ const TOOLS_AS: readonly ToolsAs[] = ["auto", "native", "text"];
 const LIMITS = ["calls", "tokensIn", "tokensOut", "time"] as const;
 
 /** The header's fields that hold lists of names. */
-const LISTS = ["tools", "out_of_reach", "reads", "given"] as const;
+const LISTS = ["tools", "out_of_reach", "reads", "given", "opening"] as const;
 
 /** A list field's line when its value is a bracketed list, up to and with its `[`. */
 const LIST_START = new RegExp(`^(?:${LISTS.join("|")})[ \\t]*:[ \\t]+\\[`);
@@ -178,6 +178,7 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
   const outOfReach = list("out_of_reach", "families of tools a search does not reach");
   const reads = list("reads", "instruction files by name, with `rules` for the always-on rules");
   const given = list("given", "what the agent is handed by name");
+  const opening = list("opening", "what the agent is given once, when its session opens, by name");
 
   const limits: DefinitionLimits = {};
   if (h.limits !== undefined && h.limits !== null) {
@@ -228,6 +229,7 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
       outOfReach,
       reads,
       given,
+      opening,
       limits,
       ...(writer !== undefined ? { writer } : {}),
       instructions: body.template,

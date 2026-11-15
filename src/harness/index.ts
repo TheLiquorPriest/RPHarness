@@ -16,9 +16,13 @@ import { Jobs } from "../jobs";
 import { sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
+import { connectionOf, template } from "./means";
+import { openingOf } from "./opening";
+import { listedTools, ownTexts } from "./own";
 import { Sessions } from "./sessions";
-import { readModelSettings, readSettings } from "./settings";
+import { formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
+import { Registry } from "../tools";
 import { UsageBook } from "./usage";
 
 export { SHIPPED_GUIDANCE } from "./shipped";
@@ -124,7 +128,19 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const connections = await layer.api.list(scope.user);
         return views.map((view) => ({ ...view, runsOn: runOf(connections, view) }));
       },
-      stack: (scope, agent) => loadGuidance(env.files, scope).stackParts(agent),
+      // Every part of what the agent gets, as the one builder makes it for a run: its stack, for a lead
+      // (the agent given the briefing) the reply contract in the form its connection's replies take,
+      // each family guide and held tool's description, the skills' index, and the briefing's parts
+      // with the situations that add them.
+      stack: async (scope, agent) => {
+        const guidance = loadGuidance(env.files, scope);
+        const [settings, definition, texts, contract] = await Promise.all([readSettings(guidance, env.files, scope, env.log), guidance.definition(agent), ownTexts(guidance), guidance.part("reply-contract")]);
+        const registry = new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope));
+        const lead = definition?.given.includes("briefing") === true ? template(contract) : undefined;
+        const form = lead === undefined || definition === undefined ? undefined : formFor(settings, await connectionOf(layer.api, scope, definition, env.log)).form;
+        const block = await openingOf({ guidance, agent, definition, tools: definition === undefined ? [] : registry.hold(definition.tools).tools, isTool: (name) => registry.has(name), ...(lead !== undefined && form !== undefined ? { contract: { part: lead, form } } : {}) });
+        return block.parts;
+      },
     },
 
     models: layer.api,

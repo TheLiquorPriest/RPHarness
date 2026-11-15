@@ -17,8 +17,9 @@
 // briefing, laid out by the given part.
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
-import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, attach, delegate, fieldsOf, Team, type TeamWork } from "../agents";
-import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Writer } from "../contract";
+import { attach, fieldsOf, Team, type TeamWork } from "../agents";
+import type { Wanted } from "../agents/attachments";
+import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
@@ -29,31 +30,30 @@ import { SILENCE_MOST_MS } from "../reply/progress";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
-import { answer, fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, Registry, REPLY_FAMILY, replyRelease, type ReplyWork, todo, TodoLists, type ToolText, type Words, writeReply } from "../tools";
-import { BASE_TOOLS, baseTools, skillsIndex } from "../tools/base";
-import { canLoadSkills } from "./opening";
-import { type AgentReach, SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
-import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
-import { JOB_SEARCHED, jobTools } from "../jobs/tools";
-import { noticeLines, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
+import { answer, type OwnTool, Registry, REPLY_FAMILY, TodoLists, type ToolText, type Words } from "../tools";
+import { skillsIndex } from "../tools/base";
+import { canLoadSkills, openingOf, pinsOf } from "./opening";
+import { ownTexts, ownTools } from "./own";
+import type { AgentReach } from "../tools/search";
+import type { JobsWork } from "../jobs/tool";
+import { noticeLines, promptSlice, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { TurnGate } from "./gate";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
-import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
+import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { placed, requestPath, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
-/** RPH's own tools, each described by its file in `.tools/`; the sub-agents', the base tools, tool search, `job_start`, the job tools behind the search and the prompt map's among them. */
-const OWN_TOOLS = ["file_read", "file_find", "file_write", "todo", "write_reply", "reply_release", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED, ...PROMPT_TOOLS] as const;
-
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
 
-/** How what the lead is given by name beyond its own blocks is laid out (`.prompts/given.md`). */
+/** How what an agent is given by name beyond its own blocks is laid out (`.prompts/given.md`): the lead's and the writer's after their blocks, and what a lead's definition gives as its session opens. */
 const GIVEN_PART = "given";
+/** The name a writer's definition gives the brief `write_reply` hands it (`given: [prompt:*, brief]`): its own block, placed as itself. */
+const WRITER_BRIEF = "brief";
 /** How a chat message and a lore entry are laid out in what an agent is given (`.prompts/delegation.md`). */
 const DELEGATION_PART = "delegation";
 
@@ -86,6 +86,8 @@ interface Compacting {
   model: AgentModel;
   connection: Connection;
   opening: Opening;
+  /** What the lead's run is handed, by name, as its start record names it. */
+  handed: string[];
   definition: AgentDefinition;
   declared: LoopTool[];
   rules: RuleRun;
@@ -333,12 +335,7 @@ export class Turn {
     this.#rules = rules;
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
 
-    const ownTexts = new Map<string, ToolText>();
-    const ownParts = await Promise.all(OWN_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const));
-    for (const [name, part] of ownParts) {
-      const text = toolTextOf(part);
-      if (text !== undefined) ownTexts.set(name, text);
-    }
+    const texts = await ownTexts(guidance);
     // A `prompt:` name, given by `delegate` or a definition's `given:`, the lead's or a sub-agent's, read as the prompt tool reads it.
     const slice = promptSlice(async () => this.#prompt, guidance);
     const team = new Team({
@@ -367,7 +364,7 @@ export class Turn {
       slice,
     });
     this.#team = team;
-    const registry = new Registry(this.#ownTools(ownTexts, team, guidance), await env.tools.all(scope));
+    const registry = new Registry(this.#ownTools(texts, team, guidance), await env.tools.all(scope));
     this.#registry = registry;
     if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
 
@@ -397,7 +394,7 @@ export class Turn {
     // The block the session opened with: as memory holds it, or, after a restart or once the session is open again after a close, as its file keeps it. Made afresh, it is kept in the file.
     let opening = session.openings.get(req.lead) ?? keptOpening(file.log, req.lead);
     if (opening === undefined) {
-      const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing));
+      const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing), slice);
       if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: opened, agent: req.lead } });
       opening = opened;
       file.add({ type: "opening", parent: begun.id, lead: req.lead, opening: opening as unknown as JsonObject });
@@ -438,6 +435,8 @@ export class Turn {
 
     const at = env.clock.now();
     const messages: AgentMessage[] = [];
+    // What the run is handed, by name, as its start record names it: only what its requests hold.
+    const handed: string[] = [];
     // A request that carries no prompt (a run that writes nothing into the chat) is given no frame introducing one.
     if (opening.given.some((ref) => ref.startsWith("prompt:*")) && req.prompt.length > 0) {
       const framing = joined([template(frame)?.render().text ?? ""]);
@@ -445,6 +444,7 @@ export class Turn {
       const prompt = promptMessages(req.prompt, model.model, at);
       this.#picturesLeft(this.#lead, undefined, prompt.pictures);
       messages.push(...prompt.messages.map((message) => placed(message, "prompt")));
+      handed.push(...opening.given.filter((ref) => ref.startsWith("prompt:*")));
     }
     // What the session carries, from where this run's work starts: fixed for the turn, after the prompt, so it never moves the cached front (§10.2).
     const layout = template(carried);
@@ -455,19 +455,27 @@ export class Turn {
     if (opening.given.includes("session:carry") && layout !== undefined) {
       carriedNow = await carriedFields(carry);
       const text = carriedNow === undefined ? "" : joined([layout.render(carriedNow).text]);
-      if (text !== "") carriedAt = messages.push(placed(systemMessage(text, at), "session:carry")) - 1;
+      if (text !== "") {
+        carriedAt = messages.push(placed(systemMessage(text, at), "session:carry")) - 1;
+        handed.push("session:carry");
+      }
     }
     if (opening.given.includes("briefing")) {
       const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places);
-      if (text !== undefined) messages.push(placed(systemMessage(joined([text]), at), "briefing"));
+      if (text !== undefined) {
+        messages.push(placed(systemMessage(joined([text]), at), "briefing"));
+        handed.push("briefing");
+      }
     }
-    // Every other name the lead is given, found as a sub-agent's is, after the briefing.
-    const named = opening.given.filter((ref) => !ref.startsWith("prompt:*") && ref !== "session:carry" && ref !== "briefing");
-    if (named.length > 0) {
-      const text = await this.#given(guidance, named, slice);
-      if (text !== "") messages.push(placed(systemMessage(text, at), named.join(", ")));
+    // Every other name the lead is given, found as a sub-agent's is, and each file pinned for it, read
+    // whole now, at each run's start (R-174): after the briefing, outside the cached front.
+    const wanted: Wanted[] = [...opening.given.filter((ref) => !ref.startsWith("prompt:*") && ref !== "session:carry" && ref !== "briefing").map((ref) => ({ ref, from: "definition" as const })), ...(await pinsOf(guidance, req.lead, env.log))];
+    if (wanted.length > 0) {
+      const given = await this.#given(guidance, this.#lead, wanted, slice);
+      if (given.text !== "") messages.push(placed(systemMessage(given.text, at), wanted.map((item) => item.ref).join(", ")));
+      handed.push(...given.handed);
     }
-    const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, definition, declared, rules, settings, at } : undefined;
+    const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, handed, definition, declared, rules, settings, at } : undefined;
     if (compacting !== undefined) await this.#compact(compacting, false);
 
     const streamRules = rules.stream(this.#lead);
@@ -522,7 +530,7 @@ export class Turn {
       });
     const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {
       if (this.#ended()) return undefined;
-      const work = runner.start({ messages: [] }, { given: opening.given });
+      const work = runner.start({ messages: [] }, { given: handed });
       const entry = { runner, work };
       this.#working.add(entry);
       const done = await work.done;
@@ -606,7 +614,7 @@ export class Turn {
         gate: this.#gate(this.#lead, undefined),
       });
       if (this.#ended()) return false;
-      const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
+      const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: c.handed });
       const entry = { runner: saver, work };
       this.#working.add(entry);
       await work.done;
@@ -681,53 +689,43 @@ export class Turn {
     return undefined;
   }
 
-  /** Opens the session for its lead: the opening block, which holds still for the session (§5.2, §10.2), or why it cannot be made. */
-  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, closing: TemplatePart | undefined): Promise<Opening | "no-tags"> {
+  /**
+   * Opens the session for its lead: the opening block, which holds still for the session (§5.2,
+   * §10.2), made by the one builder; what its definition's `opening:` names is asked of the host
+   * once, here (§8.2, R-163). Or why it cannot be made.
+   */
+  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, closing: TemplatePart | undefined, slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<Opening | "no-tags"> {
     const { env } = this.#c;
-    const stack = await guidance.stack(definition.name);
-    for (const problem of stack.problems) env.log.warn("A file of the lead's stack cannot be used.", { path: problem.path, problem: problem.message });
-    const texts: string[] = [];
-    for (const entry of stack.entries) {
-      if (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined) continue;
-      texts.push(entry.kind === "definition" ? this.#instructions(definition) : entry.text);
-    }
     const { form, stream } = formFor(settings, connection);
     let tags: ReplyTags | undefined;
     let intentFile: string | undefined;
-    let contractText = "";
     if (contract !== undefined) {
       tags = tagsOf(contract.header);
       const file = contract.header["intent_file"];
       intentFile = typeof file === "string" && file !== "" ? file : undefined;
-      contractText = joined([contract.render({ form: form === "tags" ? { tags: true } : { two_step: true } }).text]);
-      texts.push(contractText);
     }
     if (form === "tags" && tags === undefined) return "no-tags";
-    // The tool guide: the guide of each family of the tools the lead holds, where its file is (`.tools/<family>.md`).
     const held = registry.hold(definition.tools);
-    for (const family of new Set(held.tools.map((tool) => tool.family))) {
-      if (registry.has(family)) continue;
-      const guide = template(await guidance.tool(family))?.render().text;
-      if (guide !== undefined) texts.push(guide);
-    }
-    // The skills in force, for a lead that can call `skill_load`: the list stands as the session opened it, and the briefing says when it no longer does.
-    const skills = await skillsIndex(guidance, canLoadSkills(held.tools, definition.outOfReach));
-    if (skills !== "") texts.push(skills);
+    const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
+    const items = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: settings.perCall, slice }, this.#lead, definition.opening.map((ref) => ({ ref, from: "opening" as const })));
+    if (items.missing.length > 0) env.log.warn("What the lead's definition gives as its session opens could not be found.", { agent: definition.name, missing: items.missing });
+    // The skills in the block stand as the session opened it, and the briefing says when the list no longer does.
+    const block = await openingOf({ guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => registry.has(name), ...(contract !== undefined ? { contract: { part: contract, form } } : {}), items: { given: items, layout: template(layout) }, log: env.log });
     const closingText = joined([closing?.render().text ?? ""]);
     return {
-      text: joined(texts),
-      snapshot: snapshot(stack),
-      ...(skills !== "" ? { skills } : {}),
+      text: block.text,
+      snapshot: snapshot(block.stack),
+      ...(block.skills !== "" ? { skills: block.skills } : {}),
       tools: [...definition.tools],
       given: [...definition.given],
       outOfReach: [...definition.outOfReach],
       declared: Object.fromEntries(held.tools.map((tool) => [tool.name, { description: tool.description, parameters: tool.parameters }])),
-      ...(closingText !== undefined && closingText !== "" ? { closing: closingText } : {}),
+      ...(closingText !== "" ? { closing: closingText } : {}),
       form,
       stream,
       ...(tags !== undefined ? { tags } : {}),
       ...(intentFile !== undefined ? { intentFile } : {}),
-      ...(contractText !== "" ? { contract: contractText } : {}),
+      ...(block.contract !== undefined && block.contract !== "" ? { contract: block.contract } : {}),
     };
   }
 
@@ -737,13 +735,6 @@ export class Turn {
     if (now === (opening.skills ?? "")) return "";
     const line = notices?.format === "lines" ? notices.line("skills_changed", now !== "" ? { listed: true } : {}) : undefined;
     return joined([line ?? "", now]);
-  }
-
-  /** A definition's body, filled in: with a sub-agent's fields (`fieldsOf`), or with none for the lead, whose opening block holds for the session. A field nothing fills is put in empty, and the log says which. */
-  #instructions(definition: AgentDefinition, fields?: Fields): string {
-    const rendered = definition.instructions.render(fields);
-    if (rendered.missing.length > 0) this.#c.env.log.warn("An agent's definition names fields nothing fills.", { agent: definition.name, fields: rendered.missing });
-    return rendered.text;
   }
 
   /** The briefing (§10.2 block 4), laid out by its template, or undefined when it holds nothing. */
@@ -784,17 +775,19 @@ export class Turn {
   }
 
   /**
-   * What the lead's definition names in `given:` beyond the blocks of its own (§5.4, §10.2): files,
-   * stretches of the chat, lore, parts of the prompt and the host's views, found as a sub-agent's are
-   * and the whole list given to the host to keep; laid out by the given part, with each name nobody
-   * could give. Without the part, what was found goes as it is, one after another.
+   * What an agent's definition names in `given:` beyond the lead's blocks of its own (§5.4, §10.2),
+   * and the files pinned for it: files, stretches of the chat, lore, parts of the prompt and the
+   * host's views, found as a sub-agent's are and the whole list given to the host to keep; laid out by
+   * the given part, with each name nobody could give. Without the part, what was found goes as it is,
+   * one after another. With it, the names of what was handed.
    */
-  async #given(guidance: Guidance, refs: readonly string[], slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<string> {
+  async #given(guidance: Guidance, reader: AgentRef, wanted: readonly Wanted[], slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<{ text: string; handed: string[] }> {
     const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const given = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, slice }, this.#lead, refs.map((ref) => ({ ref, from: "definition" as const })));
+    const given = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, slice }, reader, wanted);
+    const handed = given.blocks.map((block) => block.name);
     const part = template(layout);
-    if (part === undefined) return joined(given.blocks.map((block) => block.text));
-    return joined([part.render({ ...(given.blocks.length > 0 ? { attachments: given.blocks.map((block) => ({ name: block.name, text: block.text })) } : {}), ...(given.missing.length > 0 ? { missing: given.missing } : {}) }).text]);
+    if (part === undefined) return { text: joined(given.blocks.map((block) => block.text)), handed };
+    return { text: joined([part.render({ ...(given.blocks.length > 0 ? { attachments: given.blocks.map((block) => ({ name: block.name, text: block.text })) } : {}), ...(given.missing.length > 0 ? { missing: given.missing } : {}) }).text]), handed };
   }
 
   /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the definition's alone. */
@@ -803,37 +796,23 @@ export class Turn {
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {
-    // The agents' tools read through the turn's files, so a view still being written is waited for.
-    const env = this.#env;
-    const fileDeps: FileToolsDeps = { files: env.files, words: (name, fields) => this.#words(name, fields), texts, most: this.#settings.perCall, written: (_scope, by, done) => this.#written(by, done.path) };
-    const work: ReplyWork = { write: (brief, live, ctx) => this.#write(brief, live, ctx), release: (path, ctx) => this.#releaseReply(path, ctx) };
-    return [
-      fileRead(fileDeps),
-      fileFind(fileDeps),
-      fileWrite(fileDeps),
-      todo({ lists: this.#todos, words: (name, fields) => this.#words(name, fields), text: texts.get("todo"), changed: (agent, items) => this.#trace.event(agent, this.#parents.get(agent.id), { kind: "todo", items: [...items] }) }),
-      writeReply(work, texts.get("write_reply")),
-      replyRelease(work, texts.get("reply_release")),
-      delegate(team, texts.get("delegate")),
-      askAuthor(team, texts.get("ask_author")),
-      agentMessage(team, texts.get("agent_message")),
-      agentDrop(team, texts.get("agent_drop")),
-      jobStart(this.#c.jobs, texts.get(JOB_START), this.#settings.jobs.perRun),
-      ...jobTools(this.#c.jobs, texts, this.#settings.perCall),
-      ...baseTools({ env, guidance, texts, ids: () => this.#c.ids(), gapHits: this.#settings.gapHits, perCall: this.#settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
-      promptTool({ prompt: async () => this.#prompt, guidance, texts, env }),
-      promptMapWrite({ prompt: async () => this.#prompt, guidance, texts, env, signatureHead: this.#settings.signatureHead }),
-      ...searchTools({
-        reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
-        ...(env.switches !== undefined ? { switches: env.switches } : {}),
-        guidance,
-        schemaShown: this.#settings.schemaShown,
-        notices: (name, fields) => this.#words(name, fields),
-        texts,
-        hits: this.#settings.searchHits,
-        // `tool_use` carries the call of the tool it found, which the agent's runner runs as itself.
-      }).map((tool) => (tool.name === TOOL_USE ? { ...tool, carrier: true } : tool)),
-    ];
+    return ownTools({
+      // The agents' tools read through the turn's files, so a view still being written is waited for.
+      env: this.#env,
+      guidance,
+      texts,
+      settings: this.#settings,
+      words: (name, fields) => this.#words(name, fields),
+      todos: this.#todos,
+      todoChanged: (agent, items) => this.#trace.event(agent, this.#parents.get(agent.id), { kind: "todo", items: [...items] }),
+      written: (_scope, by, done) => this.#written(by, done.path),
+      reply: { write: (brief, live, ctx) => this.#write(brief, live, ctx), release: (path, ctx) => this.#releaseReply(path, ctx) },
+      team,
+      jobs: this.#c.jobs,
+      ids: () => this.#c.ids(),
+      prompt: async () => this.#prompt,
+      reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
+    });
   }
 
   /**
@@ -1022,9 +1001,9 @@ export class Turn {
     const ref: AgentRef = { id: this.#c.ids(), definition: writer, parent: ctx.agent.id };
     // The writer's session is its own, as a sub-agent's is: never the lead's cached front or thread (§10.2, §11). It is let go each time its run ends.
     const session = this.#c.ids();
-    const stack = await guidance.stack(writer);
     const held = this.#registry?.hold(definition.tools) ?? { tools: [], missing: [] };
-    const instructions = joined([...stack.entries.flatMap((entry) => (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined ? [] : [entry.kind === "definition" ? this.#instructions(definition, fieldsOf(ref)) : entry.text])), await skillsIndex(guidance, canLoadSkills(held.tools, definition.outOfReach))]);
+    // Its opening block is made as any agent's is, by the one builder (§10.6: an agent like the others).
+    const block = await openingOf({ guidance, agent: writer, definition, tools: held.tools, isTool: (name) => this.#registry?.has(name) ?? false, fields: fieldsOf(ref), log: env.log });
     const connection = await this.#connection(definition);
     const model = await this.#c.models.agentModel(connection.choice);
     const parent: ParentCall = { agent: ctx.agent.id, run: this.run, call: ctx.callId };
@@ -1032,6 +1011,8 @@ export class Turn {
     this.#c.usage.gauge(this.scope, this.run, ref.id, model.limits.contextWindow?.tokens ?? 0, model.limits.maxTokens?.tokens ?? 0);
     const at = env.clock.now();
     const messages: AgentMessage[] = [];
+    // What it is handed, by name, as its start record names it: only what its request holds.
+    const handed: string[] = [];
     const givesPrompt = definition.given.some((given) => given.startsWith("prompt:*"));
     if (givesPrompt) {
       // A prefilled start is the prompt's last message; it is kept for the very end, where the writer goes on from it.
@@ -1040,9 +1021,19 @@ export class Turn {
       const converted = promptMessages(prompt, model.model, at);
       this.#picturesLeft(ref, parent, converted.pictures);
       messages.push(...converted.messages.map((message) => placed(message, "prompt")));
+      if (req.prompt.length > 0) handed.push(...definition.given.filter((given) => given.startsWith("prompt:*")));
     }
-    if (instructions !== "") messages.push(placed(systemMessage(instructions, at), "opening"));
-    messages.push(placed(userMessage(brief, at), "brief"));
+    if (block.text !== "") messages.push(placed(systemMessage(block.text, at), "opening"));
+    // Everything else its definition's `given:` names but its own blocks (the prompt, the brief), and
+    // each file pinned for it, read whole now, as a sub-agent's run is handed them (R-174).
+    const wanted: Wanted[] = [...definition.given.filter((given) => !given.startsWith("prompt:*") && given !== WRITER_BRIEF).map((given) => ({ ref: given, from: "definition" as const })), ...(await pinsOf(guidance, writer, env.log))];
+    if (wanted.length > 0) {
+      const given = await this.#given(guidance, ref, wanted, promptSlice(async () => this.#prompt, guidance));
+      if (given.text !== "") messages.push(placed(systemMessage(given.text, at), wanted.map((item) => item.ref).join(", ")));
+      handed.push(...given.handed);
+    }
+    messages.push(placed(userMessage(brief, at), WRITER_BRIEF));
+    if (definition.given.includes(WRITER_BRIEF)) handed.push(WRITER_BRIEF);
     if (givesPrompt && req.prefill !== undefined && req.prefill !== "") messages.push(placed(assistantMessage(req.prefill, model.model, at), "prompt"));
     const rules = this.#rulesRun();
     const streamRules = rules.stream(ref);
@@ -1096,7 +1087,7 @@ export class Turn {
     // A stop that came while the writer was being made fired before any listener was on it: from here
     // on nothing is awaited until the writer's work is tracked and listening, so this is the last look.
     if (ctx.signal.aborted || this.#stopped) return { content: [] };
-    const work = runner.start({ messages }, { parent, given: definition.given });
+    const work = runner.start({ messages }, { parent, given: handed });
     const entry = { runner, work };
     this.#working.add(entry);
     const stop = (): void => work.stop();

@@ -74,10 +74,10 @@ describe("the stack", () => {
     expect(brief(await g.stack("indexer"))).toEqual(["opening:agents/indexer"]);
     expect(brief(await g.stack("nobody"))).toEqual(["opening:agents/nobody(missing)"]);
 
-    const parts = await g.stackParts("author");
-    expect(parts[7]).toEqual({ part: "agents/author", path: "@shipped/.agents/author.md", level: "shipped", hash: expect.stringMatching(/^[0-9a-f]{64}$/), where: "opening" });
-    expect(parts.find((p) => p.part === "WORLD")).toEqual({ part: "WORLD", path: "@shipped/WORLD.md", level: "shipped", hash: expect.any(String), where: "opening", left: "empty" });
-    expect(parts.find((p) => p.part === "AGENTS")).toEqual({ part: "AGENTS", path: "AGENTS.md", level: "chat", where: "opening", left: "missing" });
+    const parts = (await g.stack("author")).entries;
+    expect(parts[7]).toMatchObject({ kind: "definition", part: "agents/author", path: "@shipped/.agents/author.md", level: "shipped", hash: expect.stringMatching(/^[0-9a-f]{64}$/), where: "opening" });
+    expect(parts.find((p) => p.part === "WORLD")).toMatchObject({ kind: "instruction", part: "WORLD", path: "@shipped/WORLD.md", level: "shipped", hash: expect.any(String), where: "opening", left: "empty" });
+    expect(parts.find((p) => p.part === "AGENTS")).toEqual({ kind: "instruction", part: "AGENTS", path: "AGENTS.md", level: "chat", where: "opening", replaces: [], left: "missing" });
   });
 
   test("the definition appears once, fifth", async () => {

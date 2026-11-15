@@ -12,7 +12,8 @@
 //   description.
 // - The harness, wherever it sends a model text of its own: `part(name)`.
 // - The runner, for the user's triggered rules: one `RuleRun` per run, from `ruleRun(options)`.
-// - The pages: `definitions()`, `stackParts(name)`, `rules()` and `problems()`.
+// - The pages: `definitions()`, `rules()` and `problems()`; an agent's whole opening block is the
+//   harness's opening builder's (`openingOf`), over `stack(name)`. A run's start: `pins(name)`.
 //
 // The files, by kind (each kind's folder at each level is the host's, `Layer.folders`):
 // - Instruction files: plain markdown at a level's root, named by a definition's `reads`
@@ -115,7 +116,7 @@ export interface Template {
 // ---------------------------------------------------------------- agent definitions
 
 /** The header fields of an agent definition. Anything else in its header is reported. Frozen: a host reads a definition by this same list (`rp-harness/helpers`). */
-export const DEFINITION_FIELDS = Object.freeze(["name", "description", "model", "effort", "tools_as", "tools", "out_of_reach", "reads", "given", "limits", "writer"] as const);
+export const DEFINITION_FIELDS = Object.freeze(["name", "description", "model", "effort", "tools_as", "tools", "out_of_reach", "reads", "given", "opening", "limits", "writer"] as const);
 
 /** The fields a definition's body may name, each a field of the contract's `BodyFields`. Anything else it names is reported. */
 export const BODY_FIELDS = ["agent", "definition", "plays"] as const satisfies readonly (keyof BodyFields)[];
@@ -147,6 +148,11 @@ export interface AgentDefinition {
   reads: string[];
   /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */
   given: string[];
+  /**
+   * What it is given once, when its session opens, in its opening block (`opening:`, §8.2, R-163):
+   * each found as a `given:` name is, asked of the host again only when the block is made afresh.
+   */
+  opening: string[];
   limits: DefinitionLimits;
   /** The definition `write_reply` hands the prose to when this agent calls it (§10.6), by name as its header writes it. Absent when its header names none: code names no writer of its own. */
   writer?: string;
@@ -217,17 +223,13 @@ export type PromptPart = TemplatePart | LinesPart;
  * One part of an agent's stack (§5.2). `part` names it the way `off:` lists name it: the definition
  * as `agents/<name>`, an instruction file by its name (`TURN`), a rule as `rules/<name>`. A part left
  * out has `left`, and its `path` and `level` say which file is not given, or for `missing` where it
- * would be.
+ * would be. Its `text` is its whole text as written (the definition's body unfilled).
  */
 export interface StackEntry extends StackPart {
   kind: "definition" | "instruction" | "rule";
   replaces: Replaced[];
-  /** Its whole text as given: an instruction file or a rule as written, the definition's body as written. Absent when left out. */
-  text?: string;
   /** For an instruction file named in `layered:`: this is one level's file of several; its part is told apart from the others' by its level. */
   layered?: true;
-  /** For a part handed over for the briefing: the situations that add it (`swipe`). */
-  situations?: string[];
 }
 
 /**
@@ -452,11 +454,14 @@ export interface Guidance {
   /** Every problem found in every file of the tree, and in what its configs name. Loads everything. */
   problems(): Promise<Problem[]>;
 
-  /**
-   * The definition in force of that name, with each file pinned for it (`pins:`) after its own `given`
-   * items, as `file:<path>`, once; undefined when there is none, it is off, or it is broken (see `problems`).
-   */
+  /** The definition in force of that name; undefined when there is none, it is off, or it is broken (see `problems`). */
   definition(name: string): Promise<AgentDefinition | undefined>;
+  /**
+   * The files pinned for an agent (`pins:`, both levels', the farther's first), as a run's start
+   * hands them: each with what keeps it from being handed now, if anything does (not there, refused,
+   * unreadable), found where the run looks for it, the turn's folder included.
+   */
+  pins(agent: string): Promise<{ file: string; problem?: Problem }[]>;
   /** Every definition in force, for the Files page. */
   definitions(): Promise<DefinitionView[]>;
 
@@ -466,8 +471,6 @@ export interface Guidance {
    * `added:` table could add, each with its situations, for the Files page.
    */
   stack(agent: string, options?: { situations?: readonly string[] }): Promise<Stack>;
-  /** An agent's stack as the contract's Files page has it. */
-  stackParts(agent: string): Promise<StackPart[]>;
 
   /** The skills' index: every skill in force, by name. */
   skills(): Promise<SkillEntry[]>;

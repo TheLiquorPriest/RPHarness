@@ -250,7 +250,10 @@ describe("limits", () => {
 
     await s.turn(request("t1", { lead: "chief" }));
 
+    // Two hits, then the line that says the search stopped at the player's most.
     const found = s.model.requests[1]!.messages.find((message) => message.role === "toolResult" && message.toolCallId === "f-1");
-    expect(textOf(found!).split("\n")).toHaveLength(2);
+    const lines = textOf(found!).split("\n");
+    expect(lines.filter((line) => line.includes("persistent-workspace/"))).toHaveLength(2);
+    expect(lines.at(-1)).toContain("2");
   });
 });

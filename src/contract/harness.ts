@@ -371,21 +371,36 @@ export interface BodyFields {
 export type StackLeft = "missing" | "off" | "empty" | "broken" | "needs";
 
 /**
- * One part of an agent's stack (§5.2): which part, the file it came from, and whether it sits in the
+ * What a part of an agent's opening block is (§5.2, §10.2): its definition; an instruction file; an
+ * always-on rule; the reply contract (a lead's); the guide of a family of tools it holds; a held
+ * tool's description, which its declaration carries in the cached front; the skills' index; or what
+ * its definition's `opening:` names, as the host answered when the session opened.
+ */
+export type StackPartKind = "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
+
+/**
+ * One part of what an agent gets (§5.2): which part, the file it came from, and whether it sits in the
  * opening block or comes with the briefing. A part left out is listed too, with why, so the Files
- * page says so.
+ * page says so. Every part is listed, in the order the agent gets them: the opening's, then the
+ * briefing's.
  */
 export interface StackPart {
+  kind: StackPartKind;
+  /** Its name as `off:` lists name it: `agents/<name>`, an instruction file's name (`TURN`), `rules/<name>`, `prompts/reply-contract`, `tools/<family or tool>`, `prompts/skills`; for `given`, the item as `opening:` writes it. */
   part: string;
-  /** The file it came from; for a part left out as `missing`, where it would be. */
+  /** The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it. */
   path: string;
   level: LayerLevel;
-  /** SHA-256 of the file, lower-case hex; absent for a part left out as `missing`. */
+  /** SHA-256 of the file (for `given`, of its text), lower-case hex; absent for a part left out as `missing`. */
   hash?: string;
   /** Where it sits, or for a part left out, where it would. */
   where: "opening" | "briefing";
   /** Why it is left out; absent for a part in the stack. */
   left?: StackLeft;
+  /** Its text as the agent gets it (a held tool's description as declared); absent when left out, and for `given` outside a session. */
+  text?: string;
+  /** For a part the briefing is handed: the situations that add it (`swipe`, `regenerate`; an always-on rule's `turns:`). */
+  situations?: string[];
 }
 
 export interface DefinitionsApi {

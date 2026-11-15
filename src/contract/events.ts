@@ -14,10 +14,15 @@ import type { Release, RunOutcome } from "./turn";
  * own views (`world:scene(full, map)`, `story:brief`).
  */
 export interface AttachmentRef {
-  /** The name as the definition or the lead's call wrote it. */
+  /** The name as the definition, the lead's call or the pin wrote it. */
   ref: string;
-  /** Where it was named: the agent's definition (`given:`), or the lead's `delegate` call. */
-  from: "definition" | "delegate";
+  /**
+   * Where it was named: the agent's definition (`given:`); the lead's `delegate` call; a file the
+   * user pinned for the agent (`pins:`, his setting, not the definition's, R-174); or its definition's
+   * `opening:`, an item resolved once when the session opens and kept in its opening block (§8.2,
+   * R-163), asked again only when that block is made afresh.
+   */
+  from: "definition" | "delegate" | "pin" | "opening";
   /**
    * RPH resolved it itself (prompt slices, chat ranges, lore entries, files). The host is told it
    * for the turn's record (§10.5: "the list is saved with the turn") and returns no block for it.

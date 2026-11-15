@@ -12,6 +12,14 @@ import type { JsonObject, JsonValue } from "./json";
 /** How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing (a local server that asks for none). */
 export type ConnectionAuth = "key" | "signin" | "none";
 
+/**
+ * How an agent's tools are offered to its model, as its definition's `tools_as:` says: natively
+ * until the model's connection refuses them, then as text for `calls.toolRefusalMinutes` (`auto`,
+ * the default); always natively, a refusal failing the call (`native`); or always as text, from
+ * `.prompts/tools-as-text.md` (`text`).
+ */
+export type ToolsAs = "auto" | "native" | "text";
+
 /** A model's limits as entered or reported: its context window and its longest answer, in tokens. */
 export interface ModelLimitsEntry {
   contextWindow?: number;

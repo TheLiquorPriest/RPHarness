@@ -14,8 +14,12 @@
 // - `parseDefinition` and `DEFINITION_FIELDS`: the reader of an agent definition's file and the
 //   fields its header has (§5.4, C8), so a host that writes or imports a definition (the migration's
 //   imported agents) reads its header exactly as RPH does.
+// - `OWNER_ONLY`: the members of the harness's API that only the owner's own presses may call
+//   (`jobs.start`, `live.pause`, ...), which both repositories' call-site tests read, so a member
+//   renamed in the contract or called by anything but a press fails them loudly (C-24).
 
 export { mergedConfig, SETTINGS } from "./harness/settings";
 export { checkSettingValue } from "./harness/settings/check";
 export { DEFINITION_FIELDS } from "./files/api";
 export { parseDefinition } from "./files/definitions";
+export { OWNER_ONLY } from "./owner";

@@ -2,6 +2,7 @@
 // another user and a run's id, `usage.run` answers as for an id that was never a run. Everything here
 // is invented.
 import { afterEach, expect, test } from "bun:test";
+import { jobOf } from "../jobs/support";
 import { request, type Stage, stage, USER } from "./support";
 
 let open: Stage | undefined;
@@ -15,7 +16,7 @@ const KEEPER = "---\nname: keeper\ndescription: Fixture keeper of the tower's re
 test("A's job's usage is answered to A; asked by B with A's run id, the answer is the same as for an id that was never a run", async () => {
   const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER }, answers: [{ pieces: [{ text: "Counted seven." }], usage: { input: 100, output: 20 } }] }));
 
-  const job = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: "Count the bells in the tower." });
+  const job = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: "Count the bells in the tower." }));
   await s.trace.seen((record) => record.event.kind === "job" && record.event.job.id === job.id && record.event.job.state === "done");
 
   // The job's run is the job's id: its calls and tokens are A's.

@@ -10,7 +10,7 @@ import type { AgentRef, JobView, JsonValue, StorePort, TraceRecord } from "../..
 import { createHarness } from "../../src/index";
 import { type Answer, memoryJobs, type Reply, scriptedModel } from "../../src/testing/rig";
 import { gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
-import { userHarness } from "./support";
+import { jobOf, userHarness } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -223,7 +223,7 @@ describe("a job an agent starts", () => {
 
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
-      await expect(again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: what jobs sent and wrote today counts as 1050 tokens, and the setting allows 1000.");
+      expect(await again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).toEqual({ refused: "day-tokens", max: 1000, value: 1050 });
     } finally {
       await again.close();
     }
@@ -237,7 +237,7 @@ describe("a job the player starts", () => {
   test("is held to a token limit of its own: it ends with what it wrote, and its record says which limit stopped it", async () => {
     const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [{ ...ONE_MORE, usage: { input: 90, output: 30 } }] }));
 
-    const started = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 100 } });
+    const started = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 100 } }));
     await jobEnded(s, "done");
 
     expect(toldJobs(s).at(-1)).toMatchObject({ id: started.id, state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "job", max: 100, value: 120 } });
@@ -257,12 +257,19 @@ describe("a job the player starts", () => {
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted 3 so far.", limit: { limit: "tokens", per: "job", max: 1_000, value: 1_050 } });
   });
 
-  test("a limit its start gives never loosens the player's setting for a job's run", async () => {
-    const s = (open = await stage({ config: "jobs:\n  run:\n    calls: 1\n", files: { ".agents/keeper.md": KEEPER() }, answers: [ONE_MORE] }));
+  test("a limit its start gives stands in place of the player's setting for a job's run, tighter or looser: his word for it", async () => {
+    const s = (open = await stage({ config: "jobs:\n  run:\n    calls: 2\n", files: { ".agents/keeper.md": KEEPER() }, answers: [ONE_MORE, ONE_MORE, { pieces: [{ text: "Counted seven." }] }, ONE_MORE, ONE_MORE] }));
 
+    // Looser: five calls where the setting allows two.
     await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { calls: 5 } });
     await jobEnded(s, "done");
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted seven.", limits: { calls: 5 } });
+    expect(toldJobs(s).at(-1)?.limit).toBeUndefined();
+    expect(s.model.requests).toHaveLength(3);
 
+    // Tighter: one call, and its record says which limit stopped it.
+    await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { calls: 1 } });
+    await jobEnded(s, "done", 2);
     expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", limit: { limit: "calls", per: "job", max: 1, value: 1 } });
   });
 
@@ -396,7 +403,7 @@ describe("a job and the user it is for", () => {
     const { harness } = userHarness(s, { "": scriptedModel([{ pieces: [{ hold: held }, { text: "Counted seven." }] }], { clock: s.clock }) }, { store: flaky });
     try {
       // The search for what a restart cut off fails at this user's first call, and the start goes on.
-      const job = await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+      const job = jobOf(await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
       expect(s.logged.some((line) => line.message === "The jobs a restart cut off could not be found.")).toBe(true);
       await kept.promise;
       // The search runs again at his next call, while the job runs: it is no job a restart cut off.
@@ -523,7 +530,7 @@ describe("what a job's record holds and where", () => {
 
     // Listed, and not yet removed: nothing has started.
     expect((await s.harness.jobs!.list({ user: USER })).jobs.map((job) => job.id)).toEqual(["kept-lately", "kept-long-ago"]);
-    const started = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    const started = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     await jobEnded(s, "done");
 
     expect((await s.harness.jobs!.list({ user: USER })).jobs.map((job) => job.id)).toEqual([started.id, "kept-lately"]);
@@ -551,7 +558,7 @@ describe("what a job's record holds and where", () => {
     const model = scriptedModel([{ pieces: [{ text: "Counted seven." }] }], { clock: s.clock });
     const { harness } = userHarness(s, { "": model }, { store: watched });
     try {
-      const job = await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+      const job = jobOf(await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
       await jobEnded(s, "done");
       await harness.jobs!.list({ user: USER });
 

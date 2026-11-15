@@ -5,7 +5,7 @@
 
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelLimits, Scope } from "../contract";
+import type { ModelLimits, Scope, ToolsAs } from "../contract";
 
 /**
  * How hard an agent's model reasons: `inherit` and `auto` leave it to the connection's own effort
@@ -14,11 +14,12 @@ import type { ModelLimits, Scope } from "../contract";
  */
 export type ModelEffort = "inherit" | "auto" | ModelThinkingLevel;
 
-/** What an agent runs on, among one user's connections: a connection (null: his default), a model on it (null: the connection's own), and how hard it reasons (absent: `inherit`). */
+/** What an agent runs on, among one user's connections: a connection (null: his default), a model on it (null: the connection's own), how hard it reasons (absent: `inherit`), and how its tools are offered (absent: `auto`). */
 export interface AgentChoice {
   connectionId: string | null;
   model: string | null;
   effort?: ModelEffort;
+  toolsAs?: ToolsAs;
 }
 
 /**

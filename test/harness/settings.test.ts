@@ -203,6 +203,7 @@ const LANDED: Readonly<Record<string, string>> = {
   "calls.retryWait": "calls.retryWait ms",
   "calls.retries": "calls.retries",
   "calls.cacheRetention": "calls.cacheRetention",
+  "calls.toolRefusalMinutes": "calls.toolRefusalMinutes",
   "reply.form": "form",
   "reply.forms.<connection>": "forms.<connection>",
   "reply.streamAnyway": "streamAnyway",

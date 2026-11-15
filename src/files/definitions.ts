@@ -9,7 +9,7 @@
 // (R-134): the plan's own `given: [chat:history[scene], world:scene(full, map)]` holds two names,
 // where YAML alone refuses the first and cuts the second in two.
 
-import type { Effort, FileText } from "../contract/index";
+import type { Effort, FileText, ToolsAs } from "../contract/index";
 import type { AgentDefinition, DefinitionLimits, Problem, Replaced } from "./api";
 import { BODY_FIELDS, DEFINITION_FIELDS } from "./api";
 import type { At, Split } from "./header";
@@ -17,6 +17,7 @@ import { fieldLine, isMapping, nameList, problemAt, splitHeader, unknownFields }
 import { parseTemplate } from "./template";
 
 const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
+const TOOLS_AS: readonly ToolsAs[] = ["auto", "native", "text"];
 
 /** The limits a definition can set; `time` is in seconds there. */
 const LIMITS = ["calls", "tokensIn", "tokensOut", "time"] as const;
@@ -161,6 +162,12 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
     if (effort === undefined) problems.push(problemAt(at, line("effort"), `\`effort:\` is one of ${EFFORTS.join(", ")}; ${JSON.stringify(h.effort)} is not, so the model's own is used.`));
   }
 
+  let toolsAs: ToolsAs | undefined;
+  if (h.tools_as !== undefined && h.tools_as !== null) {
+    toolsAs = TOOLS_AS.find((t) => t === h.tools_as);
+    if (toolsAs === undefined) problems.push(problemAt(at, line("tools_as"), `\`tools_as:\` is one of ${TOOLS_AS.join(", ")}; ${JSON.stringify(h.tools_as)} is not, so its tools go natively until its model's connection refuses them.`));
+  }
+
   const list = (key: (typeof LISTS)[number], what: string): string[] => {
     const names = nameList(h[key]);
     if (names !== undefined) return names;
@@ -216,6 +223,7 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
       description,
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
+      ...(toolsAs !== undefined ? { toolsAs } : {}),
       tools,
       outOfReach,
       reads,

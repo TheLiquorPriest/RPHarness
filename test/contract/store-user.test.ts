@@ -11,6 +11,7 @@ import { createFolderHost, type FolderHost } from "../../src/hosts/folder";
 import { createHarness, type Harness } from "../../src/index";
 import { gate, scriptedModel } from "../../src/testing/rig";
 import { CHARACTER, CHAT, request, type Stage, stage, USER, WatchedTrace } from "../harness/support";
+import { jobOf } from "../jobs/support";
 
 const KEEPER = "---\nname: keeper\ndescription: Fixture keeper of the tower's records.\nmodel: default\ntools: [todo]\n---\nFixture keeper: you count what you are asked to count.\n";
 const BRIEF = "Count the bells in the tower.";
@@ -57,10 +58,10 @@ describe("the store by user", () => {
     const s = (open = await stage({ config: "jobs:\n  perDay: 1\n", files: { ".agents/keeper.md": KEEPER }, answers: [{ pieces: [{ text: "Counted seven." }], usage: { input: 100, output: 20 } }] }));
     const other = await secondUser(s, "Counted nine.", { input: 300, output: 40 });
 
-    const mine = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    const mine = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     await jobDone(s.trace, mine.id);
     // The setting allows one job a day: the second user's first is his own day's first.
-    const theirs = await other.harness.jobs!.start({ user: OTHER, chat: OTHER_CHAT, session: "s1" }, { agent: "keeper", brief: BRIEF });
+    const theirs = jobOf(await other.harness.jobs!.start({ user: OTHER, chat: OTHER_CHAT, session: "s1" }, { agent: "keeper", brief: BRIEF }));
     await jobDone(other.trace, theirs.id);
 
     // Each harness counts its own ids, so the two jobs are kept under the same key.
@@ -69,7 +70,7 @@ describe("the store by user", () => {
     expect((await other.harness.jobs!.list({ user: OTHER })).jobs.map((job: JobView) => [job.scope.user, job.report])).toEqual([[OTHER, "Counted nine."]]);
     expect(await s.harness.jobs!.get(USER, mine.id)).toMatchObject({ scope: { user: USER, chat: CHAT }, report: "Counted seven." });
     expect(await other.harness.jobs!.get(OTHER, theirs.id)).toMatchObject({ scope: { user: OTHER, chat: OTHER_CHAT }, report: "Counted nine." });
-    await expect(s.harness.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).rejects.toThrow("No job was started: 1 jobs were started today, and the setting allows 1.");
+    expect(await s.harness.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).toEqual({ refused: "day-count", max: 1, value: 1 });
     // A harness's close waits for its day's totals to be kept; read after it, each user's day is his own.
     await s.harness.close();
     await other.harness.close();
@@ -99,7 +100,7 @@ describe("the store by user", () => {
     const harness = createHarness({ ...s.env, store: both }, { models: { agentModel: async () => model.agentModel() }, ids: () => "job-of-the-first" });
     closing.push(() => harness.close());
 
-    const job = await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    const job = jobOf(await harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     await s.trace.seen((record) => record.event.kind === "job" && record.event.job.state === "running");
 
     expect(await harness.jobs!.get(OTHER, job.id)).toBeUndefined();

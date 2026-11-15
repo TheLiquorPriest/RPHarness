@@ -60,7 +60,7 @@ export interface JobAsk {
   over?: Budget;
   /** What all of the user's jobs have spent in the user's day, which this one's calls count into as they are made. */
   spent: Usage;
-  /** Limits of its own, from the user's start: each held where it is tighter than the settings'. */
+  /** Limits of its own from the start. The owner's own start (none names an agent) gives his word for this job: each stands in place of the settings', looser or tighter. An agent's start only makes each tighter than the settings', never looser. */
   limits?: JobLimits;
 }
 
@@ -102,7 +102,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);
   const texts = runnerTexts(words, template(goOn), template(closing)?.render().text.trimEnd(), settings.schemaShown);
-  const trace = new RunTrace(core.hub.tee(env.trace, scope, () => settings.liveBacklog), scope, ask.id, env.clock);
+  const trace = new RunTrace(core.hub.tee(env.trace, scope, () => settings.liveBacklog), scope, ask.id, env.clock, core.hub.hold(ask.id));
   const todos = new TodoLists();
   const rules = await guidance.ruleRun({
     facts: createFacts(env.facts, (_scope, agent) => {
@@ -112,13 +112,14 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     window: settings.ruleWindow,
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
-  // The settings' limits on a job's run, each made tighter where the start gave a tighter one of its own; never looser.
+  // The settings' limits on a job's run, each given by the start standing in place of the setting where the owner started the job (his word for it, looser or tighter, §12), and made tighter, never looser, where an agent did. The day's limits hold either way.
   const given = ask.limits ?? {};
-  const tighter = (setting: number | undefined, asked: number | undefined): number | undefined => (asked === undefined ? setting : setting === undefined ? asked : Math.min(setting, asked));
-  const time = tighter(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
-  const calls = tighter(settings.jobs.run.calls, given.calls);
-  const tokensIn = tighter(settings.jobs.run.tokensIn, given.tokensIn);
-  const tokensOut = tighter(settings.jobs.run.tokensOut, given.tokensOut);
+  const owner = ask.by === undefined;
+  const limit = (setting: number | undefined, asked: number | undefined): number | undefined => (asked === undefined ? setting : owner || setting === undefined ? asked : Math.min(setting, asked));
+  const time = limit(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
+  const calls = limit(settings.jobs.run.calls, given.calls);
+  const tokensIn = limit(settings.jobs.run.tokensIn, given.tokensIn);
+  const tokensOut = limit(settings.jobs.run.tokensOut, given.tokensOut);
   // A job started by another job's agent spends from that job's run, which spends from the day; any other, from the day.
   const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, { used: ask.spent, cachedWeight: settings.jobs.cachedWeight });
   // Its own `tokens` count a cached re-read at the weight the day's job tokens do, so the two limits on a job's tokens mean the same; tokens in and out count in full, as the run limits they tighten.
@@ -280,14 +281,39 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         if (record.agent.id === ref.id && event.text.trim() !== "") hearing.text(event.text);
       });
       trace.event(ref, ask.parent, { kind: "run_started", run: "job", lead: ref.definition });
-      let limit: LimitHit | undefined;
-      const timer =
-        time === undefined
-          ? undefined
-          : env.clock.setTimeout(() => {
-              limit = { limit: "time", per: "job", max: time, value: env.clock.now() - startedAt };
-              for (const entry of working) entry.runner.limit(limit);
-            }, time);
+      let hit: LimitHit | undefined;
+      // The run's time is the time it runs: while the owner holds it (his pause, all jobs held, or the point it asks him at) the clock waits.
+      let left = time;
+      let armedAt = startedAt;
+      let heldAt: number | undefined;
+      let heldFor = 0;
+      let timer: unknown;
+      const arm = (): void => {
+        if (left === undefined || time === undefined) return;
+        armedAt = env.clock.now();
+        timer = env.clock.setTimeout(() => {
+          timer = undefined;
+          hit = { limit: "time", per: "job", max: time, value: env.clock.now() - startedAt - heldFor };
+          for (const entry of working) entry.runner.limit(hit);
+        }, Math.max(0, left));
+      };
+      const held = (isHeld: boolean): void => {
+        const now = env.clock.now();
+        if (isHeld) {
+          heldAt = now;
+          if (timer === undefined || left === undefined) return;
+          env.clock.clearTimeout(timer);
+          timer = undefined;
+          left -= now - armedAt;
+        } else {
+          if (heldAt !== undefined) heldFor += now - heldAt;
+          heldAt = undefined;
+          if (timer === undefined) arm();
+        }
+      };
+      const unwatch = core.hub.holds.watch(ask.id, held);
+      if (core.hub.holds.held(ask.id)) held(true);
+      else arm();
       const stop = (): void => {
         for (const entry of working) entry.work.stop();
       };
@@ -305,12 +331,13 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       } finally {
         working.delete(entry);
         signal.removeEventListener("abort", stop);
+        unwatch();
         if (timer !== undefined) env.clock.clearTimeout(timer);
         core.usage.end(ask.id);
         core.hub.ended(ask.id);
       }
-      const hit = outcome.limit ?? limit;
-      return { outcome, usage: { ...budget.used }, ...(hit !== undefined ? { limit: hit } : {}) };
+      const reached = outcome.limit ?? hit;
+      return { outcome, usage: { ...budget.used }, ...(reached !== undefined ? { limit: reached } : {}) };
     },
   };
 }

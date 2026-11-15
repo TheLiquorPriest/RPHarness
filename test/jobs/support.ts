@@ -2,7 +2,7 @@
 // folder host, its trace and what its host is told, with models scripted for one user that keep
 // every choice they were asked for, so a test fails where a choice names another user. Everything
 // here is invented.
-import type { Environment, Harness, TurnOutcome, TurnRequest } from "../../src/contract";
+import type { Environment, Harness, JobRefusal, JobView, TurnOutcome, TurnRequest } from "../../src/contract";
 import { createHarness } from "../../src/index";
 import { type ScriptedModel, type ScriptedSource, scriptedSource } from "../../src/testing/rig";
 import { type Stage, USER, WatchedSink } from "../harness/support";
@@ -21,4 +21,10 @@ export async function turnOn(s: Stage, harness: Harness, req: TurnRequest, signa
   const sink = new WatchedSink(s.clock);
   const outcome = await harness.answer(req, sink, signal);
   return { outcome, sink };
+}
+
+/** The job a start made: a test whose start was refused fails here, with the refusal as it was given. */
+export function jobOf(answer: JobView | JobRefusal): JobView {
+  if ("refused" in answer) throw new Error(`The start was refused: ${JSON.stringify(answer)}`);
+  return answer;
 }

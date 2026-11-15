@@ -3,8 +3,9 @@
 // to answer a connection's test or list its models, how long a sign-in stays open; a test call's
 // room, how much of a server's list of models is read, how much of a media address a refusal quotes,
 // how long a failed sign-in's words are kept and how long any failure's words may be; the wait before
-// a failed call is made again, and how many times where its connection says nothing; and how long a
-// provider is asked to keep a prompt in its cache. Times are in seconds, the list in megabytes.
+// a failed call is made again, and how many times where its connection says nothing; how long a
+// provider is asked to keep a prompt in its cache; and how long a connection's model that refused
+// native tools is offered them as text. Times are in seconds, that last in minutes, the list in megabytes.
 //
 // What these govern often has no chat in view (a connection's test, a sign-in, a request passed
 // through), so each is read at the levels every chat shares, shipped and global; the silent wait is
@@ -36,6 +37,8 @@ export const MODELS = worded(
     retryWait: { key: "calls.retryWait", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, levels: SHARED, at: "calls.retryWait", ms: true },
     retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "calls.retries" },
     cacheRetention: { key: "calls.cacheRetention", takes: { type: "oneOf", values: ["none", "short", "long"] }, default: "short", perConnection: false, levels: SHARED, at: "calls.cacheRetention" },
+    // §13.2 "moved as it is": Build 1's 60 minutes, then native tools are tried again.
+    toolRefusalMinutes: { key: "calls.toolRefusalMinutes", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "calls.toolRefusalMinutes" },
   },
   MODELS_WORDS,
 );

@@ -59,7 +59,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult, UserScope } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 
 // ---------------------------------------------------------------- where things come from
@@ -115,7 +115,7 @@ export interface Template {
 // ---------------------------------------------------------------- agent definitions
 
 /** The header fields of an agent definition. Anything else in its header is reported. Frozen: a host reads a definition by this same list (`rp-harness/helpers`). */
-export const DEFINITION_FIELDS = Object.freeze(["name", "description", "model", "effort", "tools", "out_of_reach", "reads", "given", "limits", "writer"] as const);
+export const DEFINITION_FIELDS = Object.freeze(["name", "description", "model", "effort", "tools_as", "tools", "out_of_reach", "reads", "given", "limits", "writer"] as const);
 
 /** The fields a definition's body may name, each a field of the contract's `BodyFields`. Anything else it names is reported. */
 export const BODY_FIELDS = ["agent", "definition", "plays"] as const satisfies readonly (keyof BodyFields)[];
@@ -137,6 +137,8 @@ export interface AgentDefinition {
   /** The connection profile it runs on, as the header names it (`default`). */
   model?: string;
   effort?: Effort;
+  /** How its tools are offered to its model (`tools_as:`); absent: auto. */
+  toolsAs?: ToolsAs;
   /** The tools it holds, by name, as written. */
   tools: string[];
   /** Families of tools it does not reach by searching (`out_of_reach:`, §6.8); a tool of one that `tools` names it still holds. */

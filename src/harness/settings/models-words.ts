@@ -10,4 +10,5 @@ export const MODELS_WORDS = {
   "calls.retryWait": { name: "Wait before a retry", about: "Seconds before a failed call is made again the first time; each wait after is twice the one before." },
   "calls.retries": { name: "Retries of a failed call", about: "Times a call that failed before any answer came is made again, where its connection sets no number of its own." },
   "calls.cacheRetention": { name: "Prompt cache retention", about: "How long a provider is asked to keep a prompt in its cache: none, short or long." },
+  "calls.toolRefusalMinutes": { name: "Native tools tried again after", about: "Minutes a connection's model that refused native tools is offered them as text; then native tools are tried again." },
 };

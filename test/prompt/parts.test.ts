@@ -148,6 +148,15 @@ test("a call a spent limit kept from starting says it did not run, apart from on
   for (const name of ["not_started", "rule_unasked", "not_kept"]) expect({ name, asks: /\b(must|should|please|make sure|remember to)\b/i.test(part.line(name, { tool: "lookup" }) ?? ""), unfilled: (part.line(name, { tool: "lookup" }) ?? "").includes("{{") }).toEqual({ name, asks: false, unfilled: false });
 });
 
+test("a call past an answer's count and a message past a sub-agent's count each say the count, that the call or the agent was not run, and ask for nothing", async () => {
+  const part = await lines();
+  const call = part.line("past_answer_count", { tool: "file_write", max: 3 }) ?? "";
+  expect(call).toBe("file_write was not run: the count of tool calls in one answer is 3, and this call is past it.");
+  const message = part.line("past_message_count", { agent: "mapper", max: 1 }) ?? "";
+  expect(message).toBe("mapper was not run: the count of messages it is sent after its first answer is 1, and this one is past it.");
+  for (const text of [call, message]) expect({ unfilled: text.includes("{{"), asks: /\b(must|should|please|make sure|remember to)\b/i.test(text) }).toEqual({ unfilled: false, asks: false });
+});
+
 test("a search that stopped says how it stopped, with its numbers, and how that kind of search is narrowed", async () => {
   const part = await lines();
   const by = { list: { list: true }, glob: { glob: true }, grep: { grep: true } };

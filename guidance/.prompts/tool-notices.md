@@ -1,5 +1,5 @@
 ---
-description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it did not run, never began or its tool failed, the notes given beside a tool's own answer about a rule on it or about keeping its whole, what a tool's answer that holds no words says, a search that stopped before it looked everywhere, and what the player said to an agent at work. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer; delete the line of a note beside a tool's own answer and the answer goes with no note. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)". Delete said and the player's words go to the agent bare, with nothing to say they are his.
+description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it did not run, never began, came past the count of calls in an answer or its tool failed, what a message to a sub-agent is answered with when it came past that agent's count of messages, the notes given beside a tool's own answer about a rule on it or about keeping its whole, what a tool's answer that holds no words says, a search that stopped before it looked everywhere, and what the player said to an agent at work. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer; delete the line of a note beside a tool's own answer and the answer goes with no note. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)". Delete said and the player's words go to the agent bare, with nothing to say they are his.
 format: lines
 ---
 failed: {{tool}} failed.
@@ -7,6 +7,8 @@ unfinished: {{tool}} was stopped before it finished. It may have done its work, 
 not_started: {{tool}} did not run: a limit was already spent when it was called, so it never started.
 rule_unasked: A rule on what {{tool}} answered could not be asked. The answer stands as it is.
 not_kept: The whole of {{tool}}'s answer could not be kept, so no file holds what was left out.
+past_answer_count: {{tool}} was not run: the count of tool calls in one answer is {{max}}, and this call is past it.
+past_message_count: {{agent}} was not run: the count of messages it is sent after its first answer is {{max}}, and this one is past it.
 said: The player said to you while you were at work: {{words}}
 not_held: You hold no tool named {{tool}}.
 invalid: {{tool}} was not run: the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}

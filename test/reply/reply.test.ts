@@ -117,4 +117,27 @@ describe("the reply in the tag form", () => {
     expect(channel.answers()).toEqual(["Fixture: the reply is not yours to give."]);
     expect(desk.form).toBe("narrator-live");
   });
+
+  test("a reply tag opened and then claimed by another form: no writing line", () => {
+    const desk = new ReplyDesk();
+    const sent: string[] = [];
+    const writing: string[] = [];
+    const channel = new TagReply({ tags, sink: { content: (text) => sent.push(text) }, heldSentences: 0, tailSentences: 2, claim: () => desk.claim("tags"), onBegin: () => writing.push(sent.join("")) });
+    channel.begin();
+    stream(channel, ["<reply>"]);
+    // The tag is open and nothing of it has shown; another way takes the reply.
+    expect(desk.claim("file")).toBe(true);
+    stream(channel, ["Mine, all mine.</reply>"]);
+    channel.end(anyMessage);
+    expect(sent).toEqual([]);
+    expect(writing).toEqual([]);
+    // The line comes as the first text of a reply this form holds is about to show, and not before.
+    const own = new TagReply({ tags, sink: { content: (text) => sent.push(text) }, heldSentences: 0, tailSentences: 2, onBegin: () => writing.push(sent.join("")) });
+    own.begin();
+    stream(own, ["<reply>"]);
+    expect(writing).toEqual([]);
+    stream(own, ["The lamp holds.</reply>"]);
+    expect(writing).toEqual([""]);
+    expect(sent).toEqual(["The lamp holds."]);
+  });
 });

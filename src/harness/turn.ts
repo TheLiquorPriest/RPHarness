@@ -25,6 +25,7 @@ import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, 
 import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
+import { SILENCE_MOST_MS } from "../reply/progress";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
@@ -120,12 +121,12 @@ function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefine
   return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
 }
 
-/** What the sink is told when the run ends without a reply released. */
-function replyError(outcome: RunOutcome): ReplyError {
+/** What the sink is told when the run ends without a reply released; with no reply, the lead's last plain text, where it wrote any. */
+function replyError(outcome: RunOutcome, lastText: string | undefined): ReplyError {
   if (outcome.status === "limit") return { code: "limit", ...(outcome.limit !== undefined ? { limit: outcome.limit } : {}) };
   if (outcome.status === "stopped") return { code: "stopped" };
   if (outcome.status === "failed") return outcome.error ?? { code: "failed" };
-  return { code: "no-reply" };
+  return { code: "no-reply", ...(lastText !== undefined ? { text: lastText } : {}) };
 }
 
 export class Turn {
@@ -169,15 +170,13 @@ export class Turn {
   #holding: Promise<HeldFile> | undefined;
   /** The session's turns on this turn's path, this one with them: the fact `session.turns`. */
   #sessionTurns = 0;
-  /** The definition `write_reply` hands the prose to, as its file names it. */
-  #writer: string | undefined;
   #draft: { text: string; by: AgentRef } | undefined;
-  #released: { text: string; form: ReleaseForm; by: string } | undefined;
-  /** Whether a question about the released reply has been put: it is asked once, by the agent that released it. */
-  #replyJudged = false;
+  #released: { text: string; form: ReleaseForm } | undefined;
   /** The judging model of the `question:` rules, once the turn's rules are loaded. */
   #judges: Judges | undefined;
   #intentWritten = false;
+  /** The text of the lead's last message that ended whole with any: what a run with no reply hands the host. */
+  #lastText: string | undefined;
   #notices = 0;
   #stopped = false;
   #timer: unknown;
@@ -218,7 +217,7 @@ export class Turn {
       if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     }
     this.#keep?.stop();
-    if (!this.#desk.released) this.#sink.error(replyError(outcome));
+    if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
     await this.#tell(env.events.ended(this.scope, outcome));
@@ -272,10 +271,22 @@ export class Turn {
     this.#progress = lines(progress);
     const answers = lines(toolNotices);
     this.#words = (name, fields) => answers?.line(name, fields);
-    this.#keep = new KeepAlive({ sink: this.#sink, clock: env.clock, silenceMs: settings.silenceMs, still: (fields) => this.#progress?.line("still", fields) });
+    const { time: setTime, ...counted } = settings.turn;
+    // With no line to keep a silent turn alive, the chat application would end it after ten minutes of
+    // silence: the turn's own time is held at the most the silence may be, and he is told by the trace
+    // when the turn goes quiet (§10.7, READINGS R-124). Nothing is put in the file's place.
+    const quiet = (this.#progress?.line("still", { elapsed: "0:00" }) ?? "").trim() === "";
+    const kept = quiet ? Math.min(setTime ?? SILENCE_MOST_MS, SILENCE_MOST_MS) : undefined;
+    const time = kept ?? setTime;
+    this.#keep = new KeepAlive({
+      sink: this.#sink,
+      clock: env.clock,
+      silenceMs: settings.silenceMs,
+      still: (fields) => this.#progress?.line("still", fields),
+      ...(kept !== undefined ? { missing: () => this.#trace.event(this.#lead, undefined, { kind: "progress_missing", time: kept }) } : {}),
+    });
     this.#keep.start();
     this.#say("started");
-    const { time, ...counted } = settings.turn;
     this.#budget = new Budget("turn", counted);
     if (time !== undefined) this.#timer = env.clock.setTimeout(() => this.#outOfTime(time), time);
     if (definition === undefined) return this.#outcome({ status: "failed", error: { code: "failed", detail: `No agent definition named "${req.lead}" is in force for this chat.` } });
@@ -294,9 +305,6 @@ export class Turn {
       const text = toolTextOf(part);
       if (text !== undefined) ownTexts.set(name, text);
     }
-    const writerPart = template(ownParts.find(([name]) => name === "write_reply")?.[1]);
-    const writer = writerPart?.header["writer"];
-    this.#writer = typeof writer === "string" ? writer : undefined;
     // A `prompt:` name, given by `delegate` or a definition's `given:`, the lead's or a sub-agent's, read as the prompt tool reads it.
     const slice = promptSlice(async () => this.#prompt, guidance);
     const team = new Team({
@@ -344,11 +352,6 @@ export class Turn {
         if (agent.id === this.#lead.id) return connection;
         const own = await guidance.definition(agent.definition);
         return own === undefined ? connection : this.#connection(own);
-      },
-      reply: (agent) => {
-        if (this.#released === undefined || this.#released.by !== agent.id || this.#replyJudged) return undefined;
-        this.#replyJudged = true;
-        return this.#released.text;
       },
       track: (entry) => {
         this.#working.add(entry);
@@ -599,17 +602,23 @@ export class Turn {
     return true;
   }
 
-  /** One summary call (§11): the compaction part's instructions, and one piece of what is summarized. Its summary, or undefined when the turn stopped or the call gave none, which the log is told. */
+  /**
+   * One summary call (§11): the compaction part's instructions, and one piece of what is summarized,
+   * in a session of its own for the call, let go when it ends, so it never takes the lead's cached
+   * front or thread (§10.2). Its summary, or undefined when the turn stopped or the call gave none,
+   * which the log is told.
+   */
   async #summarize(c: Compacting, instructions: string, material: string): Promise<string | undefined> {
     if (this.#ended()) return undefined;
     const { model } = c;
+    const session = this.#c.ids();
     const summarizer = new AgentRunner({
       agent: { id: this.#c.ids(), definition: this.#req.lead },
       trace: this.#trace,
       model: model.model,
       streamFn: model.streamFn,
       connection: c.connection.label,
-      session: this.scope.session,
+      session,
       thinkingLevel: model.thinkingLevel,
       instructions,
       texts: this.#texts,
@@ -618,8 +627,13 @@ export class Turn {
     const work = summarizer.start({ messages: [userMessage(material, c.at)] });
     const entry = { runner: summarizer, work };
     this.#working.add(entry);
-    const outcome = await work.done;
-    this.#working.delete(entry);
+    let outcome: AgentOutcome;
+    try {
+      outcome = await work.done;
+    } finally {
+      this.#working.delete(entry);
+      this.#c.models.ended?.(session);
+    }
     if (this.#ended()) return undefined;
     const summary = outcome.status === "done" ? outcome.text.trim() : "";
     if (summary !== "") return summary;
@@ -902,17 +916,42 @@ export class Turn {
     this.#tell(this.#c.env.events.intent(this.scope, read.text));
   }
 
-  /** The reply went out: the sink is finished, the host and the trace are told at once, and the reply is kept in the turn's folder. */
+  /**
+   * The reply went out: the sink is finished, the host and the trace are told at once, the reply is
+   * kept in the turn's folder, and each question rule on the reply is put now, in every form (§5.4).
+   */
   #release(text: string, form: ReleaseForm, by: AgentRef, path?: string): void {
     const { env } = this.#c;
     this.#desk.out();
-    this.#released = { text, form, by: by.id };
+    this.#released = { text, form };
     this.#keep?.sink.finish({ ...this.#budget.used });
     const release: Release = { by, form, ...(path !== undefined ? { path } : {}), length: text.length };
     this.#trace.event(by, this.#parents.get(by.id), { kind: "released", release });
     this.#tell(env.events.released(this.scope, release));
     const turn = this.#places?.turn;
     if (turn !== undefined) this.#tell(env.files.write(this.scope, `${turn}${RELEASED_FILE}`, { op: "write", text }, "harness"));
+    for (const answer of this.#judges?.released(by, text) ?? []) {
+      void answer.then(
+        (judged) => {
+          if (judged !== undefined) this.#replyJudged(by, judged);
+        },
+        // A judgment that failed fires nothing; the judge's run says why.
+        () => undefined,
+      );
+    }
+  }
+
+  /**
+   * A question about the reply fired: its text was held for the next briefing, the reply being
+   * shown already. It is traced now; what its agent did next is told when it next acts, or at once
+   * when its work has ended.
+   */
+  #replyJudged(agent: AgentRef, judged: Judged): void {
+    if (![...this.#working].some(({ runner }) => runner.agent.id === agent.id)) {
+      this.#late(agent, judged);
+      return;
+    }
+    this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_fired", firing: { ...judged.fired.firing, agent, action: "briefing" } });
   }
 
   /** `write_reply`: the writer's one call (§10.6), on the prompt exactly as it was sent, with the preset's sampling and prefill, and the brief. */
@@ -921,11 +960,18 @@ export class Turn {
     const req = this.#req;
     const words = this.#words;
     if (this.#desk.taken) return answer(words("second_reply"), true);
-    const writer = this.#writer;
     const guidance = this.#guidance;
+    // Who writes is in the definitions (§10.6): the writer the caller's own definition names; code names none of its own.
+    const writer = guidance === undefined ? undefined : (await guidance.definition(ctx.agent.definition))?.writer;
     const definition = writer === undefined || guidance === undefined ? undefined : await guidance.definition(writer);
-    if (writer === undefined || guidance === undefined || definition === undefined) return answer(words("no_writer", { writer: writer ?? "" }), true);
+    if (writer === undefined || guidance === undefined || definition === undefined) {
+      // Why there is none, for the file's line to say: none is named, or the one named is missing, switched off or broken.
+      const left = writer === undefined || guidance === undefined ? undefined : (await guidance.stack(writer)).entries.find((entry) => entry.kind === "definition")?.left;
+      return answer(words("no_writer", { ...(writer !== undefined ? { writer } : {}), ...(left !== undefined ? { [left]: true } : {}) }), true);
+    }
     const ref: AgentRef = { id: this.#c.ids(), definition: writer, parent: ctx.agent.id };
+    // The writer's session is its own, as a sub-agent's is: never the lead's cached front or thread (§10.2, §11). It is let go each time its run ends.
+    const session = this.#c.ids();
     const stack = await guidance.stack(writer);
     const held = this.#registry?.hold(definition.tools) ?? { tools: [], missing: [] };
     const instructions = joined([...stack.entries.flatMap((entry) => (entry.where !== "opening" || entry.left !== undefined || entry.text === undefined ? [] : [entry.kind === "definition" ? this.#instructions(definition, fieldsOf(ref)) : entry.text])), await skillsIndex(guidance, held.tools)]);
@@ -973,7 +1019,7 @@ export class Turn {
       model: model.model,
       streamFn: model.streamFn,
       connection: connection.label,
-      session: this.scope.session,
+      session,
       thinkingLevel: model.thinkingLevel,
       tools: held.tools,
       texts: this.#texts,
@@ -988,9 +1034,14 @@ export class Turn {
       ...this.#keeper(ref),
     });
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: writer, tools: runner.leftOut });
+    // Each later stretch of the writer's work, which a message sets going, ends its run as well: its draft is kept, and its session let go.
+    const stretchEnded = (ended: AgentOutcome): void => {
+      if (!live) this.#drafted(ref, ended);
+      this.#c.models.ended?.(session);
+    };
     // The writer stands in the team as a sub-agent does: the user's limits hold for it and for what it
     // starts, and its question comes back as this call's answer, for the agent that called to answer.
-    const refused = await this.#team?.enlist(ref, runner, parent, ctx, live ? undefined : (ended) => this.#drafted(ref, ended));
+    const refused = await this.#team?.enlist(ref, runner, parent, ctx, stretchEnded);
     if (refused !== undefined) return refused;
     // A stop that came while the writer was being made fired before any listener was on it: from here
     // on nothing is awaited until the writer's work is tracked and listening, so this is the last look.
@@ -1006,6 +1057,7 @@ export class Turn {
     } finally {
       this.#working.delete(entry);
       ctx.signal.removeEventListener("abort", stop);
+      this.#c.models.ended?.(session);
     }
     if (outcome.status === "asked" && this.#team !== undefined) return this.#team.asked(ref, outcome);
     // Why there is no reply is the file's to say, by how the writer's work ended; the error's own words are the model layer's or the provider's, for whoever runs the host.
@@ -1078,6 +1130,7 @@ export class Turn {
         return;
       case "call_ended": {
         if (event.stop === "cut") return;
+        if (agent === this.#lead.id && event.error === undefined && event.text.trim() !== "") this.#lastText = event.text;
         const then: RuleThen | undefined = event.toolCalls.length > 0 ? { did: "called", tools: event.toolCalls.map((call) => call.name) } : event.text !== "" ? { did: "wrote" } : undefined;
         if (then !== undefined) this.#then(agent, (firing) => event.call > firing.call, then);
         return;

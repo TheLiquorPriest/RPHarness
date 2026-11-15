@@ -111,6 +111,12 @@ export type TraceEvent =
   | { kind: "limit"; hit: LimitHit }
   /** The reply was released (§10.7). */
   | { kind: "released"; release: Release }
+  /**
+   * The turn went quiet and the chat's progress file has no line to send (§10.7, READINGS R-124):
+   * nothing keeps it alive, so its limit on wall time was held at `time` milliseconds, under the ten
+   * minutes after which the chat application ends a generation that shows nothing. Once in a turn.
+   */
+  | { kind: "progress_missing"; time: number }
   /** A session was compacted (§11): its tokens before and after, and how many of its newest turns were kept as they were. */
   | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number }
   /** A session opened, closed, forked from another, or opened again because the turn that closed it left the path (§11). */

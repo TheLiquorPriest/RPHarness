@@ -7,10 +7,10 @@
 // stream anyway): the text goes out as it is written, held back by sentences while a rule that
 // interrupts covers it, as the tag form does, and the message's end releases it.
 //
-// Once the reply went out, this way or another, every message's text is working text: shown to
-// nobody, and nothing is said of it. Plain text carries no mark of a reply the way a tag does, so
-// none of it is a second reply: a message of text alone after the reply simply ends the run, as any
-// message without calls does.
+// Once the reply went out, this way or another, a message's text is never shown. A message that
+// would have been the reply (its text, with no work left after it) is an attempt at a second reply:
+// the agent is told so after the message, in a file's words, once in the generation, as in the tag
+// form, so a second reply never buys it call after call. Any other message's text is working text.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { JsonValue, ReplySink } from "../contract";
 import type { TextChannel } from "../loop/channel";
@@ -29,10 +29,13 @@ export interface MessageReplyOptions {
   tailSentences: number;
   /**
    * Asked just before the reply's first text is shown, never sooner (a reply cut before anything of
-   * it showed takes nothing): false when the reply is another form's, or went out already; this
-   * message's text is then working text, not shown and not answered. Absent: always this form's.
+   * it showed takes nothing): false when the reply is another form's, or went out already; none of
+   * this message is then shown, and if it would have been the reply, the agent is told so.
+   * Absent: always this form's.
    */
   claim?(): boolean;
+  /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
+  second?: string;
   /** The reply begins to show: its first text is about to go out. */
   onBegin?(): void;
   /** The reply is complete and was sent on: once. */
@@ -47,6 +50,8 @@ export class MessageReply implements TextChannel {
   #message = "";
   /** This message's text is not the reply's to show: the reply went out another way, or another way has it. */
   #unshown = false;
+  /** A reply was attempted that could not be shown: the agent is told after the message, once in the generation. */
+  #second: "unsaid" | "due" | "said" = "unsaid";
 
   constructor(options: MessageReplyOptions) {
     this.#o = options;
@@ -96,15 +101,33 @@ export class MessageReply implements TextChannel {
   }
 
   end(message: AssistantMessage): void {
-    if (this.#o.stream) {
-      if (this.#state === "open" && this.#flush(true)) this.#finish();
+    // The message's text with no work left after it: the reply, or an attempt at a second one.
+    const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall" || isClosing(part.arguments as JsonValue));
+    if (this.#state === "released" || this.#unshown) {
+      if (replies) this.#notShown();
       return;
     }
-    if (this.#state === "released") return;
-    const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall" || isClosing(part.arguments as JsonValue));
+    if (this.#o.stream) {
+      if (this.#state !== "open") return;
+      if (this.#flush(true)) this.#finish();
+      else if (replies) this.#notShown();
+      return;
+    }
     if (!replies) return;
     this.#release.hold(this.#message);
     if (this.#flush(true)) this.#finish();
+    else this.#notShown();
+  }
+
+  answers(): string[] {
+    if (this.#second !== "due") return [];
+    this.#second = "said";
+    return this.#o.second !== undefined ? [this.#o.second] : [];
+  }
+
+  /** A reply this form does not show: the agent is told after the message, once in the generation. */
+  #notShown(): void {
+    if (this.#second === "unsaid") this.#second = "due";
   }
 
   /** Sends on what may be shown. False when the reply was not this form's as its first text was to go out: none of this message is shown. */

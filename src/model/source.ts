@@ -42,4 +42,6 @@ export interface AgentModel {
 export interface ModelSource {
   /** The model an agent runs on, from the connections of the user the choice names; rejects, in words that say what to do, when there is none to run on. */
   agentModel(choice: UserChoice): Promise<AgentModel>;
+  /** An agent session ended: what is kept for its prompt cache is let go (the model layer's `ended`). Absent: nothing is kept. */
+  ended?(sessionId: string): void;
 }

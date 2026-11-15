@@ -139,6 +139,8 @@ export interface StageOptions {
   filesPort?: (inner: FilesPort) => FilesPort;
   /** Each time an agent's model is asked for, by its count from 1: a test can hold the answer back. */
   modelAsked?: (count: number) => void | Promise<void>;
+  /** Each agent session the harness lets go (the model layer's `ended`), as it does. */
+  ended?: (session: string) => void;
   /** The chat's active path, oldest first; none when absent. */
   chat?: ChatFixture[];
   /** The host's other stores; it has none when absent. */
@@ -285,6 +287,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
       await options.modelAsked?.(asked);
       return model.agentModel(choice.effort === undefined || choice.effort === "auto" || choice.effort === "inherit" ? "off" : choice.effort);
     },
+    ended: (session: string) => options.ended?.(session),
   };
   const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: scripted }), ids: () => `id-${(next += 1)}` });
 

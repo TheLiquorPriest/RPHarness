@@ -4,7 +4,9 @@
 // limit left unfinished is answered in a file's words when the sub-agent goes on; and a stop ends
 // every agent of the turn.
 import { afterEach, expect, test } from "bun:test";
+import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
+import { SHIPPED_GUIDANCE } from "../../src/index";
 import { gate, request, said, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;
@@ -135,7 +137,7 @@ test("a sub-agent stopped at its time limit while a tool ran: when the lead's me
   expect(unfinished === undefined ? "" : textOf(unfinished)).not.toContain("too late");
 });
 
-const SCRIBE = "---\nname: scribe\ndescription: Fixture lead that hands the reply to a writer.\nmodel: default\ntools: [write_reply, reply_release, agent_message]\ngiven: [prompt:*]\n---\nFixture scribe: you run the turn.\n";
+const SCRIBE = "---\nname: scribe\ndescription: Fixture lead that hands the reply to a writer.\nmodel: default\ntools: [write_reply, reply_release, agent_message]\ngiven: [prompt:*]\nwriter: narrator\n---\nFixture scribe: you run the turn.\n";
 const NARRATOR = "---\nname: narrator\ndescription: Fixture writer.\nmodel: default\ntools: [delegate, ask_author]\n---\nFixture narrator: tell what you are briefed to tell.\n";
 
 test("the writer stands in the team as a sub-agent does: what it starts is held to the depth the player allows, and its question comes back to the agent that called write_reply, which answers it", async () => {
@@ -175,6 +177,54 @@ function answerTo(s: Stage, callId: string): string {
   }
   return "";
 }
+
+/** A writer of the fixture's own: it tells what it is briefed to tell. */
+const BARD = "---\nname: bard\ndescription: Fixture writer.\nmodel: default\ntools: []\n---\nFixture bard: tell what you are briefed to tell.\n";
+/** `write_reply` described with a `writer:` header of its own, which decides nothing. */
+const WRITE_REPLY_NAMING = "---\ndescription: Fixture write_reply, whose header names a writer.\nwriter: narrator\narguments:\n  brief: What the writer is to tell.\n  live: True to send the reply as it is written.\n---\nFixture: hands the telling of the reply to a writer.\n";
+
+test("the caller's definition's writer: key decides who writes; a writer: header on .tools/write_reply.md decides nothing", async () => {
+  const herald = "---\nname: herald\ndescription: Fixture lead whose definition names no writer.\nmodel: default\ntools: [write_reply]\ngiven: [prompt:*]\n---\nFixture herald: you run the turn.\n";
+  const s = (open = await stage({
+    files: { ".agents/scribe.md": SCRIBE.replace("writer: narrator", "writer: bard"), ".agents/herald.md": herald, ".agents/narrator.md": NARRATOR, ".agents/bard.md": BARD, ".tools/write_reply.md": WRITE_REPLY_NAMING },
+    answers: [
+      { pieces: [{ call: "write_reply", args: { brief: "Tell the leap.", live: true, closing: true }, id: "w-1" }] },
+      { pieces: [{ text: "She clears the gap by a hand." }] },
+      { pieces: [{ call: "write_reply", args: { brief: "Tell the leap." }, id: "w-2" }] },
+      { pieces: [{ text: "<reply>She waits for the tide.</reply>" }] },
+    ],
+  }));
+
+  const first = await s.turn(request("t1", { lead: "scribe" }));
+  expect(first.outcome).toMatchObject({ status: "released", form: "narrator-live", reply: "She clears the gap by a hand." });
+  // The writer the scribe's definition names wrote, not the one the tool's file names.
+  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "bard"]);
+
+  const second = await s.turn(request("t2", { lead: "herald" }));
+  expect(second.outcome).toMatchObject({ status: "released", form: "tags", reply: "She waits for the tide." });
+  // A caller whose definition names no writer has none, whatever the tool's file says.
+  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "bard", "herald"]);
+  expect(s.trace.of("tool_ended").find((record) => record.event.callId === "w-2")?.event.result.error).toBe(true);
+});
+
+test("a writer: naming a definition switched off: write_reply answers with the no_writer line, true for that case; nothing fails", async () => {
+  const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "tool-notices.md")).text();
+  if (!/^no_writer: /m.test(shipped)) throw new Error("RPH's own tool notices have no no_writer line.");
+  // The line worded true for each case, as the file's own words will be.
+  const notices = shipped.replace(/^no_writer: .*$/m, "no_writer: {{#off}}{{writer}}, the writer your definition names, is switched off; it cannot write the reply.{{/off}}{{^off}}There is no agent definition named {{writer}} to write the reply.{{/off}}");
+  const s = (open = await stage({
+    config: "off: [agents/bard]\n",
+    files: { ".agents/scribe.md": SCRIBE.replace("writer: narrator", "writer: bard"), ".agents/bard.md": BARD, ".prompts/tool-notices.md": notices },
+    answers: [{ pieces: [{ call: "write_reply", args: { brief: "Tell the leap." }, id: "w-1" }] }, { pieces: [{ text: "<reply>She waits for the tide.</reply>" }] }],
+  }));
+
+  const { outcome } = await s.turn(request("t1", { lead: "scribe" }));
+
+  expect(outcome).toMatchObject({ status: "released", form: "tags", reply: "She waits for the tide." });
+  expect(answerTo(s, "w-1")).toBe("bard, the writer your definition names, is switched off; it cannot write the reply.");
+  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe"]);
+  expect(s.logged.filter((line) => line.level === "error")).toEqual([]);
+});
 
 const KEEPER = "---\nname: keeper\ndescription: Fixture keeper of records.\nmodel: default\ntools: [file_write]\n---\nFixture keeper: keep the lighthouse log.\n";
 const WARDEN = "---\nname: warden\ndescription: Fixture lead that can drop what its sub-agents wrote.\nmodel: default\ntools: [delegate, agent_drop]\ngiven: [prompt:*]\n---\nFixture warden: you run the turn.\n";

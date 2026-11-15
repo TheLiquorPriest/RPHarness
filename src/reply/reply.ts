@@ -32,7 +32,7 @@ export interface TagReplyOptions {
   claim?(): boolean;
   /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
   second?: string;
-  /** The reply begins: its first tag opened. */
+  /** The reply begins to show: its first text is about to go out, never sooner (a tag opened for a reply another form holds says nothing). */
   onBegin?(): void;
   /** An intent record, whole, each time one ends: for the live view and the turn's record, never for the chat. */
   onIntent?(text: string): void;
@@ -64,7 +64,7 @@ export class TagReply implements TextChannel {
   constructor(options: TagReplyOptions) {
     this.#o = options;
     this.#parser = new TagParser(options.tags);
-    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => options.claim?.() !== false);
+    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => this.#claim());
   }
 
   /** Whether the reply was released. */
@@ -137,7 +137,6 @@ export class TagReply implements TextChannel {
         this.#notShown();
         return;
       }
-      if (this.#state === "none") this.#o.onBegin?.();
       this.#state = "open";
       return;
     }
@@ -171,6 +170,13 @@ export class TagReply implements TextChannel {
   /** A reply this form does not show: the agent is told after the message, once in the generation. */
   #notShown(): void {
     if (this.#second === "unsaid") this.#second = "due";
+  }
+
+  /** Just before the first text goes out: whether the reply is this form's; if it is, it begins to show. */
+  #claim(): boolean {
+    if (this.#o.claim?.() === false) return false;
+    this.#o.onBegin?.();
+    return true;
   }
 
   #endIntent(): void {

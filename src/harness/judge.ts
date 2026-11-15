@@ -1,10 +1,13 @@
 // The judging model of the `question:` rules (§5.4, Appendix D.1): after each message an agent
-// finishes, each question rule due on it is put to a model in one call under the run's budget,
-// written from `.prompts/judge.md`, whose `yes:` names the answer that fires the rule. The model is
-// reached through the connection the rule's own `judge:` names, else the `rules.judge` setting's,
-// else the asking agent's own. What fires goes in front of the agent as every rule's text does
-// (the runner's work); the rules keep to their `repeat:`. The run waits for judgments still running
-// before it keeps what the rules remembered.
+// finishes, each question rule due on its text or its thinking is put to a model in one call under
+// the run's budget, written from `.prompts/judge.md`, whose `yes:` names the answer that fires the
+// rule; a question about the reply is put the moment the reply is released, in whichever form, and
+// what it fires is held for the next briefing, the reply being shown already. The model is reached
+// through the connection the rule's own `judge:` names, else the `rules.judge` setting's, else the
+// asking agent's own. Each call is a session of its own, let go when the call ends: it never
+// carries the lead's session id (§11, §10.2). What fires goes in front of the agent as every rule's
+// text does (the runner's work); the rules keep to their `repeat:`. The run waits for judgments
+// still running before it keeps what the rules remembered.
 import { joined } from "../agents/attachments";
 import type { AgentRef, Environment, ModelsApi } from "../contract";
 import type { Guidance, Question, RuleRun, TemplatePart } from "../files/api";
@@ -31,8 +34,6 @@ export interface JudgeDeps {
   budget: Budget;
   /** The connection an agent's own model is reached through. */
   own(agent: AgentRef): Promise<Connection>;
-  /** The reply `agent` released and was not yet asked about, once: what a question about the reply is put about. */
-  reply?(agent: AgentRef): string | undefined;
   /** A judge's work began: the run stops it with the rest. Gives what forgets it once it ends. */
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A rule that fired once its agent's work had ended. */
@@ -58,15 +59,26 @@ export class Judges implements QuestionRules {
 
   ask(message: Finished): Judgment[] {
     const d = this.#d;
-    const reply = d.reply?.(message.agent);
-    const questions = d.rules.questions(message.agent, { text: message.text, ...(message.thinking !== "" ? { thinking: message.thinking } : {}), ...(reply !== undefined ? { reply } : {}) });
-    return questions.map((question) => {
-      const answer = this.#judge(question).then((yes) => d.rules.answered(question, yes));
-      const pending = answer.catch(() => undefined);
-      this.#pending.add(pending);
-      void pending.finally(() => this.#pending.delete(pending));
-      return { wait: question.interrupt, answer };
-    });
+    const questions = d.rules.questions(message.agent, { text: message.text, ...(message.thinking !== "" ? { thinking: message.thinking } : {}) });
+    return questions.map((question) => ({ wait: question.interrupt, answer: this.#put(question) }));
+  }
+
+  /**
+   * The reply `agent` wrote went out: each question rule due on the reply is put, once, now. Each
+   * answer settles with the rule it fired, held for the next briefing, or undefined.
+   */
+  released(agent: AgentRef, reply: string): Promise<Judged | undefined>[] {
+    return this.#d.rules.questions(agent, { text: "", reply }).map((question) => this.#put(question));
+  }
+
+  /** Puts one question; the run waits for it before it keeps what the rules remembered. */
+  #put(question: Question): Promise<Judged | undefined> {
+    const d = this.#d;
+    const answer = this.#judge(question).then((yes) => d.rules.answered(question, yes));
+    const pending = answer.catch(() => undefined);
+    this.#pending.add(pending);
+    void pending.finally(() => this.#pending.delete(pending));
+    return answer;
   }
 
   late(agent: AgentRef, judged: Judged): void {
@@ -97,20 +109,25 @@ export class Judges implements QuestionRules {
       d.env.log.warn("A rule's question has no model to be put to.", { rule: question.rule, connection: connection.label, error: error instanceof Error ? error.message : String(error) });
       return false;
     }
+    // A session of its own, for this one call, let go when it ends.
+    const session = d.ids();
     const runner = new AgentRunner({
       agent: { id: d.ids(), definition: question.agent.definition, parent: question.agent.id },
       trace: d.trace,
       model: model.model,
       streamFn: model.streamFn,
       connection: connection.label,
-      session: d.trace.scope.session,
+      session,
       thinkingLevel: model.thinkingLevel,
       texts: { continueAfterRule: () => "" },
       turn: d.budget,
     });
     const work = runner.start({ messages: [userMessage(text, d.env.clock.now())] });
     const untrack = d.track({ runner, work });
-    const outcome = await work.done.finally(untrack);
+    const outcome = await work.done.finally(() => {
+      untrack();
+      d.models.ended?.(session);
+    });
     return outcome.status === "done" && saysYes(outcome.text, yes);
   }
 }

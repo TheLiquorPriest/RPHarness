@@ -56,6 +56,91 @@ describe("the two-step form", () => {
     expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
     expect(s.told[0]!.payload).toBe(intent);
   });
+
+  test("reply.forms and reply.streamAnyway from the chat's config reach the turn: whole at the end by default, streamed when named", async () => {
+    // A lead on a connection of its own name; the chat's config names that connection.
+    const teller = "---\nname: teller\ndescription: Fixture lead on a connection that does not keep tags.\nmodel: slow-link\ntools: [todo]\ngiven: [prompt:*]\n---\nFixture teller: answer the player.\n";
+    const shown = async (config: string): Promise<{ atHold: string[]; pieces: string[]; form: string | undefined }> => {
+      const more = gate();
+      const s = await stage({
+        files: { ".agents/teller.md": teller, "chats/wren-hale/lighthouse/config.yml": config },
+        answers: [{ pieces: [{ text: "Wren shakes her head." }, { hold: more }, { text: " No boat, not in this sea." }] }],
+      });
+      try {
+        const sink = new WatchedSink(s.clock);
+        const turn = s.turn(request("t1", { lead: "teller" }), sink);
+        await s.trace.seen((record) => record.event.kind === "call_started");
+        if (config.includes("streamAnyway")) await sink.until(() => sink.text !== "");
+        await s.clock.idle();
+        const atHold = sink.pieces.map((piece) => piece.text);
+        more.open();
+        const { outcome } = await turn;
+        return { atHold, pieces: sink.pieces.map((piece) => piece.text), form: outcome.form };
+      } finally {
+        await s.close();
+      }
+    };
+
+    const whole = await shown("reply:\n  forms:\n    slow-link: two-step\n");
+    expect(whole).toEqual({ atHold: [], pieces: ["Wren shakes her head. No boat, not in this sea."], form: "message" });
+    const streamed = await shown("reply:\n  forms:\n    slow-link: two-step\n  streamAnyway: [slow-link]\n");
+    expect(streamed).toEqual({ atHold: ["Wren shakes her head."], pieces: ["Wren shakes her head.", " No boat, not in this sea."], form: "message" });
+  });
+});
+
+describe("no reply", () => {
+  test("a run that ends with no reply: the sink's error is no-reply and carries the last message's text", async () => {
+    const s = (open = await stage({
+      answers: [{ pieces: [{ text: "Weighing the tide tables." }, { call: "todo", args: { items: [{ text: "check the tide" }] } }] }, { pieces: [{ text: "Nothing to tell yet; the tide decides." }] }],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+    expect(outcome).toMatchObject({ status: "no-reply", released: false });
+    expect(sink.text).toBe("");
+    expect(sink.errors).toEqual([{ code: "no-reply", text: "Nothing to tell yet; the tide decides." }]);
+  });
+});
+
+describe("the thinking block", () => {
+  test("progress.show least: only the silence line reaches the thinking block", async () => {
+    const more = gate();
+    const s = (open = await stage({
+      config: "progress:\n  show: least\n",
+      answers: [{ pieces: [{ call: "todo", args: { items: [{ text: "check the lamp" }] } }] }, { pieces: [{ hold: more }, { text: "<reply>The lamp holds.</reply>" }] }],
+    }));
+    const sink = new WatchedSink(s.clock);
+
+    const turn = s.turn(request("t1", { lead: "lead" }), sink);
+    await s.trace.seen((record) => record.event.kind === "call_started" && record.event.call === 2);
+    s.clock.advance(60_000);
+    more.open();
+    const { outcome } = await turn;
+
+    expect(outcome).toMatchObject({ status: "released", reply: "The lamp holds." });
+    // Started, the tool and writing are kept back; the line that keeps a silent turn alive is not.
+    expect(sink.lines.map((line) => line.line)).toEqual(["Still working (1:00)."]);
+  });
+});
+
+describe("a finished file", () => {
+  test("reply_release of a file: the sink gets the whole text in one piece, Release.form file with its path", async () => {
+    const text = "The lamp turns. Wren sets down the cloth.\n\nNo boat tonight, she says. Not in this sea.\n";
+    const s = (open = await stage({
+      files: { "chats/wren-hale/lighthouse/persistent-workspace/reply.md": text },
+      answers: [{ pieces: [{ call: "reply_release", args: { path: "persistent-workspace/reply.md", closing: true } }] }],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+    expect(outcome).toMatchObject({ status: "released", form: "file", reply: text });
+    expect(sink.pieces.map((piece) => piece.text)).toEqual([text]);
+    expect(sink.finished).toHaveLength(1);
+    const release = { by: { definition: "lead" }, form: "file", path: "persistent-workspace/reply.md", length: text.length };
+    expect(s.told.find((told) => told.kind === "released")?.payload).toMatchObject(release);
+    expect(s.trace.of("released")).toHaveLength(1);
+    expect(s.trace.of("released")[0]!.event.release).toMatchObject(release);
+  });
 });
 
 describe("the narrator", () => {
@@ -203,6 +288,27 @@ describe("one reply per generation", () => {
 
     expect(outcome.status).toBe("released");
     expect(sink.text).toBe("No boat tonight.");
+    expect(s.model.requests).toHaveLength(3);
+    const told = s.model.requests[2]!.messages.at(-1)!;
+    expect(told.role).toBe("user");
+    expect(textOf(told)).toBe(SECOND);
+  });
+
+  test("two-step: a second reply in one generation gets the plain line", async () => {
+    const s = (open = await stage({
+      config: "reply:\n  form: two-step\n",
+      answers: [
+        // The reply, with a closing call that does not come back clean, so the lead gets another call.
+        { pieces: [{ text: "Wren shakes her head." }, { call: "file_read", args: { path: "persistent-workspace/absent.md", closing: true } }] },
+        { pieces: [{ text: "On second thought, a boat." }] },
+        { pieces: [{ text: "Understood." }] },
+      ],
+    }));
+
+    const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+    expect(outcome).toMatchObject({ status: "released", form: "message", reply: "Wren shakes her head." });
+    expect(sink.pieces.map((piece) => piece.text)).toEqual(["Wren shakes her head."]);
     expect(s.model.requests).toHaveLength(3);
     const told = s.model.requests[2]!.messages.at(-1)!;
     expect(told.role).toBe("user");

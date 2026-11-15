@@ -33,7 +33,7 @@ describe("a turn that would end with no reply", () => {
     expect(reminded.role).toBe("user");
     expect(textOf(reminded)).toBe(REMINDER);
     expect(sink.text).toBe("");
-    expect(sink.errors).toEqual([{ code: "no-reply" }]);
+    expect(sink.errors).toEqual([{ code: "no-reply", text: "Thinking it over." }]);
     expect(sink.finished).toEqual([]);
     expect(firings(s)).toMatchObject([{ rule: "reply-missing", moment: "run-end", action: "follow-up", then: { did: "wrote" } }]);
     expect(s.told.at(-1)).toMatchObject({ kind: "ended", payload: { status: "no-reply", released: false } });

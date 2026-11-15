@@ -135,6 +135,12 @@ export interface ReplyError {
   code: "no-reply" | "limit" | "provider" | "stopped" | "failed";
   limit?: LimitHit;
   detail?: string;
+  /**
+   * For `no-reply`: the lead's last plain text, as written, the text of the last of its messages in
+   * the run that ended whole with any; absent when none had any. A host's setting may send it in
+   * place of its own line (§10.7).
+   */
+  text?: string;
 }
 
 /**

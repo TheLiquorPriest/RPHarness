@@ -92,6 +92,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
     todo: { kind: "todo", items: [{ text: "Answer Tamsin.", done: false }] },
     limit: { kind: "limit", hit: { limit: "calls", per: "turn", max: 40, value: 40 } },
     released: { kind: "released", release: { by: agent, form: "tags", length: 10 } },
+    progress_missing: { kind: "progress_missing", time: 540_000 },
     compacted: { kind: "compacted", session: "kit-session", before: 90_000, after: 12_000, keptTurns: 3 },
     session: { kind: "session", session: "kit-session", change: "opened" },
     job: { kind: "job", job: { id: "kit-job-1", agent: "indexer", brief: "Index the lore.", state: "running", scope: { user: "kit-user", chat: "kit-chat", session: "kit-job-session", turn: "kit-turn-1" }, startedBy: agent, started: 0, usage: NO_USAGE } },

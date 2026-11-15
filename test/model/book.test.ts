@@ -1,15 +1,17 @@
 // The connections as the Connections page keeps them, through the host's two documents: a key and its
 // headers' values kept with the secrets, apart from the connection, and never shown, only whether
-// each is set (and a key's last four characters); what can't be saved said in words; what was stored
-// for one server never going to another, whether a save or a hand edit moved its connection; a
-// sign-in's token only to its provider's own address; a hand edit made while the layer runs used from
-// the next turn and kept by the next save; and a document a hand edit broke said in words and never
-// written over.
+// each is set and whether it waits; what can't be saved said in words; a key and its headers' values
+// going only to the place they were given for, and waiting for the host's switches wherever a save or
+// a hand edit moved their connection or no place was kept for them; a connection made under a given
+// id; a secrets document a host marks as not to be written; a sign-in's token only to its provider's
+// own address; a hand edit made while the layer runs used from the next turn and kept by the next
+// save; and a document a hand edit broke said in words and never written over.
 
 import { afterEach, describe, expect, test } from "bun:test";
-import type { ConnectionInput, UserScope } from "../../src/contract";
+import { placeOf } from "rp-harness/helpers";
+import type { ConnectionInput, SecretsDoc, UserScope } from "../../src/contract";
 import type { Rig } from "./support";
-import { MemoryStore, anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, json, rig, USER } from "./support";
+import { MemoryStore, Switches, anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, json, rig, USER } from "./support";
 
 const KEY = "sk-ant-api03-Ilse0123456789abcdefWXYZ";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -17,6 +19,11 @@ const OPENAI_KEY = "sk-proj-0123456789abcdefghijklmnop";
 const ROUTER_KEY = "sk-or-v1-0123456789abcdefghijklmn";
 const GATEWAY = "gw-token-Okoro0123456789abcdef";
 const ASK = [{ role: "user" as const, content: "Where is Ilse?", timestamp: 1 }];
+
+/** What the log and a turn's start say of the connection "Proxy", moved to another address than its key and headers' values were given for. */
+const MOVED_NOTE = `the key and headers' values of the saved connection "Proxy" were given for another provider or address than it now goes to: kept, and sent nowhere until the connection is switched on there from the server's command line`;
+/** What a call on it ends in. */
+const MOVED_WAITS = `The connection "Proxy" now goes to another provider or address than its key and headers' values were given for, so the call wasn't made: nothing of them is sent until the connection is switched on there from the server's command line.`;
 
 let r: Rig | undefined;
 afterEach(async () => {
@@ -33,15 +40,28 @@ async function wordsOf(work: Promise<unknown>): Promise<string> {
 }
 
 describe("the connections", () => {
-  test("keep a key apart from its connection, and show only that it is set and its last four characters", async () => {
+  test("keep a key apart from its connection, and show only that it is set and whether it waits", async () => {
     r = rig();
     const view = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-    expect(view).toMatchObject({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", default: true, key: { set: true, last4: "WXYZ" } });
+    expect(view).toMatchObject({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", default: true, key: { set: true, waiting: false } });
     const list = await r.layer.api.list(USER);
     expect(JSON.stringify(list)).not.toContain(KEY);
     expect(list.providers.map((p) => p.id)).toEqual(["anthropic", "openai", "google", "openrouter", "deepseek", "xai", "groq", "mistral", "openai-compatible", "anthropic-compatible"]);
     expect(JSON.stringify(r.store.connectionsDoc)).not.toContain(KEY);
     expect(r.store.secretsDoc).toEqual({ v: 1, keys: { id1: KEY }, signins: {}, places: { id1: '["anthropic",null]' } });
+  });
+
+  test("a connection's view holds no character of its key", async () => {
+    r = rig();
+    const view = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const list = await r.layer.api.list(USER);
+    expect([view.key, list.connections[0]?.key]).toEqual([
+      { set: true, waiting: false },
+      { set: true, waiting: false },
+    ]);
+    // Not its last four characters, nor any four of them in a row.
+    const shown = JSON.stringify([view, list.connections]);
+    for (let at = 0; at + 4 <= KEY.length; at += 1) expect(shown).not.toContain(KEY.slice(at, at + 4));
   });
 
   test("are read back by a layer made again over the same documents", async () => {
@@ -51,7 +71,7 @@ describe("the connections", () => {
     await r.done();
     r = rig({ store });
     expect((await r.layer.api.list(USER)).connections).toEqual([
-      { id: "id1", name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", serialTools: true, messageThreads: true, retries: 4, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } }, headers: [{ name: "x-team", set: true }], default: true, key: { set: true, last4: "WXYZ" } },
+      { id: "id1", name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", effort: "low", serialTools: true, messageThreads: true, retries: 4, limits: { "claude-sonnet-4-5": { contextWindow: 100_000 } }, headers: [{ name: "x-team", set: true }], default: true, key: { set: true, waiting: false } },
     ]);
   });
 
@@ -73,8 +93,8 @@ describe("the connections", () => {
     r = rig();
     const fields: ConnectionInput = { name: "Claude", provider: "anthropic", auth: "key" };
     const saved = await r.layer.api.save(USER, fields, KEY);
-    expect((await r.layer.api.save(USER, { ...fields, id: saved.id })).key).toEqual({ set: true, last4: "WXYZ" });
-    expect((await r.layer.api.save(USER, { ...fields, id: saved.id }, null)).key).toEqual({ set: false, last4: null });
+    expect((await r.layer.api.save(USER, { ...fields, id: saved.id })).key).toEqual({ set: true, waiting: false });
+    expect((await r.layer.api.save(USER, { ...fields, id: saved.id }, null)).key).toEqual({ set: false, waiting: false });
     await r.layer.api.save(USER, { ...fields, id: saved.id }, KEY);
     expect((await r.layer.api.save(USER, { ...fields, id: saved.id, auth: "signin" })).key).toBeNull();
     expect(JSON.stringify(r.store.secretsDoc)).not.toContain(KEY);
@@ -107,13 +127,14 @@ describe("the connections", () => {
     expect(r.store.writes).toEqual([]);
   });
 
-  test("a key of 8 characters or more, and a header's value of any length, are taken out of what a server says back", async () => {
+  test("a key, and a header's value of any length, are taken out of what a server says back", async () => {
     // A server that refuses every call and says back the key and the headers it was sent, as some do.
     r = rig({ script: (sent) => failed(401, { error: { message: `Unknown key ${sent.headers.authorization ?? ""} with token ${sent.headers["x-gateway-token"] ?? ""} for ${sent.headers["x-portkey-provider"] ?? ""}.`, type: "invalid_request_error" } }) });
     const saved = await r.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", headers: { "x-portkey-provider": "openai", "x-gateway-token": "gw-01234" } }, "sk-01234");
     const tested = await r.layer.api.test(USER, saved.id);
     expect(r.sent.map((s) => [s.headers.authorization, s.headers["x-gateway-token"], s.headers["x-portkey-provider"]])).toEqual([["Bearer sk-01234", "gw-01234", "openai"]]);
-    expect(tested).toMatchObject({ ok: false, error: "401: Unknown key Bearer [secret] with token [secret] for openai. (invalid_request_error)" });
+    // A header's value is the connection's secret whatever it says: "openai", shorter than calls.secretFloor, is taken out where it stands as a word of its own.
+    expect(tested).toMatchObject({ ok: false, error: "401: Unknown key Bearer [secret] with token [secret] for [secret]. (invalid_request_error)" });
   });
 
   test("documents a layer can't read stop it in words, and are never written over", async () => {
@@ -137,30 +158,93 @@ describe("the connections", () => {
 });
 
 describe("what was stored for one server goes to no other", () => {
-  test("a new origin for a connection's address takes its key and its headers' values away; another path at the same origin keeps them", async () => {
-    r = rig({ script: () => json({ data: [{ id: "served-model" }] }) });
+  test("a key whose connection moved, and a key with no recorded place, are sent nowhere until the switch for the connection's place is on; then they go and the place is recorded", async () => {
+    const switches = new Switches();
+    const answered = (): Response => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")]));
+    r = rig({ switches, script: answered });
     const fields = { name: "Proxy", provider: "openai-compatible", auth: "key", model: "served-model" } as const;
     const saved = await r.layer.api.save(USER, { ...fields, baseUrl: "https://proxy.example.com/v1", headers: { "x-gateway-token": GATEWAY } }, SERVER_KEY);
-    expect(await r.layer.api.save(USER, { ...fields, id: saved.id, baseUrl: "https://proxy.example.com/v2" })).toMatchObject({ key: { set: true, last4: "mnop" }, headers: [{ name: "x-gateway-token", set: true }] });
-    expect(await r.layer.api.save(USER, { ...fields, id: saved.id, baseUrl: "https://elsewhere.example/v1" })).toMatchObject({ key: { set: false, last4: null }, headers: [{ name: "x-gateway-token", set: false }] });
-    expect(await r.layer.api.models(USER, saved.id)).toEqual([{ id: "served-model", name: "served-model" }]);
-    expect((await call(await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null }), ASK)).errorMessage).toBe('The connection "Proxy" has no key: add one on the Connections page.');
-    expect(r.sent.map((s) => s.url)).toEqual(["https://elsewhere.example/v1/models"]);
-    expect(JSON.stringify(r.sent)).not.toContain(SERVER_KEY);
-    expect(JSON.stringify(r.sent)).not.toContain(GATEWAY);
-    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(SERVER_KEY);
-    expect(JSON.stringify(r.store.connectionsDoc)).not.toContain(GATEWAY);
+    // Another path at the same origin is another place: a save that gives none of them again keeps them there, waiting.
+    expect(await r.layer.api.save(USER, { ...fields, id: saved.id, baseUrl: "https://proxy.example.com/v2" })).toMatchObject({ key: { set: true, waiting: true }, headers: [{ name: "x-gateway-token", set: true }] });
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+    expect((await call(agent, ASK)).errorMessage).toBe(MOVED_WAITS);
+    await expect(r.layer.api.models(USER, saved.id)).rejects.toThrow(MOVED_WAITS);
+    expect(r.sent).toEqual([]);
+    expect(r.store.secretsDoc).toMatchObject({ keys: { [saved.id]: SERVER_KEY }, headers: { [saved.id]: { "x-gateway-token": GATEWAY } }, places: { [saved.id]: placeOf("openai-compatible", "https://proxy.example.com/v1") } });
+    // The host's switches were asked for the connection at its new place, which the server switches on.
+    const there = { kind: "connection" as const, name: "Proxy", target: placeOf("openai-compatible", "https://proxy.example.com/v2") };
+    expect(switches.asked).toContainEqual(there);
+    switches.switchOn(USER, there);
+    expect((await call(agent, ASK)).errorMessage).toBeUndefined();
+    expect([r.sent[0]?.url, r.sent[0]?.headers.authorization, r.sent[0]?.headers["x-gateway-token"]]).toEqual(["https://proxy.example.com/v2/chat/completions", `Bearer ${SERVER_KEY}`, GATEWAY]);
+    expect((r.store.secretsDoc as SecretsDoc).places).toEqual({ [saved.id]: there.target });
+    expect((await r.layer.api.list(USER)).connections[0]?.key).toEqual({ set: true, waiting: false });
+    await r.done();
+
+    // A key kept before places were waits too, until the switch for its connection's place is on.
+    const store = new MemoryStore();
+    store.connectionsDoc = { v: 1, default: "c1", connections: [{ id: "c1", ...fields, baseUrl: "https://proxy.example.com/v1" }] };
+    store.secretsDoc = { v: 1, keys: { c1: SERVER_KEY }, signins: {} };
+    const later = new Switches();
+    r = rig({ store, switches: later, script: answered });
+    const unplaced = await r.layer.agentModel({ user: USER, connectionId: "c1", model: null, effort: "off" });
+    expect((await call(unplaced, ASK)).errorMessage).toBe(`The key of the connection "Proxy" was kept before the place it was given for was recorded, so the call wasn't made: nothing of it is sent until the connection is switched on at its place from the server's command line.`);
+    expect(r.logs).toEqual([`the key of the saved connection "Proxy" was kept before the place it was given for was recorded: nothing of it is sent until the connection is switched on at its place from the server's command line`]);
+    expect([r.sent, store.writes]).toEqual([[], []]);
+    later.switchOn(USER, { kind: "connection", name: "Proxy", target: placeOf("openai-compatible", "https://proxy.example.com/v1") });
+    expect((await call(unplaced, ASK)).errorMessage).toBeUndefined();
+    expect(r.sent[0]?.headers.authorization).toBe(`Bearer ${SERVER_KEY}`);
+    expect(store.secretsDoc).toEqual({ v: 1, keys: { c1: SERVER_KEY }, signins: {}, places: { c1: placeOf("openai-compatible", "https://proxy.example.com/v1") } });
   });
 
-  test("a connection whose provider changes keeps no key: an OpenAI key never goes to OpenRouter", async () => {
+  test("the exported placeOf gives the place the book records", async () => {
+    r = rig();
+    const saved = await r.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1/", model: "served-model" }, SERVER_KEY);
+    expect((r.store.secretsDoc as SecretsDoc).places).toEqual({ [saved.id]: placeOf("openai-compatible", "https://proxy.example.com/v1") });
+    expect([placeOf("openai-compatible", "https://proxy.example.com/v1/"), placeOf("anthropic", undefined)]).toEqual(['["openai-compatible","https://proxy.example.com/v1"]', '["anthropic",null]']);
+  });
+
+  test("a connection whose provider changes keeps its key waiting: an OpenAI key never goes to OpenRouter unswitched", async () => {
     r = rig();
     const saved = await r.layer.api.save(USER, { name: "Mine", provider: "openai", auth: "key", model: "gpt-5" }, OPENAI_KEY);
-    expect((await r.layer.api.save(USER, { id: saved.id, name: "Mine", provider: "openrouter", auth: "key", model: "openai/gpt-5" })).key).toEqual({ set: false, last4: null });
-    expect((await call(await r.layer.agentModel({ user: USER, connectionId: null, model: null }), ASK)).errorMessage).toBe('The connection "Mine" has no key: add one on the Connections page.');
+    expect((await r.layer.api.save(USER, { id: saved.id, name: "Mine", provider: "openrouter", auth: "key", model: "openai/gpt-5" })).key).toEqual({ set: true, waiting: true });
+    expect((await call(await r.layer.agentModel({ user: USER, connectionId: null, model: null }), ASK)).errorMessage).toBe(`The connection "Mine" now goes to another provider or address than its key was given for, so the call wasn't made: nothing of it is sent until the connection is switched on there from the server's command line.`);
     expect(r.sent).toEqual([]);
-    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(OPENAI_KEY);
-    // A key that comes with the change is the new provider's own.
-    expect((await r.layer.api.save(USER, { id: saved.id, name: "Mine", provider: "openrouter", auth: "key" }, ROUTER_KEY)).key).toEqual({ set: true, last4: "klmn" });
+    // A key that comes with the change is the new provider's own, given for its place.
+    expect((await r.layer.api.save(USER, { id: saved.id, name: "Mine", provider: "openrouter", auth: "key" }, ROUTER_KEY)).key).toEqual({ set: true, waiting: false });
+    expect(r.store.secretsDoc).toEqual({ v: 1, keys: { [saved.id]: ROUTER_KEY }, signins: {}, places: { [saved.id]: '["openrouter",null]' } });
+  });
+
+  test("a connection made under a given id from name, provider, address and model, with no key, is listed under that id with no key; a second save under the same id is refused by name", async () => {
+    r = rig();
+    const copied = { name: "Harbour copy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model" } as const;
+    expect(await r.layer.api.save(USER, copied, undefined, "lv-conn-7")).toMatchObject({ id: "lv-conn-7", key: { set: false, waiting: false } });
+    expect((await r.layer.api.list(USER)).connections.map((c) => [c.id, c.key])).toEqual([["lv-conn-7", { set: false, waiting: false }]]);
+    expect(await wordsOf(r.layer.api.save(USER, { ...copied, name: "Again" }, undefined, "lv-conn-7"))).toBe(`The id "lv-conn-7" is the saved connection "Harbour copy"'s already: a connection is made under an id no other has.`);
+    expect((await r.layer.api.list(USER)).connections.map((c) => c.name)).toEqual(["Harbour copy"]);
+    // A key added later is recorded with its place.
+    await r.layer.api.save(USER, { ...copied, id: "lv-conn-7" }, SERVER_KEY);
+    expect(r.store.secretsDoc).toEqual({ v: 1, keys: { "lv-conn-7": SERVER_KEY }, signins: {}, places: { "lv-conn-7": placeOf("openai-compatible", "https://proxy.example.com/v1") } });
+  });
+
+  test("over a secrets document marked not to be written, a call on a scripted server carries the key it was handed, and the port is never written", async () => {
+    /** A script's port: its secrets filled in memory from the environment, each key with its place. */
+    class FromEnvironment extends MemoryStore {
+      readonly secretsWritten = false as const;
+    }
+    const store = new FromEnvironment();
+    const fields = { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model" } as const;
+    store.connectionsDoc = { v: 1, default: "c1", connections: [{ id: "c1", ...fields }] };
+    const handed = { v: 1, keys: { c1: SERVER_KEY }, signins: {}, places: { c1: placeOf("openai-compatible", "https://proxy.example.com/v1") } };
+    store.secretsDoc = structuredClone(handed);
+    r = rig({ store, script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
+    const agent = await r.layer.agentModel({ user: USER, connectionId: "c1", model: null, effort: "off" });
+    expect((await call(agent, ASK)).errorMessage).toBeUndefined();
+    // A key given in a save is used from memory alone, its place too.
+    await r.layer.api.save(USER, { id: "c1", ...fields }, ROUTER_KEY);
+    await call(agent, ASK);
+    expect(r.sent.map((s) => s.headers.authorization)).toEqual([`Bearer ${SERVER_KEY}`, `Bearer ${ROUTER_KEY}`]);
+    expect([store.secretsDoc, store.writes]).toEqual([handed, ["connections"]]);
   });
 
   test("a connection that signs in goes to its provider's own address: one given another is refused when saved, and left out when read", async () => {
@@ -224,13 +308,12 @@ describe("headers' values are kept with the secrets", () => {
         { id: "c2", name: "Typo", provider: "openai-compatible", auth: "key", effort: "medium-high", headers: { "x-gateway-token": typo } },
       ],
     };
-    store.secretsDoc = { v: 1, keys: { c1: SERVER_KEY }, signins: {} };
+    store.secretsDoc = { v: 1, keys: { c1: SERVER_KEY }, signins: {}, places: { c1: placeOf("openai-compatible", "https://proxy.example.com/v1") } };
     r = rig({ store, script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
     const agent = await r.layer.agentModel({ user: USER, connectionId: "c1", model: null, effort: "off" });
     await call(agent, ASK);
-    // The document is read as it is; the key, kept before places were, is given the place the document names, at once.
-    expect(store.writes).toEqual(["secrets"]);
-    expect(store.secretsDoc).toEqual({ v: 1, keys: { c1: SERVER_KEY }, signins: {}, places: { c1: '["openai-compatible","https://proxy.example.com"]' } });
+    // The document is read as it is, and a read writes nothing.
+    expect(store.writes).toEqual([]);
     await r.layer.api.setDefault(USER, "c1");
     expect(store.connectionsDoc).toEqual({
       v: 1,
@@ -245,10 +328,10 @@ describe("headers' values are kept with the secrets", () => {
       keys: { c1: SERVER_KEY },
       signins: {},
       headers: { c1: { "x-gateway-token": GATEWAY }, c2: { "x-gateway-token": typo } },
-      places: { c1: '["openai-compatible","https://proxy.example.com"]', c2: '["openai-compatible",null]' },
+      places: { c1: placeOf("openai-compatible", "https://proxy.example.com/v1"), c2: '["openai-compatible",null]' },
     });
     // The values went to the secrets before they left the document.
-    expect(store.writes).toEqual(["secrets", "secrets", "connections"]);
+    expect(store.writes).toEqual(["secrets", "connections"]);
     await call(agent, ASK);
     expect(r.sent.map((s) => s.headers["x-gateway-token"])).toEqual([GATEWAY, GATEWAY]);
   });
@@ -320,9 +403,9 @@ describe("a hand edit of the connections, made while the layer runs", () => {
     await r.layer.api.setDefault(USER, "by-hand");
     expect(r.store.connectionsDoc).toMatchObject({ default: "by-hand", connections: [{ model: "claude-opus-4-7" }, { model: "other-model" }, byHand, typo] });
     expect((await r.layer.api.list(USER)).connections.map((c) => [c.id, c.key])).toEqual([
-      [claude.id, { set: true, last4: "WXYZ" }],
+      [claude.id, { set: true, waiting: false }],
       [local.id, null],
-      ["by-hand", { set: false, last4: null }],
+      ["by-hand", { set: false, waiting: false }],
     ]);
     expect(r.logs).toEqual(["left out a saved connection this build can't read"]);
   });
@@ -369,48 +452,48 @@ describe("a hand edit of the connections, made while the layer runs", () => {
     expect(JSON.stringify(r.logs)).not.toContain(GATEWAY);
   });
 
-  test("a connection moved by hand to another provider or address goes there without its key or its headers' values, which are taken out of what is kept", async () => {
-    r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
+  test("a connection moved by hand to another provider or address keeps its key and its headers' values, sent nowhere until it is switched on at its new place", async () => {
+    const switches = new Switches();
+    r = rig({ switches, script: () => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")])) });
     const fields = { name: "Proxy", provider: "openai-compatible", auth: "key", model: "served-model" } as const;
     const saved = await r.layer.api.save(USER, { ...fields, baseUrl: "https://proxy.example.com/v1", headers: { "x-gateway-token": GATEWAY } }, SERVER_KEY);
     handEdit(r.store, (doc) => {
       entryAt(doc, 0).baseUrl = "https://elsewhere.example/v1";
     });
-    expect(await r.layer.turnStarting(USER)).toEqual([`took away the key and headers' values of the saved connection "Proxy": it now goes to another provider or address than they were given for; give them again on the Connections page`]);
+    expect(await r.layer.turnStarting(USER)).toEqual([MOVED_NOTE]);
     const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
-    expect((await call(agent, ASK)).errorMessage).toBe('The connection "Proxy" has no key: add one on the Connections page.');
+    expect((await call(agent, ASK)).errorMessage).toBe(MOVED_WAITS);
     expect(r.sent).toEqual([]);
-    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(SERVER_KEY);
-    expect(JSON.stringify(r.store.secretsDoc)).not.toContain(GATEWAY);
-    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ baseUrl: "https://elsewhere.example/v1", headers: [{ name: "x-gateway-token", set: false }], key: { set: false, last4: null } });
-    // Given again for the new address, they go there.
-    await r.layer.api.save(USER, { ...fields, id: saved.id, baseUrl: "https://elsewhere.example/v1", headers: { "x-gateway-token": "gw-token-elsewhere-0123" } }, "sk-elsewhere-0123456789abcdef");
+    expect(r.store.secretsDoc).toMatchObject({ keys: { [saved.id]: SERVER_KEY }, headers: { [saved.id]: { "x-gateway-token": GATEWAY } } });
+    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ baseUrl: "https://elsewhere.example/v1", headers: [{ name: "x-gateway-token", set: true }], key: { set: true, waiting: true } });
+    // Switched on there from the server, they go there.
+    switches.switchOn(USER, { kind: "connection", name: "Proxy", target: placeOf("openai-compatible", "https://elsewhere.example/v1") });
     await call(agent, ASK);
-    expect([r.sent[0]?.url, r.sent[0]?.headers.authorization, r.sent[0]?.headers["x-gateway-token"]]).toEqual(["https://elsewhere.example/v1/chat/completions", "Bearer sk-elsewhere-0123456789abcdef", "gw-token-elsewhere-0123"]);
+    expect([r.sent[0]?.url, r.sent[0]?.headers.authorization, r.sent[0]?.headers["x-gateway-token"]]).toEqual(["https://elsewhere.example/v1/chat/completions", `Bearer ${SERVER_KEY}`, GATEWAY]);
   });
 
-  test("a connection that first appears by hand takes nothing kept under its id for another", async () => {
+  test("a connection that first appears by hand under an id whose secrets were given for another place sends none of them", async () => {
     const store = new MemoryStore();
     store.connectionsDoc = { v: 1, default: null, connections: [] };
-    store.secretsDoc = { v: 1, keys: { c9: SERVER_KEY }, signins: {}, headers: { c9: { "x-gateway-token": GATEWAY } } };
+    store.secretsDoc = { v: 1, keys: { c9: SERVER_KEY }, signins: {}, headers: { c9: { "x-gateway-token": GATEWAY } }, places: { c9: placeOf("openai-compatible", "https://proxy.example.com/v1") } };
     r = rig({ store });
     // The first read is done before the edit.
     await r.layer.api.list(USER);
     handEdit(store, (doc) => {
       doc.connections.push({ id: "c9", name: "Copied", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model", headers: ["x-gateway-token"] });
     });
-    expect(await r.layer.turnStarting(USER)).toEqual([`took away the key and headers' values kept under the id of the saved connection "Copied", which is new: they were given for another connection; give this one its own on the Connections page`]);
-    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ id: "c9", headers: [{ name: "x-gateway-token", set: false }], key: { set: false, last4: null } });
-    expect(store.secretsDoc).toEqual({ v: 1, keys: {}, signins: {} });
+    expect(await r.layer.turnStarting(USER)).toEqual([MOVED_NOTE.replace('"Proxy"', '"Copied"')]);
+    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ id: "c9", headers: [{ name: "x-gateway-token", set: true }], key: { set: true, waiting: true } });
+    expect(await r.layer.api.test(USER, "c9")).toMatchObject({ ok: false, error: MOVED_WAITS.replace('"Proxy"', '"Copied"') });
+    expect(r.sent).toEqual([]);
   });
 });
 
 describe("a hand edit of the connections, made while the layer was stopped", () => {
   const answered = (): Response => eventStream(chatStream([chunk({ role: "assistant", content: "Yes." }), chunk({}, "stop")]));
   const fields = { name: "Proxy", provider: "openai-compatible", auth: "key", model: "served-model" } as const;
-  const moved = `took away the key and headers' values of the saved connection "Proxy": it now goes to another provider or address than they were given for; give them again on the Connections page`;
 
-  test("a connection moved to another address while the layer was stopped goes there without its key or its headers' values, and one left where it was keeps them", async () => {
+  test("a connection moved to another address while the layer was stopped waits there with its key and its headers' values, and one left where it was sends them", async () => {
     const store = new MemoryStore();
     r = rig({ store, script: answered });
     const saved = await r.layer.api.save(USER, { ...fields, baseUrl: "https://proxy.example.com/v1", headers: { "x-gateway-token": GATEWAY } }, SERVER_KEY);
@@ -427,29 +510,11 @@ describe("a hand edit of the connections, made while the layer was stopped", () 
     });
     r = rig({ store, script: answered });
     const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
-    expect((await call(agent, ASK)).errorMessage).toBe('The connection "Proxy" has no key: add one on the Connections page.');
+    expect((await call(agent, ASK)).errorMessage).toBe(MOVED_WAITS);
     expect(r.sent).toEqual([]);
-    expect(r.logs).toEqual([moved]);
-    expect(JSON.stringify(store.secretsDoc)).not.toContain(SERVER_KEY);
-    expect(JSON.stringify(store.secretsDoc)).not.toContain(GATEWAY);
-    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ baseUrl: "https://elsewhere.example/v1", headers: [{ name: "x-gateway-token", set: false }], key: { set: false, last4: null } });
-  });
-
-  test("secrets kept before places were: the first read gives each key the place its connection names, so a move made while stopped after it is told", async () => {
-    const store = new MemoryStore();
-    store.connectionsDoc = { v: 1, default: "c1", connections: [{ id: "c1", ...fields, baseUrl: "https://proxy.example.com/v1", headers: ["x-gateway-token"] }] };
-    store.secretsDoc = { v: 1, keys: { c1: SERVER_KEY }, signins: {}, headers: { c1: { "x-gateway-token": GATEWAY } } };
-    r = rig({ store, script: answered });
-    await r.layer.api.list(USER);
-    await r.done();
-
-    handEdit(store, (doc) => {
-      entryAt(doc, 0).baseUrl = "https://elsewhere.example/v1";
-    });
-    r = rig({ store, script: answered });
-    expect((await call(await r.layer.agentModel({ user: USER, connectionId: "c1", model: null, effort: "off" }), ASK)).errorMessage).toBe('The connection "Proxy" has no key: add one on the Connections page.');
-    expect(r.sent).toEqual([]);
-    expect(r.logs).toEqual([moved]);
+    expect(r.logs).toEqual([MOVED_NOTE]);
+    expect(store.secretsDoc).toMatchObject({ keys: { [saved.id]: SERVER_KEY }, headers: { [saved.id]: { "x-gateway-token": GATEWAY } } });
+    expect((await r.layer.api.list(USER)).connections[0]).toMatchObject({ baseUrl: "https://elsewhere.example/v1", headers: [{ name: "x-gateway-token", set: true }], key: { set: true, waiting: true } });
   });
 });
 

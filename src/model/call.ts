@@ -19,8 +19,10 @@
 //
 // What leaves with a call goes only where its connection says: the call follows no redirect, since
 // its key and headers would go with it to an address nobody gave them for, and neither a key nor a
-// header the loop passes in its options is sent. Google's calls are the one kind that can't go out
-// through the layer's own fetch, so a Google connection takes no address but Google's own (book.ts).
+// header the loop passes in its options is sent. A key and headers' values given for another place
+// than the connection now goes to wait for the host's switches (book.ts), and the call isn't made
+// until then. Google's calls are the one kind that can't go out through the layer's own fetch, so a
+// Google connection takes no address but Google's own (book.ts).
 // A stream that goes silent once its answer has begun is ended after `calls.silentAfter`
 // (`silenceWatch`), in words that say so and name that setting. A call is made under its terms, read
 // as it is made at its agent's chat's levels, or, with no chat in view, at the levels every chat
@@ -54,7 +56,6 @@ import type { JsonObject, ModelLimits, Scope, ToolsAs, UserScope } from "../cont
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import type { Book, Connection } from "./book";
-import { sentHeaders } from "./book";
 import { isRecord, isTokenCount, own } from "./json";
 import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
@@ -140,8 +141,6 @@ export interface CallAsk {
   toolsAs?: ToolsAs;
   /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's own count, else `calls.retries`. */
   retries?: number;
-  /** Fields of a passed request sent as they came, where the call speaks the request's own API (OpenAI's chat completions). */
-  extras?: JsonObject;
   /** What the loop's options carry to pi-ai as they are. */
   carried: Pick<SimpleStreamOptions, "identity" | "transport" | "maxRetryDelayMs" | "timeoutMs" | "metadata" | "onResponse" | "onProviderStreamEvent" | "onPayload">;
   /** Where the agent's run is told of a wait for the connection's throttle, or of the limit it cannot be made within; absent: nobody is told. */
@@ -161,16 +160,19 @@ function throttleOf(settings: ModelSettings, connection: Connection): Throttle {
 /** What a keyless call carries as its key: pi-ai's OpenAI and Anthropic clients need one, and a server that asks for none ignores it. */
 const NO_KEY = "none";
 
-/** The way a call on a connection signs: its key, the sign-in (read by pi-ai), or the key-shaped nothing of a keyless server. */
-export async function keyOf(book: Book, connection: Connection, kind: ProviderKind): Promise<string | undefined> {
-  if (connection.auth === "none") return NO_KEY;
-  if (connection.auth === "signin") {
-    if ((await book.signin(kind.id)) === undefined) throw new Error(`There is no sign-in to ${kind.name}, which the connection "${connection.name}" uses: sign in on the Connections page.`);
-    return undefined;
-  }
-  const key = await book.key(connection.id);
-  if (key === undefined) throw new Error(`The connection "${connection.name}" has no key: add one on the Connections page.`);
-  return key;
+/**
+ * How a call on a connection signs, and the headers it sends: its key, the sign-in (read by pi-ai),
+ * or the key-shaped nothing of a keyless server; and its headers' values. What waits for the host's
+ * switches (book.ts) keeps the call from being made, in words that say so.
+ */
+export async function signingOf(book: Book, connection: Connection, kind: ProviderKind): Promise<{ apiKey: string | undefined; headers: Record<string, string> | undefined }> {
+  if (connection.auth === "signin" && (await book.signin(kind.id)) === undefined) throw new Error(`There is no sign-in to ${kind.name}, which the connection "${connection.name}" uses: sign in on the Connections page.`);
+  const signing = await book.signing(connection);
+  if ("waits" in signing) throw new Error(signing.waits);
+  if (connection.auth === "none") return { apiKey: NO_KEY, headers: signing.headers };
+  if (connection.auth === "signin") return { apiKey: undefined, headers: signing.headers };
+  if (signing.key === undefined) throw new Error(`The connection "${connection.name}" has no key: add one on the Connections page.`);
+  return { apiKey: signing.key, headers: signing.headers };
 }
 
 /**
@@ -262,7 +264,6 @@ interface PayloadChanges {
   /** The provider's own default effort: pi-ai's switch for Gemini's thinking is taken away, so Gemini decides. */
   providerDefault: boolean;
   thinking: boolean;
-  extras: JsonObject | undefined;
   /** Nobody knows how long a reply the model can write and the call asked for no room: the cap pi-ai fills in on its own (one token, for a model with no limit) is taken out, so the provider's own default stands. */
   uncapped: boolean;
   /** A call on an Anthropic sign-in: the line pi-ai puts first in the system prompt is this one, or none where it is undefined. */
@@ -273,7 +274,7 @@ interface PayloadChanges {
 
 function changePayload(api: string, payload: unknown, changes: PayloadChanges): unknown {
   if (!isRecord(payload)) return undefined;
-  const { sampling, serial, providerDefault, thinking, extras, uncapped, signin, prefix } = changes;
+  const { sampling, serial, providerDefault, thinking, uncapped, signin, prefix } = changes;
   const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
   switch (api) {
     case "anthropic-messages":
@@ -292,7 +293,6 @@ function changePayload(api: string, payload: unknown, changes: PayloadChanges): 
     case "openai-responses":
       if (uncapped) for (const cap of ["max_tokens", "max_completion_tokens", "max_output_tokens"]) delete payload[cap];
       if (serial && hasTools) payload.parallel_tool_calls = false;
-      if (api === "openai-completions" && extras !== undefined) for (const [k, v] of Object.entries(extras)) if (!(k in payload)) payload[k] = v;
       if (prefix && Array.isArray(payload.messages)) {
         const last: unknown = payload.messages.at(-1);
         if (isRecord(last) && last.role === "assistant") {
@@ -452,11 +452,11 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     if (signal?.aborted === true) return { ...message, content: [...message.content], stopReason: "aborted", errorMessage: message.errorMessage ?? stopWords(signal) };
     // The silence's own words, which hold no secret.
     if (quiet.signal.aborted) return { ...message, content: [...message.content], stopReason: "error", errorMessage: errorWords(quiet.signal.reason) };
-    return { ...message, content: [...message.content], stopReason: "error", errorMessage: redact(failedWith(message, kind), await secrets(), settings.wordsMost) };
+    return { ...message, content: [...message.content], stopReason: "error", errorMessage: redact(failedWith(message, kind), await secrets(), settings) };
   };
   try {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
-    const apiKey = await keyOf(deps.book, connection, kind);
+    const { apiKey, headers } = await signingOf(deps.book, connection, kind);
     // A call never asks more room than its model can write; with no room asked, the model's longest reply, where anybody knows it.
     const most = limits.maxTokens?.tokens;
     const room = ask.maxTokens !== undefined ? Math.min(ask.maxTokens, most ?? Number.POSITIVE_INFINITY) : most;
@@ -499,7 +499,6 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       serial: ask.serialTools,
       providerDefault: leftToProvider,
       thinking: reasoning !== undefined || leftToProvider,
-      extras: ask.extras,
       uncapped: room === undefined,
       ...(connection.auth === "signin" && model.api === "anthropic-messages" ? { signin: { line: texts.signinLine } } : {}),
       prefix,
@@ -507,7 +506,6 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
     watch = watching;
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
-    const headers = sentHeaders(connection);
     const theirs = ask.carried.onPayload;
     const wire: Wire = {};
     const options: SimpleStreamOptions = {
@@ -642,7 +640,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   } catch (error) {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
     // Whatever words leave here, no key, token or header's value the layer holds is in them.
-    endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets(), settings.wordsMost), deps.now()));
+    endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets(), settings), deps.now()));
   } finally {
     watch?.stop();
     hold?.settle(spent);

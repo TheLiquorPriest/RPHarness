@@ -15,26 +15,27 @@
 //   a hand edit made since holds from the turn's first call.
 //
 // What the layer is handed (`ModelLayerDeps`) is everything it reaches the world through: where the
-// host keeps each user's connections and their secrets, the clock, ids, timers, `fetch`, the log, the
-// environment it takes the SDKs' own settings out of, its settings (`calls.*`: its waits, its sizes,
-// its retries and the prompt cache's retention) and its texts (texts.ts: the sign-in line, the mark
-// of a system message sent in place, a connection's test, a tool answer with no text), each read as
-// it is used so a change holds from the next call. What has no chat in view (a connection's test,
-// its list of models, a sign-in, a request passed through) reads them at the levels every chat
-// shares; an agent's call reads them at its chat's levels. A desk is kept only for a user the host
-// answered for: one whose documents the host refused leaves none.
+// host keeps each user's connections and their secrets, the host's switches (a connection's key and
+// headers' values given for another place than it goes to wait on them, book.ts), the clock, ids,
+// timers, `fetch`, the log, the environment it takes the SDKs' own settings out of, its settings
+// (`calls.*`: its waits, its sizes, its retries and the prompt cache's retention) and its texts
+// (texts.ts: the sign-in line, the mark of a system message sent in place, a connection's test, a
+// tool answer with no text), each read as it is used so a change holds from the next call. What has
+// no chat in view (a connection's test, its list of models, a sign-in, a request passed through)
+// reads them at the levels every chat shares; an agent's call reads them at its chat's levels. A desk
+// is kept only for a user the host answered for: one whose documents the host refused leaves none.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { cleanupSessionResources, createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, UserScope } from "../contract";
+import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, Switchable, SwitchesPort, UserScope } from "../contract";
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import { promptMessages } from "../harness/prompt";
 import type { Connection } from "./book";
-import { Book, sentHeaders } from "./book";
+import { Book } from "./book";
 import type { CallDeps } from "./call";
 import { agentShapeOf, makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
 import { isRecord } from "./json";
@@ -84,6 +85,8 @@ export interface ModelLayerDeps {
   settings(scope: Scope | UserScope): Promise<ModelSettings>;
   /** The layer's texts at a scope's levels, read as each is used, at the same levels as its settings. A request passed through goes with no mark on a system message in its place. */
   texts(scope: Scope | UserScope): Promise<ModelTexts>;
+  /** The host's switches: without them, a key or a header's value that waits (book.ts) is sent nowhere. */
+  switches?: SwitchesPort;
 }
 
 export interface ModelLayer extends ModelSource {
@@ -95,8 +98,8 @@ export interface ModelLayer extends ModelSource {
    * A turn of `user`'s starts: his connections are read again through the host (book.ts), so that a
    * hand edit made since holds from this turn's first call. Resolves with what that read had to say,
    * in words, each also in the log once: a document that can't be read (the connections read before
-   * it stay in use), a saved connection left out, a key or headers' values taken from a connection
-   * that now goes elsewhere. Never rejects.
+   * it stay in use), a saved connection left out, a connection whose key or headers' values wait to
+   * be switched on at the place it now goes to. Never rejects.
    */
   turnStarting(user: string): Promise<readonly string[]>;
   /** Ends open sign-ins and waits for the documents to be written. */
@@ -105,8 +108,6 @@ export interface ModelLayer extends ModelSource {
 
 /** Megabytes, as `calls.listMost` counts them, in bytes. */
 const MEGABYTE = 1024 * 1024;
-/** A key's last four characters are shown for a key long enough that they don't give it away. */
-const SHOWN_FROM = 12;
 
 /** pi-ai reads credentials from nowhere but the book: no environment variable, no file of another program's, ever signs a call. */
 const NOWHERE = { env: async (): Promise<string | undefined> => undefined, fileExists: async (): Promise<boolean> => false };
@@ -200,7 +201,9 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   const deskOf = (user: string): Desk => {
     const known = desks.get(user);
     if (known !== undefined) return known;
-    const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
+    // A key given for another place than its connection goes to waits on the host's switches, asked for the connection at its place.
+    const switchedOn = async (thing: Switchable): Promise<boolean> => deps.switches !== undefined && (await deps.switches.state(user, thing)) === "on";
+    const book = new Book({ store: deps.store, scope: { user }, log: deps.log, switchedOn });
     const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
     for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
     const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, id: deps.id, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts, refusals: new Refusals(), throttles: new Throttles({ now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout }) };
@@ -229,13 +232,13 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   };
 
   const viewOf = async (book: Book, c: Connection, chosen: string | null): Promise<ConnectionView> => {
-    const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const { headers, ...shown } = c;
     return {
       ...shown,
       ...(headers !== undefined ? { headers: Object.entries(headers).map(([name, value]) => ({ name, set: value !== null })) } : {}),
       default: c.id === chosen,
-      key: c.auth === "key" ? { set: key !== undefined, last4: key !== undefined && key.length >= SHOWN_FROM ? key.slice(-4) : null } : null,
+      // Whether a key is set and whether it waits; never a character of it.
+      key: c.auth === "key" ? { set: (await book.key(c.id)) !== undefined, waiting: await book.waiting(c) } : null,
       ...(c.auth === "signin" ? { signedIn: (await book.signin(c.provider)) !== undefined } : {}),
     };
   };
@@ -249,12 +252,15 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   const serverModels = async (desk: Desk, c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
     const { book, calls } = desk;
     const settings = await calls.settings({ user: calls.user });
-    const key = c.auth === "key" ? await book.key(c.id) : undefined;
+    // Its key and headers' values go only where they were given for, or where the host's switches have the connection on.
+    const signing = await book.signing(c);
+    if ("waits" in signing) throw new Error(signing.waits);
+    const key = c.auth === "key" ? signing.key : undefined;
     const anthropic = api === "anthropic-messages";
     const signs: Record<string, string> = key === undefined ? {} : anthropic ? { "x-api-key": key } : { authorization: `Bearer ${key}` };
     const wait = deadline(settings, (ms) => `it didn't answer within ${ms}.`);
     try {
-      const response = await deps.fetch(`${c.baseUrl ?? ""}${anthropic ? "/v1/models" : "/models"}`, { headers: { accept: "application/json", ...(anthropic ? { "anthropic-version": "2023-06-01" } : {}), ...signs, ...sentHeaders(c) }, redirect: "error", signal: wait.signal });
+      const response = await deps.fetch(`${c.baseUrl ?? ""}${anthropic ? "/v1/models" : "/models"}`, { headers: { accept: "application/json", ...(anthropic ? { "anthropic-version": "2023-06-01" } : {}), ...signs, ...signing.headers }, redirect: "error", signal: wait.signal });
       const text = await cappedText(response, settings.listMost * MEGABYTE);
       if (text === null) throw new Error(`${response.ok ? "" : `${response.status}: `}its answer is larger than ${settings.listMost} MB, more than is read. ${settingWords(MODELS.listMost)} says how much of it is read.`);
       if (!response.ok) throw new Error(failureWords(`${response.status}: ${text}`));
@@ -273,7 +279,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       });
     } catch (error) {
       const words = errorWords(wait.signal.aborted ? wait.signal.reason : error);
-      throw new Error(redact(`The server didn't list its models: ${REDIRECT_REFUSED.test(words) ? REDIRECT_WORDS : words}`, await book.secretValues(), settings.wordsMost));
+      throw new Error(redact(`The server didn't list its models: ${REDIRECT_REFUSED.test(words) ? REDIRECT_WORDS : words}`, await book.secretValues(), settings));
     } finally {
       wait.clear();
     }
@@ -286,9 +292,11 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       const views = await Promise.all((await book.connections()).map((c) => viewOf(book, c, chosen)));
       return { connections: views, default: chosen, providers: KINDS.map((k) => ({ id: k.id, name: k.name, auth: [...k.auth], apis: [...k.apis], needsBaseUrl: k.needsBaseUrl })) };
     },
-    async save(user, input, key) {
+    async save(user, input, key, id) {
       const { book } = deskOf(user);
-      const saved = await book.save(input, key, deps.id);
+      // A save has no chat in view: the floor a key is held to is the levels every chat shares'.
+      const { secretFloor } = await deps.settings({ user });
+      const saved = await book.save(input, key, id ?? deps.id, secretFloor);
       return viewOf(book, saved, await book.defaultId());
     },
     remove: (user, id) => deskOf(user).book.remove(id),

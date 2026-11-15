@@ -7,6 +7,7 @@ export const MODELS_WORDS = {
   "calls.quoted": { name: "Address quoted in a refusal", about: "Characters of a media address that the words of a refused request quote." },
   "calls.signInWordsKept": { name: "Failed sign-in's words kept", about: "Seconds the words of why a sign-in did not finish are kept to be shown." },
   "calls.wordsMost": { name: "Length of failure words", about: "Characters of a provider's or a call's failure words that are kept; the rest is cut." },
+  "calls.secretFloor": { name: "Length a secret is looked for at", about: "Characters from which a key or a header's value is taken out of a provider's words wherever it stands; a shorter one is taken out where it stands as a word of its own. A key shorter than this is refused." },
   "calls.retryWait": { name: "Wait before a retry", about: "Seconds before a failed call is made again the first time; each wait after is twice the one before." },
   "calls.retries": { name: "Retries of a failed call", about: "Times a call that failed before any answer came is made again, where its connection sets no number of its own." },
   "calls.cacheRetention": { name: "Prompt cache retention", about: "How long a provider is asked to keep a prompt in its cache: none, short or long." },

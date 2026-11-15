@@ -6,12 +6,14 @@
 // Each is read back to a status and the provider's message.
 //
 // And what keeps a secret out of every word that leaves the layer: a key, a token or a header's
-// value the layer holds, wherever it shows up in a provider's text (some echo a key they refused),
-// is taken out, and no text that leaves is longer than `calls.wordsMost` says.
+// value the layer holds, whatever its length, wherever it shows up in a provider's text (some echo a
+// key they refused), is taken out, and no text that leaves is longer than `calls.wordsMost` says.
 //
 // The words of a wait that ran out name its setting as the list of settings names it, and say where
-// it is changed.
+// it is changed. A part of a request passed through that its model can't take is named, never
+// dropped (READINGS R-100).
 
+import type { ModelSettings } from "../harness/settings";
 import type { SettingWords } from "../harness/settings/entry";
 import { isRecord } from "./json";
 
@@ -75,28 +77,40 @@ export const REDIRECT_REFUSED = /\bUnexpectedRedirect\b/;
 /** The words for it: no redirect is followed, since a call's key and headers would go with it to an address nobody gave them for. */
 export const REDIRECT_WORDS = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.";
 
-/** The shortest secret worth looking for: shorter ones would match ordinary words. So a save refuses a key any shorter (book.ts); a header's value may be shorter, and is then not looked for. */
-export const SECRET_FLOOR = 8;
 /** What stands where a secret was. */
 const HIDDEN = "[secret]";
 /** Where pi-ai cut a long error body short ("… [truncated 120 chars]"): a secret the cut went through leaves its first characters just before it. */
 const CUT_MARK = "... [truncated ";
 
+/** What words are cleaned by: how long they may be (`calls.wordsMost`), and the length from which a secret is looked for anywhere in them (`calls.secretFloor`). */
+export type SecretTerms = Pick<ModelSettings, "wordsMost" | "secretFloor">;
+
+/** A secret shorter than the floor where it stands as a word of its own: no letter, digit or underscore on either side of it. */
+function asWord(secret: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}_])${secret.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?![\\p{L}\\p{N}_])`, "gu");
+}
+
 /**
- * Text fit to leave the layer: every secret named taken out, wherever it stands, and the text cut
- * to `most` characters after that (`calls.wordsMost`), so no cut ever leaves part of a secret behind.
+ * Text fit to leave the layer: every secret named taken out, whatever its length, and the text cut
+ * to `wordsMost` characters after that, so no cut ever leaves part of a secret behind. A secret of
+ * `secretFloor` characters or more is taken out wherever it stands; a shorter one, which could be
+ * part of an ordinary word, where it stands as a word of its own.
  */
-export function redact(text: string, secrets: Iterable<string>, most: number): string {
+export function redact(text: string, secrets: Iterable<string>, terms: SecretTerms): string {
   // Longest first: a secret that holds a shorter one is taken out whole, never left half shown around it.
-  const wanted = [...new Set(secrets)].filter((s) => s.length >= SECRET_FLOOR).sort((a, b) => b.length - a.length);
+  const all = [...new Set(secrets)].filter((s) => s !== "").sort((a, b) => b.length - a.length);
+  const long = all.filter((s) => s.length >= terms.secretFloor);
   let out = text;
-  for (const secret of wanted) if (out.includes(secret)) out = out.split(secret).join(HIDDEN);
-  out = withoutCutSecrets(out, wanted);
-  return out.length > most ? `${out.slice(0, most)}…` : out;
+  for (const secret of long) if (out.includes(secret)) out = out.split(secret).join(HIDDEN);
+  out = withoutCutSecrets(out, long, terms.secretFloor);
+  const short = all.filter((s) => s.length < terms.secretFloor).map(asWord);
+  // What already stands for a secret is left as it is: a short secret may be one of its words.
+  if (short.length > 0) out = out.split(HIDDEN).map((piece) => short.reduce((cleaned, word) => cleaned.replace(word, HIDDEN), piece)).join(HIDDEN);
+  return out.length > terms.wordsMost ? `${out.slice(0, terms.wordsMost)}…` : out;
 }
 
 /** Takes out the first characters of a secret where a text was cut short through it: before pi-ai's mark of a cut, or at the text's very end. */
-function withoutCutSecrets(text: string, secrets: readonly string[]): string {
+function withoutCutSecrets(text: string, secrets: readonly string[], floor: number): string {
   const cuts: number[] = [];
   for (let at = text.indexOf(CUT_MARK); at !== -1; at = text.indexOf(CUT_MARK, at + 1)) cuts.push(at);
   cuts.push(text.length);
@@ -104,10 +118,10 @@ function withoutCutSecrets(text: string, secrets: readonly string[]): string {
   // From the last cut back, so that where the earlier ones stand still holds.
   for (const end of cuts.reverse()) {
     for (const secret of secrets) {
-      const head = secret.slice(0, SECRET_FLOOR);
+      const head = secret.slice(0, floor);
       let from = out.indexOf(head, Math.max(0, end - secret.length + 1));
-      while (from !== -1 && from <= end - SECRET_FLOOR && !secret.startsWith(out.slice(from, end))) from = out.indexOf(head, from + 1);
-      if (from !== -1 && from <= end - SECRET_FLOOR) {
+      while (from !== -1 && from <= end - floor && !secret.startsWith(out.slice(from, end))) from = out.indexOf(head, from + 1);
+      if (from !== -1 && from <= end - floor) {
         out = `${out.slice(0, from)}${HIDDEN}${out.slice(end)}`;
         break;
       }
@@ -126,6 +140,11 @@ export function durationWords(ms: number): string {
 /** A setting of the layer in words, by the name the list of settings gives it, with where it is changed: the Settings page. */
 export function settingWords(setting: SettingWords): string {
   return `The setting "${setting.name}" on the Settings page`;
+}
+
+/** A picture of a request passed through, `part` naming its place, that the model it goes to takes none of: the request goes whole or not at all (READINGS R-100). */
+export function pictureUntakenWords(part: string, model: string, connection: string): string {
+  return `${part} is a picture, and the model "${model}" on the connection "${connection}" takes no pictures: send the request without it, or on a connection whose model takes pictures`;
 }
 
 /** An error's text: its message, or what it is. */

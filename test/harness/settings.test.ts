@@ -507,7 +507,7 @@ test("every setting name the model layer's words use is the name of a listed set
     expect({ file, written: text.match(/setting "[^"$]+"/g) ?? [] }).toEqual({ file, written: [] });
     for (const found of text.matchAll(/settingWords\(MODELS\.(\w+)\)/g)) named.push(found[1]!);
   }
-  expect([...new Set(named)].sort()).toEqual(["listMost", "providerWait", "signInOpen", "silentAfter", "tokensPerMinute"]);
+  expect([...new Set(named)].sort()).toEqual(["listMost", "providerWait", "secretFloor", "signInOpen", "silentAfter", "tokensPerMinute"]);
   const entries: Readonly<Record<string, SettingEntry & SettingWords>> = MODELS;
   for (const name of named) {
     const entry = entries[name];

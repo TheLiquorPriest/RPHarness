@@ -311,3 +311,19 @@ describe("a provider that never answers", () => {
     expect(await r.layer.api.test(USER, refused.id)).toMatchObject({ ok: false, error: "401: invalid x-api-key (authentication_error)" });
   });
 });
+
+describe("a secret in a provider's words", () => {
+  test("a five-character header value in a provider's error words never reaches the words that leave the layer", async () => {
+    const TOKEN = "q7Rk2";
+    // A gateway that refuses the call and says back the short token it was sent, as a word of its own and inside a longer one.
+    r = rig({ script: (sent) => failed(403, { error: { message: `Gateway token ${sent.headers["x-gateway-token"] ?? ""} is unknown (sent: "${sent.headers["x-gateway-token"] ?? ""}"); try x${TOKEN}y.`, type: "permission_error" } }) });
+    const saved = await r.layer.api.save(USER, { name: "Gateway", provider: "openai-compatible", auth: "key", baseUrl: "https://gateway.example.com/v1", model: "served-model", headers: { "x-gateway-token": TOKEN } }, SERVER_KEY);
+    const tested = await r.layer.api.test(USER, saved.id);
+    expect(r.sent.map((s) => s.headers["x-gateway-token"])).toEqual([TOKEN]);
+    // Shorter than calls.secretFloor, it is taken out where it stands alone; a longer word it is part of is another word.
+    expect(tested).toMatchObject({ ok: false, error: `403: Gateway token [secret] is unknown (sent: "[secret]"); try x${TOKEN}y. (permission_error)` });
+    // Set lower, the floor has a five-character secret looked for anywhere.
+    r.configs.global = "calls:\n  secretFloor: 5\n";
+    expect(await r.layer.api.test(USER, saved.id)).toMatchObject({ ok: false, error: `403: Gateway token [secret] is unknown (sent: "[secret]"); try x[secret]y. (permission_error)` });
+  });
+});

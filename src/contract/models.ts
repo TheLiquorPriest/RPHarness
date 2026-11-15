@@ -91,8 +91,10 @@ export interface SecretsDoc {
   headers?: Record<string, Record<string, string>>;
   /**
    * Where each connection's key and header values were given for, by the connection's id: its
-   * provider and its address's origin, in the layer's own form. A connection whose document now names
-   * another place keeps neither (§16). Absent when no connection has a key or a header's value.
+   * provider and its address, origin and path, in the layer's own form (`placeOf` in RPH's helpers).
+   * A connection whose document now names another place, or whose values have no place here, keeps
+   * them and sends them nowhere until the host's switches have the connection on at its place
+   * (§16; READINGS R-53). Absent when no connection has a key or a header's value.
    */
   places?: Record<string, string>;
   device?: string;
@@ -114,6 +116,12 @@ export interface ModelsPort {
   /** The user's secrets document as last saved, as it comes; null when none was ever saved. */
   loadSecrets(scope: UserScope): Promise<unknown>;
   saveSecrets(scope: UserScope, doc: SecretsDoc): Promise<void>;
+  /**
+   * False: the secrets document this port gives is never to be written. A script fills it in memory
+   * from its environment, each key with the place it is for, and the layer keeps every change of it
+   * in memory alone, its places too: `saveSecrets` is never called (C27).
+   */
+  secretsWritten?: false;
 }
 
 // ---------------------------------------------------------------- what the host calls
@@ -123,8 +131,13 @@ export interface ConnectionView extends Omit<StoredConnection, "headers"> {
   /** Its headers by name, and whether each has a value. */
   headers?: { name: string; set: boolean }[];
   default: boolean;
-  /** Whether a key is set, and its last four characters; null for a connection that signs with no key. */
-  key: { set: boolean; last4: string | null } | null;
+  /**
+   * Whether a key is set, and whether it waits: a key, or a header's value, given for another place
+   * than the connection now goes to, or kept with no place, is sent nowhere until the host's
+   * switches have the connection on there (§16). Null for a connection that signs with no key. No
+   * character of a key is ever in it.
+   */
+  key: { set: boolean; waiting: boolean } | null;
   /** For a connection that signs in: whether the sign-in holds. */
   signedIn?: boolean;
 }
@@ -285,8 +298,13 @@ export interface PassSink {
  */
 export interface ModelsApi {
   list(user: string): Promise<ConnectionList>;
-  /** Adds or changes a connection of the user's. `key`: a new key; null takes it away; absent keeps it. */
-  save(user: string, input: ConnectionInput, key?: string | null): Promise<ConnectionView>;
+  /**
+   * Adds or changes a connection of the user's: the owner's own act, on his press (C27). `key`: a new
+   * key; null takes it away; absent keeps it. `id`: the id a new connection is made under (one copied
+   * from elsewhere keeps its id there); refused, named, where one of his connections has it already,
+   * or where `input` names a connection to change.
+   */
+  save(user: string, input: ConnectionInput, key?: string | null, id?: string): Promise<ConnectionView>;
   remove(user: string, id: string): Promise<void>;
   setDefault(user: string, id: string | null): Promise<void>;
   /** One tiny call on the user's connection. */

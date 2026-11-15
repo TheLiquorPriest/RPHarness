@@ -5,7 +5,7 @@
 
 import type { AssistantMessage, Message, Provider, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import type { ConnectionsDoc, FilesPort, Layer, Log, ModelsPort, SecretsDoc, UserScope } from "../../src/contract";
+import type { ConnectionsDoc, FilesPort, Layer, Log, ModelsPort, SecretsDoc, Switchable, SwitchesPort, SwitchState, UserScope } from "../../src/contract";
 import { readModelSettings } from "../../src/harness/settings";
 import type { AgentModel, ModelLayer, ModelTexts } from "../../src/model";
 import { createModelLayer } from "../../src/model";
@@ -188,6 +188,22 @@ export class MemoryStore implements ModelsPort {
   }
 }
 
+/** A host's switches as its own command line keeps them: each thing switched on for one user alone, and every thing the layer asked of them. */
+export class Switches implements SwitchesPort {
+  readonly #on = new Set<string>();
+  readonly asked: Switchable[] = [];
+
+  /** Switches `thing` on for `user`, as `rpe allow` does on the server. */
+  switchOn(user: string, thing: Switchable): void {
+    this.#on.add(JSON.stringify([user, thing.kind, thing.name, thing.target]));
+  }
+
+  async state(user: string, thing: Switchable): Promise<SwitchState> {
+    this.asked.push(thing);
+    return this.#on.has(JSON.stringify([user, thing.kind, thing.name, thing.target])) ? "on" : "waiting";
+  }
+}
+
 /** The config files the rig's settings are read from, as YAML, changed as a test goes: the global level's, and each chat's by its id. */
 export interface Configs {
   global: string;
@@ -234,6 +250,8 @@ export interface RigOptions {
   /** Each chat's config file's text, by the chat's id. */
   chats?: Record<string, string>;
   markNote?: (text: string) => string;
+  /** The host's switches: none when not given, so a key that waits is sent nowhere. */
+  switches?: SwitchesPort;
 }
 
 export interface Rig {
@@ -288,6 +306,7 @@ export function rig(options: RigOptions = {}): Rig {
     settings: (scope) => readModelSettings(files, scope, log),
     texts: async () => ({ ...texts }),
     ...(options.providers ? { providers: options.providers } : {}),
+    ...(options.switches ? { switches: options.switches } : {}),
   });
   return { layer, store, sent, clock, logs, configs, settingsLog, texts, done: () => layer.close() };
 }

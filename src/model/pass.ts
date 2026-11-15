@@ -1,16 +1,24 @@
 // A request that is no turn (STANDALONE-PLAN §4.2: a title, a summary, a quiet generation, anything
-// another extension sends through the connection), passed through to the connection the host names,
-// whole, its answer streamed back as it comes. Its body is OpenAI's chat completions, as a chat
-// application's custom connection posts it: its messages and tools, its answer room, sampling,
-// effort and tool choice are read from it, and every other field of it is sent as it came where the
-// call speaks that API. A provider with another API takes what it has a place for.
+// another extension sends through the connection), passed through untouched to the connection the
+// host names, its answer streamed back as it comes. Its body is OpenAI's chat completions, as a chat
+// application's custom connection posts it.
 //
-// What has no way to the model refuses the request before anything of it is sent, in words that
-// name it and say what to do: a speaker's name, audio and video, media given by address, an image in
-// a system message or in a message of the model's own, a tool choice other than letting the model
-// choose or not, and a prefix to continue where the call can't continue one. Dropped, any of them
-// would change what the model is told and nobody would know. A message is named by its place in the
-// body, where each tool's result is a message of its own.
+// On a connection that speaks that same API the body goes as it came, every field of it and of its
+// messages kept (a speaker's name, audio, video, media given by address, an image's detail, a forced
+// tool choice, a prefix): only its model is the connection's, and whether and how its answer streams
+// is the call's own, so that the layer reads the answer as it comes; its address, key and headers
+// are the connection's (READINGS R-100).
+//
+// Through another API it is carried as that API can carry it: its messages and tools, its answer
+// room, the sampling the provider takes, its effort and its tool choice are read from it. What that
+// API has no place for refuses the request before anything of it is sent, in words that name it and
+// say what to do: a speaker's name, audio and video, media given by address, an image in a system
+// message or in a message of the model's own, an image's detail, a tool choice other than letting
+// the model choose or not, a prefix to continue where the call can't continue one, and any field of
+// the body the API has no place for. Dropped, any of them would change what the model is told and
+// nobody would know. A message is named by its place in the body, where each tool's result is a
+// message of its own. A picture the model takes none of (its figures say so: limits.ts) refuses the
+// request on any API, named.
 //
 // Of the APIs a connection speaks, only Anthropic's continues an assistant's message given last, and
 // Anthropic refuses that prefix to Claude 4.6 and later whatever they are asked, and to an earlier
@@ -20,22 +28,23 @@
 // A prefix is therefore looked at against the call itself: the model it goes to, and how that model
 // is asked to think.
 //
-// A turn of the model's that the body sends back carries its reasoning in the chat application's
-// shapes: on a chat-completions call the reasoning text (DeepSeek's `reasoning_content`) and
-// OpenRouter's reasoning details go back as that model's own; anything else of it is left out, and
-// the turn's text and calls go back as they are. A cache mark (`cache_control`) is let go: the
-// provider places its own, and a mark changes nothing of what the model is told.
+// A turn of the model's that the body sends back through another API goes back as its text and its
+// calls: the reasoning a chat application keeps beside it (`reasoning_content`, OpenRouter's reasoning
+// details) is another model's, which this API can't take back as its own, and a provider reads none
+// of an earlier turn's. A cache mark (`cache_control`) is let go too: the provider places its own,
+// and a mark changes nothing of what the model is told.
 
-import type { AssistantMessage, AssistantMessageEventStream, ImageContent, Message, TextContent, ThinkingContent, Tool, ToolCall, ToolChoice } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, Tool, ToolCall, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import type { JsonObject, PassError, PassRequest, PassResult, PassSink } from "../contract";
-import type { CallDeps, CallShape } from "./call";
-import { keyOf, makeCall, shapeOf, termsOf } from "./call";
+import type { ModelSettings } from "../harness/settings";
+import type { CallAsk, CallDeps, CallShape } from "./call";
+import { makeCall, shapeOf, signingOf, termsOf } from "./call";
 import { isRecord } from "./json";
 import type { Sampling } from "./kinds";
 import type { ModelEffort } from "./source";
 import { compatSays } from "./transcript";
-import { errorWords } from "./words";
+import { errorWords, pictureUntakenWords } from "./words";
 
 /** Something of a request that can't be carried: the request is refused with these words. */
 class NotCarried extends Error {}
@@ -46,16 +55,13 @@ type PassedPart = { type: "text"; text: string } | { type: "media"; media: "imag
 /**
  * A message of a passed request, as read here: its text as it came, or its parts where the request
  * gave parts, tool calls or tool results. `prefix` marks an assistant message the model is to
- * continue; `reasoning` and `reasoningDetails` are an assistant turn's reasoning as the model gave
- * it (`reasoning_content`, `reasoning_details`).
+ * continue.
  */
 interface PassedMessage {
   role: "system" | "user" | "assistant";
   content: string | PassedPart[];
   name?: string;
   prefix?: true;
-  reasoning?: string;
-  reasoningDetails?: JsonObject[];
   /** How many of the body's messages it was: a run of tool results is one here. */
   of: number;
 }
@@ -204,14 +210,6 @@ function passedMessages(raw: unknown, quoted: number): PassedMessage[] {
       }
       for (const mark of [m.prefix, m.partial]) if (!holdsNothing(mark) && typeof mark !== "boolean") throw new NotCarried(`${what}'s mark as a prefix isn't true or false`);
       if (m.prefix === true || m.partial === true) message.prefix = true;
-      // The model's reasoning text goes by either name; two that differ can't both be it.
-      const reasoning = [m.reasoning_content, m.reasoning].filter((r) => !holdsNothing(r));
-      if (reasoning.some((r) => typeof r !== "string") || (reasoning.length === 2 && reasoning[0] !== reasoning[1])) throw new NotCarried(`${what}'s reasoning isn't one text (\`reasoning_content\`, or \`reasoning\`)`);
-      if (typeof reasoning[0] === "string") message.reasoning = reasoning[0];
-      if (!holdsNothing(m.reasoning_details)) {
-        if (!Array.isArray(m.reasoning_details) || !m.reasoning_details.every(isRecord)) throw new NotCarried(`${what}'s reasoning details aren't a list of objects`);
-        message.reasoningDetails = m.reasoning_details as JsonObject[];
-      }
     }
     out.push(message);
   });
@@ -240,7 +238,7 @@ function passedTools(raw: unknown): PassedTool[] {
 /** The fields of a body that say what to send and how to answer, which a passthrough sets itself. */
 const OWN_FIELDS: Readonly<Record<string, true>> = { messages: true, tools: true, model: true, stream: true, stream_options: true };
 
-/** The fields of a body read here; every other one is sent as it came, where it can be. */
+/** The fields of a body read for a call through another API than the body's own; any other there refuses the request (`refuseUnplaced`). */
 const READ: Readonly<Record<string, true>> = {
   max_tokens: true,
   max_completion_tokens: true,
@@ -302,6 +300,39 @@ function maxTokensOf(body: JsonObject): number | undefined {
   return typeof v === "number" && Number.isSafeInteger(v) && v > 0 ? v : undefined;
 }
 
+/** The sampling fields of a body, which a call through another API carries where its provider takes them. */
+const SAMPLED: readonly string[] = [...NUMBERS, "stop"];
+
+/**
+ * Refuses each field of the body a call through another API than the body's own has no place for,
+ * by its name (see the head of this file): one no such call reads, sampling its provider doesn't
+ * take (OpenAI's reasoning models take no temperature or top_p), and in `reasoning` anything but its
+ * effort. A field that holds nothing is no field.
+ */
+function refuseUnplaced(body: JsonObject, shape: CallShape): void {
+  const { connection, kind, model } = shape;
+  for (const [field, value] of Object.entries(body)) {
+    if (holdsNothing(value) || Object.hasOwn(OWN_FIELDS, field)) continue;
+    const placed = !Object.hasOwn(READ, field)
+      ? false
+      : SAMPLED.includes(field)
+        ? (kind.sampling as readonly string[]).includes(field) && !(model.api === "openai-responses" && model.reasoning && (field === "temperature" || field === "top_p"))
+        : field !== "reasoning" || (isRecord(value) && Object.entries(value).every(([inner, held]) => inner === "effort" || holdsNothing(held)));
+    if (!placed) throw new NotCarried(`it has the field \`${field}\`, which the connection "${connection.name}" (${kind.name}, ${model.id}) has no place for: leave it out, or send the request on a connection that speaks OpenAI's chat completions, where it goes as it came`);
+  }
+}
+
+/** Refuses a picture the model takes none of, named by its place in the body with the model (READINGS R-100): never dropped, on any API. A model nobody has said takes pictures or not is sent it. */
+function refuseUntaken(raw: unknown, shape: CallShape): void {
+  if (shape.limits.pictures?.takes !== false || !Array.isArray(raw)) return;
+  raw.forEach((m: unknown, i) => {
+    if (!isRecord(m) || !Array.isArray(m.content)) return;
+    m.content.forEach((part: unknown, j) => {
+      if (isRecord(part) && part.type === "image_url") throw new NotCarried(pictureUntakenWords(`message ${i + 1}'s part ${j + 1}`, shape.model.id, shape.connection.name));
+    });
+  });
+}
+
 /** Why a call of this shape can't continue the prefix the request ends in (see the head of this file); null where it can. */
 function prefixRefusal(shape: CallShape, body: JsonObject): string | null {
   const { connection, kind, model } = shape;
@@ -319,15 +350,6 @@ function prefixRefusal(shape: CallShape, body: JsonObject): string | null {
 /** A message's text, its text parts together. */
 function textOf(m: PassedMessage): string {
   return typeof m.content === "string" ? m.content : m.content.flatMap((p) => (p.type === "text" ? [p.text] : [])).join("");
-}
-
-/** Thinking a turn carries in the chat application's shapes that maps to a call on `api`, as that model's own; none for any other API. */
-function carriedThinking(m: PassedMessage, api: string): ThinkingContent[] {
-  if (api !== "openai-completions") return [];
-  if (m.reasoningDetails !== undefined && m.reasoningDetails.length > 0) return [{ type: "thinking", thinking: m.reasoning ?? "", thinkingSignature: JSON.stringify(m.reasoningDetails) }];
-  // A chat application sends the reasoning text back as `reasoning_content`, the field DeepSeek reads.
-  if (m.reasoning) return [{ type: "thinking", thinking: m.reasoning, thinkingSignature: "reasoning_content" }];
-  return [];
 }
 
 const NO_USAGE: AssistantMessage["usage"] = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
@@ -364,8 +386,7 @@ function messagesFor(passed: readonly PassedMessage[], shape: CallShape): Messag
       const text = textOf(m);
       const calls: ToolCall[] = parts.flatMap((p) => (p.type === "tool_use" ? [{ type: "toolCall" as const, id: p.id, name: p.name, arguments: p.input }] : []));
       for (const c of calls) callNames.set(c.id, c.name);
-      const content: AssistantMessage["content"] = [...carriedThinking(m, shape.model.api), ...(text !== "" ? [{ type: "text" as const, text }] : []), ...calls];
-      // Said to be the call's own model's, so pi-ai sends its reasoning back as that model's.
+      const content: AssistantMessage["content"] = [...(text !== "" ? [{ type: "text" as const, text }] : []), ...calls];
       out.push({ role: "assistant", content, api: shape.model.api, provider: shape.model.provider, model: shape.model.id, usage: NO_USAGE, stopReason: calls.length > 0 ? "toolUse" : "stop", timestamp: 0 });
     } else if (typeof m.content === "string") {
       out.push({ role: "user", content: m.content, timestamp: 0 });
@@ -418,6 +439,77 @@ function notPassedWords(what: string): string {
   return `This request wasn't passed on: ${what}. A request that is no turn goes to its connection whole or not at all, so that nothing of a prompt is dropped on the way.`;
 }
 
+/** A message's content as text: its text, or the text of its parts; none for anything else. */
+function saidIn(content: unknown): string {
+  if (typeof content === "string") return content;
+  return Array.isArray(content) ? content.flatMap((part: unknown) => (isRecord(part) && typeof part.text === "string" ? [part.text] : [])).join("") : "";
+}
+
+/**
+ * A call on a connection that speaks the body's own API (see the head of this file): the body goes
+ * as it came, its model and how its answer streams the call's own. The call is made from its
+ * messages' text alone, which is what it counts toward its connection's minute and how it tells a
+ * message of the model's own given last (DeepSeek's prefix path); the request pi-ai builds from it is
+ * replaced by the body as it is sent.
+ */
+function whole(body: JsonObject, shape: CallShape, settings: ModelSettings): { context: TranscriptContext; ask: CallAsk } {
+  if (!Array.isArray(body.messages)) throw new NotCarried("it has no list of messages");
+  const messages = body.messages.map((m: unknown): Message => {
+    const role = isRecord(m) ? m.role : undefined;
+    const text = isRecord(m) ? saidIn(m.content) : "";
+    if (role === "system" || role === "developer") return { role: "system", content: text, timestamp: 0 };
+    if (role === "assistant") return { role: "assistant", content: text === "" ? [] : [{ type: "text", text }], api: shape.model.api, provider: shape.model.provider, model: shape.model.id, usage: NO_USAGE, stopReason: "stop", timestamp: 0 };
+    return { role: "user", content: text, timestamp: 0 };
+  });
+  const maxTokens = maxTokensOf(body);
+  return {
+    context: normalizeContext({ messages }),
+    ask: {
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      sampling: {},
+      serialTools: false,
+      cacheRetention: settings.cacheRetention,
+      toolsAs: "native",
+      carried: {
+        onPayload: (payload) => {
+          if (!isRecord(payload)) return undefined;
+          const { stream_options: _theirs, ...asCame } = body;
+          return { ...asCame, model: payload.model, stream: payload.stream, ...(payload.stream_options !== undefined ? { stream_options: payload.stream_options } : {}) };
+        },
+      },
+    },
+  };
+}
+
+/** A call through another API than the body's own (see the head of this file): what it has a place for read from the body, and the request refused for anything else. */
+function carried(body: JsonObject, shape: CallShape, settings: ModelSettings): { context: TranscriptContext; ask: CallAsk } {
+  const messages = passedMessages(body.messages, settings.quoted);
+  const tools = passedTools(body.tools);
+  refuseUncarried(messages);
+  const toolChoice = tools.length > 0 ? toolChoiceOf(body.tool_choice) : undefined;
+  refuseUnplaced(body, shape);
+  if (messages.at(-1)?.prefix === true) {
+    const refused = prefixRefusal(shape, body);
+    if (refused !== null) throw new NotCarried(refused);
+  }
+  const maxTokens = maxTokensOf(body);
+  return {
+    context: normalizeContext({ messages: messagesFor(messages, shape), ...(tools.length > 0 ? { tools: tools.map(toolOf) } : {}) }),
+    ask: {
+      ...(maxTokens !== undefined ? { maxTokens } : {}),
+      ...(shape.reasoning !== undefined ? { reasoning: shape.reasoning } : {}),
+      sampling: samplingOf(body),
+      ...(toolChoice !== undefined ? { toolChoice } : {}),
+      serialTools: body.parallel_tool_calls === false || shape.connection.serialTools === true,
+      // A request passed through belongs to no session; it keeps a prompt as `calls.cacheRetention` says.
+      cacheRetention: settings.cacheRetention,
+      // A request passed through goes as it came: its tools natively, whatever its provider says of them.
+      toolsAs: "native",
+      carried: {},
+    },
+  };
+}
+
 /**
  * Passes a request through (see the head of this file), its answer streamed to `sink`, which hears
  * exactly one `finish` or one `error`. Nothing of the request is sent when it is refused. Its terms
@@ -427,52 +519,19 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
   const fail = (code: PassError["code"], detail: string): void => sink.error({ code, detail });
   const body = request.body;
   const terms = await termsOf(deps, { user: deps.user });
-  const { settings } = terms;
-  let out: AssistantMessageEventStream;
+  let shape: CallShape;
   try {
-    const messages = passedMessages(body.messages, settings.quoted);
-    const tools = passedTools(body.tools);
-    refuseUncarried(messages);
-    const toolChoice = tools.length > 0 ? toolChoiceOf(body.tool_choice) : undefined;
-    let shape: CallShape;
-    try {
-      shape = await shapeOf(deps, { connectionId: request.connection, model: null, effort: effortOf(body) });
-      await keyOf(deps.book, shape.connection, shape.kind);
-    } catch (error) {
-      return fail("no-connection", errorWords(error));
-    }
-    if (messages.at(-1)?.prefix === true) {
-      const refused = prefixRefusal(shape, body);
-      if (refused !== null) throw new NotCarried(refused);
-    }
-    const context = normalizeContext({ messages: messagesFor(messages, shape), ...(tools.length > 0 ? { tools: tools.map(toolOf) } : {}) });
-    const extras: JsonObject = {};
-    for (const [key, value] of Object.entries(body)) if (!Object.hasOwn(READ, key) && !Object.hasOwn(OWN_FIELDS, key)) extras[key] = value;
-    const maxTokens = maxTokensOf(body);
-    out = createAssistantMessageEventStream();
+    shape = await shapeOf(deps, { connectionId: request.connection, model: null, effort: effortOf(body) });
+    await signingOf(deps.book, shape.connection, shape.kind);
+  } catch (error) {
+    return fail("no-connection", errorWords(error));
+  }
+  const out = createAssistantMessageEventStream();
+  try {
+    refuseUntaken(body.messages, shape);
+    const call = shape.model.api === "openai-completions" ? whole(body, shape, terms.settings) : carried(body, shape, terms.settings);
     // A request passed through goes as it came: a system message in its middle goes in place unmarked.
-    const unmarked = { ...terms, texts: { ...terms.texts, markNote: undefined } };
-    void makeCall(
-      deps,
-      shape,
-      context,
-      {
-        ...(maxTokens !== undefined ? { maxTokens } : {}),
-        ...(shape.reasoning !== undefined ? { reasoning: shape.reasoning } : {}),
-        sampling: samplingOf(body),
-        ...(toolChoice !== undefined ? { toolChoice } : {}),
-        serialTools: body.parallel_tool_calls === false || shape.connection.serialTools === true,
-        // A request passed through belongs to no session; it keeps a prompt as `calls.cacheRetention` says.
-        cacheRetention: settings.cacheRetention,
-        ...(Object.keys(extras).length > 0 ? { extras } : {}),
-        // A request passed through goes as it came: its tools natively, whatever its provider says of them.
-        toolsAs: "native",
-        carried: {},
-      },
-      unmarked,
-      signal,
-      out,
-    );
+    void makeCall(deps, shape, call.context, call.ask, { ...terms, texts: { ...terms.texts, markNote: undefined } }, signal, out);
   } catch (error) {
     if (error instanceof NotCarried) return fail("not-carried", notPassedWords(error.message));
     throw error;

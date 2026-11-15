@@ -2,8 +2,9 @@
 // `calls` in a config file: how long an answer that has begun may go silent, how long a provider has
 // to answer a connection's test or list its models, how long a sign-in stays open; a test call's
 // room, how much of a server's list of models is read, how much of a media address a refusal quotes,
-// how long a failed sign-in's words are kept and how long any failure's words may be; the wait before
-// a failed call is made again, and how many times where its connection says nothing; how long a
+// how long a failed sign-in's words are kept and how long any failure's words may be, and the length
+// from which a secret is looked for anywhere in them; the wait before a failed call is made again,
+// and how many times where its connection says nothing; how long a
 // provider is asked to keep a prompt in its cache; how long a connection's model that refused
 // native tools is offered them as text; and each connection's throttle (§13.2): its requests and
 // tokens a minute and its calls at once, with the calls at once of a connection that sets none.
@@ -38,6 +39,8 @@ export const MODELS = worded(
     signInWordsKept: { key: "calls.signInWordsKept", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, levels: SHARED, at: "calls.signInWordsKept", ms: true },
     // A server's error body can be any length, and a page or a log line has no use for more.
     wordsMost: { key: "calls.wordsMost", takes: { type: "whole", least: 1 }, default: 2000, perConnection: false, levels: SHARED, at: "calls.wordsMost" },
+    // Today's 8: a secret this long is looked for anywhere in a text, a shorter one as a word of its own, where it can't be part of an ordinary word.
+    secretFloor: { key: "calls.secretFloor", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, levels: SHARED, at: "calls.secretFloor" },
     // Appendix D.1 l.2416: 1 second, then twice the wait before; a connection's own count of tries stands over `retries`.
     retryWait: { key: "calls.retryWait", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, levels: SHARED, at: "calls.retryWait", ms: true },
     retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "calls.retries" },

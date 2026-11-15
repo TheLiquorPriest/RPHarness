@@ -16,6 +16,7 @@ import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import type { Book } from "./book";
 import { isSignInProvider } from "./kinds";
+import type { SecretTerms } from "./words";
 import { durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export interface SignInDeps {
@@ -52,15 +53,15 @@ const EXCHANGE_FAILURE = /status=(\d{3}); url=[^;]*; body=([\s\S]*?)(?:; stack=|
 /** A report of an answer pi-ai took but couldn't read quotes that answer, and its parser's words after it quote it again: it may hold the new tokens. */
 const QUOTES_ANSWER = /\bbody=/;
 
-/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `most` characters; of a report that quotes an answer it couldn't read, only its first sentence; a port in use, said in the layer's own words. */
-function failure(error: unknown, secrets: Iterable<string>, most: number): string {
+/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `calls.wordsMost` characters; of a report that quotes an answer it couldn't read, only its first sentence; a port in use, said in the layer's own words. */
+function failure(error: unknown, secrets: Iterable<string>, terms: SecretTerms): string {
   const text = errorWords(error);
   const port = PORT_IN_USE.exec(text);
   if (port) return `port ${port[1]} on this machine, where OpenAI's sign-in comes back to, is in use by another sign-in still open or by another program: close that`;
   const exchange = EXCHANGE_FAILURE.exec(text);
   const report = text.split("; stack=")[0] ?? text;
   const words = exchange ? failureWords(`${exchange[1]}: ${exchange[2]}`) : failureWords(QUOTES_ANSWER.test(report) ? (report.split(" url=")[0] ?? report) : report);
-  return redact(words, secrets, most);
+  return redact(words, secrets, terms);
 }
 
 interface Flow {
@@ -163,7 +164,7 @@ export function createSignIn(deps: SignInDeps): SignInApi & { close(): void } {
           deps.log(`signed in to ${NAMES[provider]}`);
         },
         async (error: unknown) => {
-          const why = flow.stop.signal.aborted ? errorWords(flow.stop.signal.reason) : failure(error, [...(await deps.book.secretValues())], (await deps.settings()).wordsMost);
+          const why = flow.stop.signal.aborted ? errorWords(flow.stop.signal.reason) : failure(error, [...(await deps.book.secretValues())], await deps.settings());
           if (flows.get(id) === flow) {
             flows.delete(id);
             deps.clearTimeout(flow.timer);

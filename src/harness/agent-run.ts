@@ -4,13 +4,13 @@
 // its request files and transcripts as a turn's does. Every agent of a run made here writes its
 // transcript (`transcripts.ts`).
 import type { AgentRef, Environment, Places, Scope } from "../contract";
-import type { RuleRun } from "../files/api";
+import type { Guidance, RuleRun } from "../files/api";
 import type { ParentCall, RunTrace } from "../loop/trace";
 import type { GateCall, KeepRequest, LoopToolResult, ToolGate } from "../loop/types";
 import type { HeldTool } from "../tools/registry";
 import type { Words } from "../tools/kit";
 import { TurnGate } from "./gate";
-import { requestPath, sentMessages } from "./requests";
+import { type PointedFile, pointerForm, requestPath, sentMessages } from "./requests";
 import type { Settings } from "./settings";
 import { Transcripts } from "./transcripts";
 
@@ -19,6 +19,8 @@ export interface AgentRunDeps {
   scope: Scope;
   trace: RunTrace;
   places: Places;
+  /** The guidance of the run: where each of RPH's own tools' descriptions comes from. */
+  guidance: Pick<Guidance, "tool">;
   /** The run's settings: which requests are kept (`trace.requests`) and the bound on one call (`results.clip`). */
   settings(): Pick<Settings, "requests" | "clipChars">;
   rules(): RuleRun;
@@ -27,6 +29,8 @@ export interface AgentRunDeps {
   tools(): readonly HeldTool[];
   /** Where each write still under way is handed: the run's end waits for it. */
   tell(written: Promise<unknown>): void;
+  /** The files of the turn's folder a kept request may point into, as they are written (the views, `briefing.md`); none: every message is kept as its text. */
+  sources?(): Promise<readonly PointedFile[]>;
   /** Told of each call that ran, as its gate takes it after the tool: a job's record of its writes. */
   ran?(call: GateCall, result: LoopToolResult, tool: HeldTool | undefined): void;
 }
@@ -75,18 +79,29 @@ export class AgentRuns {
     };
   }
 
-  /** Keeps what an agent's calls are sent, as `trace.requests` names them, in the turn's folder beside the transcripts; none for a run with no turn. */
-  keep(agent: AgentRef): KeepRequest | undefined {
+  /**
+   * Keeps what an agent's calls are sent, as `trace.requests` names them, in the turn's folder beside
+   * the transcripts, in the pointer form (`requests.ts`), with each declared tool and the file its
+   * description came from; none for a run with no turn. A lead's call before a compaction is kept as
+   * `save`, apart from its run's own calls.
+   */
+  keep(agent: AgentRef, kind: "call" | "save" = "call"): KeepRequest | undefined {
     const d = this.#d;
     const which = d.settings().requests;
     const turn = d.places.turn;
     if (which === "none" || turn === undefined) return undefined;
     const { env } = d;
-    return (call, messages, opening) => {
+    return (call, messages, opening, declared) => {
       if (which === "first" && call !== 1) return undefined;
-      const path = requestPath(turn, agent, call);
+      const path = requestPath(turn, agent, call, kind);
+      const sent = sentMessages(messages, opening);
+      const kept = (async () => {
+        const own = new Set(d.tools().flatMap((tool) => (tool.from === "rph" ? [tool.name] : [])));
+        const [sources, tools] = await Promise.all([d.sources?.() ?? [], Promise.all(declared.map(async (name) => ({ name, ...(own.has(name) ? await describedBy(d.guidance, name) : {}) })))]);
+        return env.files.write(d.scope, path, { op: "write", text: pointerForm(sent, sources, tools) }, "harness");
+      })();
       d.tell(
-        env.files.write(d.scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages, opening) }) }, "harness").then(
+        kept.then(
           (done) => {
             if (done.status !== "written") env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, status: done.status });
           },
@@ -96,4 +111,10 @@ export class AgentRuns {
       return path;
     };
   }
+}
+
+/** The file one of RPH's own tools is described by, where it has one. */
+async function describedBy(guidance: Pick<Guidance, "tool">, name: string): Promise<{ file?: string }> {
+  const file = (await guidance.tool(name))?.source.path;
+  return file === undefined ? {} : { file };
 }

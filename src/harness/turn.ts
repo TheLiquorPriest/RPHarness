@@ -19,7 +19,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
-import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
+import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
@@ -35,19 +35,21 @@ import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { JobsWork } from "../jobs/tool";
-import { noticeLines, promptSlice, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
+import { noticeLines, type PromptView, promptSlice, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
-import { placed } from "./requests";
+import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { callTerms, DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
 const RELEASED_FILE = "output/reply.md";
+/** What the lead was told at its run's start, in the turn's folder (§5.3). */
+const BRIEFING_FILE = "briefing.md";
 
 /** How what an agent is given by name beyond its own blocks is laid out (`.prompts/given.md`): the lead's and the writer's after their blocks, and what a lead's definition gives as its session opens. */
 const GIVEN_PART = "given";
@@ -184,6 +186,10 @@ export class Turn {
   #prompt: TurnPrompt | undefined;
   /** The views of the prompt being written in the turn's folder, alongside the lead's run (§10.1). */
   #views: ViewWrites | undefined;
+  /** The views' texts as they are written: what a kept request points into. */
+  #viewTexts: Promise<PromptView[]> | undefined;
+  /** This run's briefing file in the turn's folder and its text, as the Author was told it. */
+  #briefed: PointedFile | undefined;
   /** What the turn's agents reach: the host's, with a files port whose read of a view still being written waits for that write. */
   readonly #env: Environment;
   /** The session's file, once the turn has its entry in it. */
@@ -307,6 +313,8 @@ export class Turn {
       scope,
       trace: this.#trace,
       places,
+      guidance,
+      sources: () => this.#sources(),
       settings: () => this.#settings,
       rules: () => this.#rulesRun(),
       words: (name, fields) => this.#words(name, fields),
@@ -416,6 +424,7 @@ export class Turn {
         return () => this.#working.delete(entry);
       },
       late: (agent, judged) => this.#late(agent, judged),
+      keep: (agent) => this.#agentRuns().keep(agent),
     });
     this.#judges = judges;
     // The block the session opened with: as memory holds it, or, after a restart or once the session is open again after a close, as its file keeps it. Made afresh, it is kept in the file.
@@ -455,7 +464,9 @@ export class Turn {
       if (located.notices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: located.notices });
       // The views are written alongside the lead's run, not before its first call; a read of one waits for its write, and the turn's end for them all.
       if (places.turn !== undefined) {
-        this.#views = writeViews(env.files, scope, places.turn, promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
+        const views = promptViews(prompt, guidance, this.#lead, req.leftOut ?? []);
+        this.#viewTexts = views;
+        this.#views = writeViews(env.files, scope, places.turn, views, env.log);
         this.#tell(this.#views.done);
       }
     }
@@ -504,6 +515,8 @@ export class Turn {
     }
     const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, handed, definition, declared, rules, settings, at } : undefined;
     if (compacting !== undefined) await this.#compact(compacting, false);
+    // What the Author was told, as sent: what the session carried into the turn and the briefing (§5.3 l.489).
+    if (places.turn !== undefined) await this.#writeBriefing(places.turn, sentMessages(messages));
 
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
@@ -642,6 +655,7 @@ export class Turn {
         turn: this.#budget,
         stream: c.rules.stream(this.#lead),
         gate: this.#agentRuns().gate(this.#lead, undefined),
+        ...this.#keeper(this.#lead, "save"),
       });
       if (this.#ended()) return false;
       const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: c.handed });
@@ -690,8 +704,9 @@ export class Turn {
     if (this.#ended()) return undefined;
     const { model } = c;
     const session = this.#c.ids();
+    const summarizing: AgentRef = { id: this.#c.ids(), definition: this.#req.lead };
     const summarizer = new AgentRunner({
-      agent: { id: this.#c.ids(), definition: this.#req.lead },
+      agent: summarizing,
       trace: this.#trace,
       model: model.model,
       streamFn: model.streamFn,
@@ -702,6 +717,7 @@ export class Turn {
       instructions,
       texts: this.#texts,
       turn: this.#budget,
+      ...this.#keeper(summarizing),
     });
     const work = summarizer.start({ messages: [userMessage(material, c.at)] });
     const entry = { runner: summarizer, work };
@@ -894,8 +910,8 @@ export class Turn {
   }
 
   /** What an agent's calls are sent, kept as `trace.requests` names them (`AgentRuns.keep`), as the runner's option. */
-  #keeper(agent: AgentRef): { keep?: KeepRequest } {
-    const keep = this.#agentRuns().keep(agent);
+  #keeper(agent: AgentRef, kind?: "call" | "save"): { keep?: KeepRequest } {
+    const keep = this.#agentRuns().keep(agent, kind);
     return keep === undefined ? {} : { keep };
   }
 
@@ -910,6 +926,27 @@ export class Turn {
       "prompt.notices": { count: this.#notices },
       "session.turns": { count: this.#sessionTurns },
     };
+  }
+
+  /**
+   * Writes what the lead was told at this run's start, as sent (§5.3 l.489): what the session
+   * carried into the turn and the briefing, to the turn folder's `briefing.md`; a later run of the
+   * same turn (a continue) to a file of its own beside it, none written over.
+   */
+  async #writeBriefing(turn: string, sent: readonly KeptMessage[]): Promise<void> {
+    const told = sent.filter((message) => message.block === "session:carry" || message.block === "briefing").map((message) => message.text);
+    if (told.length === 0) return;
+    const env = this.#c.env;
+    const first = await env.files.read(this.scope, `${turn}${BRIEFING_FILE}`);
+    const file = first.status === "read" ? `briefing.${this.run.replace(/[^A-Za-z0-9_-]/g, "-")}.md` : BRIEFING_FILE;
+    const text = joined(told);
+    this.#briefed = { file, text };
+    this.#tell(env.files.write(this.scope, `${turn}${file}`, { op: "write", text }, "harness"));
+  }
+
+  /** The files of the turn's folder a kept request may point into: this run's briefing, and the prompt's views. */
+  async #sources(): Promise<PointedFile[]> {
+    return [...(this.#briefed !== undefined ? [this.#briefed] : []), ...((await this.#viewTexts) ?? [])];
   }
 
   /**

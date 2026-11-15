@@ -638,7 +638,7 @@ export class AgentRunner {
     stint.calling = true;
     stint.writing.clear();
     this.#o.channel?.begin();
-    const request = this.#o.keep?.(this.#calls, context.messages, this.#opening);
+    const request = this.#o.keep?.(this.#calls, context.messages, this.#opening, [...this.#tools.keys()]);
     this.#emit(stint, {
       kind: "call_started",
       call: this.#calls,

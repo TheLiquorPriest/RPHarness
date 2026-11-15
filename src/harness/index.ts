@@ -20,6 +20,7 @@ import { connectionOf, template } from "./means";
 import { openingOf } from "./opening";
 import { listedTools, ownTexts } from "./own";
 import { Sessions } from "./sessions";
+import { rebuildRequest } from "./requests";
 import { formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
 import { Registry } from "../tools";
@@ -155,6 +156,10 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     },
 
     models: layer.api,
+
+    rebuildRequest(scope, file) {
+      return rebuildRequest(env.files, scope, file);
+    },
 
     async close() {
       for (const turn of turns.values()) turn.stop();

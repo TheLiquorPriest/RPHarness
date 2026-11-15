@@ -11,7 +11,7 @@
 import { joined } from "../agents/attachments";
 import type { AgentRef, Environment, ModelsApi } from "../contract";
 import type { Guidance, Question, RuleRun, TemplatePart } from "../files/api";
-import { AgentRunner, type Budget, type Finished, type Judged, type Judgment, type QuestionRules, type RunTrace, type Work } from "../loop";
+import { AgentRunner, type Budget, type Finished, type Judged, type Judgment, type KeepRequest, type QuestionRules, type RunTrace, type Work } from "../loop";
 import type { AgentModel, ModelSource } from "../model/source";
 import { type Connection, connectionOf, template } from "./means";
 import { userMessage } from "./prompt";
@@ -38,6 +38,8 @@ export interface JudgeDeps {
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A rule that fired once its agent's work had ended. */
   late(agent: AgentRef, judged: Judged): void;
+  /** Keeps what a judge's call is sent, as the run keeps every agent's (`trace.requests`). */
+  keep?(agent: AgentRef): KeepRequest | undefined;
 }
 
 /** Whether an answer gives the word that fires the rule: as its first word, whatever the case of its letters. */
@@ -111,8 +113,10 @@ export class Judges implements QuestionRules {
     }
     // A session of its own, for this one call, let go when it ends.
     const session = d.ids();
+    const agent: AgentRef = { id: d.ids(), definition: question.agent.definition, parent: question.agent.id };
+    const keep = d.keep?.(agent);
     const runner = new AgentRunner({
-      agent: { id: d.ids(), definition: question.agent.definition, parent: question.agent.id },
+      agent,
       trace: d.trace,
       model: model.model,
       streamFn: model.streamFn,
@@ -122,6 +126,7 @@ export class Judges implements QuestionRules {
       terms: callTerms(d.settings),
       texts: { continueAfterRule: () => "" },
       turn: d.budget,
+      ...(keep !== undefined ? { keep } : {}),
     });
     const work = runner.start({ messages: [userMessage(text, d.env.clock.now())] });
     const untrack = d.track({ runner, work });

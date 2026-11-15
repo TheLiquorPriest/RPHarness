@@ -418,6 +418,26 @@ export interface DefinitionsApi {
   apply(scope: Scope): Promise<void>;
 }
 
+// ---------------------------------------------------------------- what a model call was sent
+
+/** One message of a kept request, as it was sent: its role, its text, and the block RPH placed it as (`opening`, `prompt`, `briefing`, …), none for the run's own conversation. */
+export interface KeptMessage {
+  role: string;
+  text: string;
+  block?: string;
+}
+
+/**
+ * A kept request rebuilt from the turn's folder (§5.3 l.495, §17.1 l.1764): every message as it was
+ * sent, in order; each tool declared with the file its description came from (none for a host's
+ * tool); and whether what was rebuilt is what was sent (`same`, by the hash the file keeps).
+ */
+export interface RebuiltRequest {
+  messages: KeptMessage[];
+  tools: { name: string; file?: string }[];
+  same: boolean;
+}
+
 // ---------------------------------------------------------------- the harness
 
 export interface Harness {
@@ -455,6 +475,11 @@ export interface Harness {
   usage: UsageApi;
   definitions: DefinitionsApi;
   models: ModelsApi;
+  /**
+   * An agent's kept request (the file its `call_started` names, C-17) rebuilt exactly as it was sent,
+   * from the pointers into the turn's files it holds; undefined when there is no such file.
+   */
+  rebuildRequest(scope: Scope, file: string): Promise<RebuiltRequest | undefined>;
   /** Stops every run and job (a running job is kept as interrupted, §13.5) and waits for what RPH keeps to be written. */
   close(): Promise<void>;
 }

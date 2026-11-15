@@ -172,21 +172,21 @@ describe("a job an agent starts", () => {
 
   test("a job that passes the player's job tokens for the day is stopped at its next call and its record says so; a start after it is answered in the file's words and starts nothing", async () => {
     const s = (open = await stage({
-      config: "jobs:\n  tokensPerDay: 100\n",
+      config: "jobs:\n  tokensPerDay: 300\n",
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER() },
       answers: routed(
         [start("start-1"), reply("The tower is quiet."), start("start-2"), reply("Still quiet.")],
-        [{ pieces: [{ text: "Counted three so far." }, { call: "todo", args: { items: [{ text: "count the rest" }] } }], usage: { input: 90, output: 30 } }],
+        [{ pieces: [{ text: "Counted three so far." }, { call: "todo", args: { items: [{ text: "count the rest" }] } }], usage: { input: 250, output: 100 } }],
       ),
     }));
 
     await s.turn(request("t1", { lead: "lead" }));
     await jobEnded(s, "done");
-    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "day", max: 100, value: 120 } });
+    expect(toldJobs(s).at(-1)).toMatchObject({ state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "day", max: 300, value: 350 } });
 
     await s.turn(request("t2", { lead: "lead", parent: "t1" }));
 
-    expect(answerTo(s, "start-2")).toBe("No job was started: what jobs sent and wrote today counts as 120 tokens, and the player allows 100.");
+    expect(answerTo(s, "start-2")).toBe("No job was started: what jobs sent and wrote today counts as 350 tokens, and the player allows 300.");
     expect(new Set(toldJobs(s).map((job) => job.id)).size).toBe(1);
   });
 
@@ -235,12 +235,12 @@ describe("a job the player starts", () => {
   const ONE_MORE: Reply = { pieces: [{ text: "Counted three so far." }, { call: "todo", args: { items: [{ text: "count the rest" }] } }] };
 
   test("is held to a token limit of its own: it ends with what it wrote, and its record says which limit stopped it", async () => {
-    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [{ ...ONE_MORE, usage: { input: 90, output: 30 } }] }));
+    const s = (open = await stage({ files: { ".agents/keeper.md": KEEPER() }, answers: [{ ...ONE_MORE, usage: { input: 250, output: 100 } }] }));
 
-    const started = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 100 } }));
+    const started = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, limits: { tokens: 300 } }));
     await jobEnded(s, "done");
 
-    expect(toldJobs(s).at(-1)).toMatchObject({ id: started.id, state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "job", max: 100, value: 120 } });
+    expect(toldJobs(s).at(-1)).toMatchObject({ id: started.id, state: "done", report: "Counted three so far.", limit: { limit: "tokens", per: "job", max: 300, value: 350 } });
     expect(s.model.requests).toHaveLength(1);
   });
 

@@ -5,6 +5,7 @@
 // Everything here is invented.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { JobView } from "../../src/contract";
+import { createHarness } from "../../src/index";
 import { gate, scriptedModel } from "../../src/testing/rig";
 import { CHAT, request, said, type Stage, stage, textOf, USER } from "../harness/support";
 import { jobOf, userHarness } from "./support";
@@ -90,6 +91,28 @@ describe("a job cut off by a restart", () => {
     } finally {
       held.open();
       await harness.close();
+    }
+  });
+
+  test("the day's job tokens include a call of a job as it ends: a harness over the same store, started while that job's tool still runs, finds them spent", async () => {
+    const held = gate();
+    const slow = { ...NOTE, run: async () => (await held.opened, said("Noted the count.")) };
+    const s = (open = await stage({
+      config: "jobs:\n  tokensPerDay: 300\n",
+      files: { ".agents/keeper.md": KEEPER },
+      tools: { note: slow },
+      answers: [{ pieces: [{ text: "Counted three so far." }, { call: "note" }], usage: { input: 250, output: 100 } }],
+    }));
+    await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    // Its first call has ended and its tool is under way: the job has not ended, and the day already holds the call.
+    await s.trace.seen((record) => record.event.kind === "tool_started" && record.event.tool === "note");
+
+    const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
+    try {
+      expect(await again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).toEqual({ refused: "day-tokens", max: 300, value: 350 });
+    } finally {
+      held.open();
+      await again.close();
     }
   });
 });

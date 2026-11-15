@@ -53,8 +53,6 @@ interface Live {
   connections: { key: string; atOnce?: number }[];
   /** The point at which it asks the owner whether to go on, in tokens as `JobLimits.askAt` counts them; none once he answered that it asks no more. */
   askAt?: number;
-  /** What the user's jobs spent in the day it was started on, which its calls count into. */
-  spend: DaySpend;
   /** Stops its run; the state it ends in is the reason's. */
   controller: AbortController;
   /** Settles once its end is kept and told. */
@@ -63,24 +61,12 @@ interface Live {
 }
 
 /**
- * A day's count of the jobs a user started: all of them, those on each connection a setting names,
- * and the tokens all of them sent (cached ones included), read again from a provider's cache, and
- * wrote. The tokens are kept as they were spent, so that the weight of a cached token in force
- * applies to the whole day.
+ * A day's count of the jobs a user started: all of them, and those on each connection a setting
+ * names. What they spent is the usage book's, which counts every call as it ends.
  */
 interface DayCount {
   all: number;
   connections: Record<string, number>;
-  tokens: { input: number; cacheRead: number; output: number };
-}
-
-/** What all of one user's jobs spent in one of the user's days, as this process counts it: from the day's record in the store, then from every call of their agents as it is made. */
-interface DaySpend {
-  /** The day's record in the store. */
-  key: string;
-  user: string;
-  /** Counted into by the budget of every job of the user's started that day. */
-  used: Usage;
 }
 
 /** What came of making a job: the job, as it stands once it had its chance at a place; the user's limit it would pass; why none may be made; or the answer that says why none could be made. */
@@ -95,12 +81,7 @@ function dayCount(value: JsonValue | undefined): DayCount {
   const connections: Record<string, number> = {};
   const kept = isObject(value) ? value["connections"] : undefined;
   if (isObject(kept)) for (const [key, count] of Object.entries(kept)) if (typeof count === "number") connections[key] = count;
-  const spent = isObject(value) ? value["tokens"] : undefined;
-  const part = (name: string): number => {
-    const count = isObject(spent) ? spent[name] : undefined;
-    return typeof count === "number" ? count : 0;
-  };
-  return { all, connections, tokens: { input: part("input"), cacheRead: part("cacheRead"), output: part("output") } };
+  return { all, connections };
 }
 
 function errorWords(error: unknown): string {
@@ -121,8 +102,6 @@ export class Jobs implements JobsApi, JobsWork {
   readonly #pending = new Set<Promise<unknown>>();
   /** Each job's latest write to the store, so its writes land in the order its state changed. */
   readonly #writes = new Map<string, Promise<unknown>>();
-  /** What each user's jobs have spent today, by the day and the user, read from the store once in this process. */
-  readonly #days = new Map<string, Promise<DaySpend>>();
   /** For each user this process has acted for: settles once the jobs a restart found him under way are kept as interrupted or queued again. */
   readonly #recovered = new Map<string, Promise<void>>();
   /** Every job this process made, running or ended: none is one a restart cut off, whatever a search of the store reads of it. */
@@ -416,7 +395,7 @@ export class Jobs implements JobsApi, JobsWork {
    * started once the user's jobs have spent the day's tokens, and none such is counted among the
    * day's jobs. The user's job records older than `jobs.keepDays` are removed as a job starts.
    */
-  async #begin(ask: Omit<JobAsk, "id" | "spent"> & { repeats?: string }): Promise<Begun> {
+  async #begin(ask: Omit<JobAsk, "id" | "spend"> & { repeats?: string }): Promise<Begun> {
     const { scope, call, by, parent } = ask;
     const core = this.#core;
     // What a restart cut off of the user's is kept as interrupted first, so no job of this process is taken for one.
@@ -424,8 +403,8 @@ export class Jobs implements JobsApi, JobsWork {
     // Jobs switched off by the owner: none may start, by an agent or by him.
     if (this.#switchesOf(scope.user).off) return { refusal: { refused: "off" } };
     const id = core.ids();
-    const spend = await this.#spend(scope.user);
-    const prepared = await prepareJob({ ...core, jobs: this }, { ...ask, id, spent: spend.used });
+    const spend = await core.usage.spend(scope.user);
+    const prepared = await prepareJob({ ...core, jobs: this }, { ...ask, id, spend });
     if (!("run" in prepared)) return prepared;
     const own = jobCountsFor(prepared.settings, prepared.connection);
     const hit = prepared.day.reached(prepared.agent)[0] ?? (await this.#count(scope.user, prepared.settings, own));
@@ -450,18 +429,17 @@ export class Jobs implements JobsApi, JobsWork {
       ...(prepared.missing.length > 0 ? { missing: prepared.missing } : {}),
     };
     // As it stands once it had its chance at a place: running, or still waiting.
-    return { view: this.#enqueue(view, prepared, own, spend).view };
+    return { view: this.#enqueue(view, prepared, own).view };
   }
 
   /** Puts a job of this process in the queue for a place, kept, traced and told as queued, and gives the places that are free. */
-  #enqueue(view: JobView, prepared: PreparedJob, own: readonly ConnectionCounts[], spend: DaySpend): Live {
+  #enqueue(view: JobView, prepared: PreparedJob, own: readonly ConnectionCounts[]): Live {
     const { promise, resolve } = Promise.withResolvers<JobView>();
     const live: Live = {
       view,
       prepared,
       connections: own.map(({ key, counts }) => ({ key, ...(counts.atOnce !== undefined ? { atOnce: counts.atOnce } : {}) })),
       ...(view.limits?.askAt !== undefined ? { askAt: view.limits.askAt } : {}),
-      spend,
       controller: new AbortController(),
       done: promise,
       settle: resolve,
@@ -503,44 +481,9 @@ export class Jobs implements JobsApi, JobsWork {
       }
       count.all += 1;
       for (const { key } of own) count.connections[key] = (count.connections[key] ?? 0) + 1;
-      return { all: count.all, connections: count.connections, tokens: count.tokens };
+      return { all: count.all, connections: count.connections };
     });
     return hit;
-  }
-
-  /**
-   * What the user's jobs have spent today: read from the day's record in the store the first time
-   * this process asks, so that it holds across a restart, then counted into by every call of their
-   * agents as it is made. Only today's is kept here; a job started on a day gone by goes on counting
-   * into that day's.
-   */
-  #spend(user: string): Promise<DaySpend> {
-    const day = this.#core.env.clock.day();
-    const at = `${day}\n${user}`;
-    const known = this.#days.get(at);
-    if (known !== undefined) return known;
-    for (const other of this.#days.keys()) if (!other.startsWith(`${day}\n`)) this.#days.delete(other);
-    const key = `${DAYS}${day}`;
-    const read = this.#core.env.store.get({ user }, key).then((value): DaySpend => {
-      // What was spent before this process, as it was spent: each job's day holds it to the weight of a cached token in force.
-      const { tokens } = dayCount(value);
-      return { key, user, used: { ...emptyUsage(), ...tokens } };
-    });
-    this.#days.set(at, read);
-    // A read that failed is tried again by the next start.
-    void read.catch(() => {
-      if (this.#days.get(at) === read) this.#days.delete(at);
-    });
-    return read;
-  }
-
-  /** Keeps what the user's jobs have spent in a day, as counted so far, beside that day's count of jobs; once a job has ended, so that it holds across a restart. */
-  #keepSpend(spend: DaySpend, job: string): void {
-    const kept = this.#core.env.store.update({ user: spend.user }, spend.key, (current) => {
-      const count = dayCount(current);
-      return { all: count.all, connections: count.connections, tokens: { input: spend.used.input, cacheRead: spend.used.cacheRead, output: spend.used.output } };
-    });
-    this.#pend(kept, "What the user's jobs spent today could not be kept.", job);
   }
 
   /** Starts the waiting jobs that have a place: within the user's count at once, of every job of theirs and of those on each job's connection. */
@@ -584,12 +527,10 @@ export class Jobs implements JobsApi, JobsWork {
           const state: JobState = stoppedAs ?? (outcome.status === "failed" ? "failed" : outcome.status === "stopped" ? "cancelled" : "done");
           if (outcome.status === "failed") this.#core.env.log.warn("A job's agent could not go on.", { job: live.view.id, failure: outcome.failure ?? "harness", error: outcome.error ?? "" });
           const report = outcome.text.trim() !== "" ? outcome.text : live.view.report;
-          this.#keepSpend(live.spend, live.view.id);
           this.#end(live, { ...live.view, state, usage: end.usage, ...(report !== undefined ? { report } : {}), ...(end.limit !== undefined && stoppedAs === undefined ? { limit: end.limit } : {}) });
         },
         (error: unknown) => {
           this.#core.env.log.error("A job failed in the harness.", { job: live.view.id, error: errorWords(error) });
-          this.#keepSpend(live.spend, live.view.id);
           this.#end(live, { ...live.view, state: "failed" });
         },
       );
@@ -715,13 +656,12 @@ export class Jobs implements JobsApi, JobsWork {
   async #again(view: JobView): Promise<boolean> {
     const { log } = this.#core.env;
     try {
-      const spend = await this.#spend(view.scope.user);
-      const prepared = await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spent: spend.used, ...(view.limits !== undefined ? { limits: view.limits } : {}) });
+      const prepared = await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spend: await this.#core.usage.spend(view.scope.user), ...(view.limits !== undefined ? { limits: view.limits } : {}) });
       if (!("run" in prepared)) {
         log.warn("A job that was waiting could not be queued again.", { job: view.id, agent: view.agent });
         return false;
       }
-      this.#enqueue(view, prepared, jobCountsFor(prepared.settings, prepared.connection), spend);
+      this.#enqueue(view, prepared, jobCountsFor(prepared.settings, prepared.connection));
       return true;
     } catch (error) {
       log.error("A job that was waiting could not be queued again.", { job: view.id, error: errorWords(error) });

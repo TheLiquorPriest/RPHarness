@@ -12,7 +12,7 @@ import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
 import { requestPath, sentMessages } from "../harness/requests";
 import { callTerms, readSettings, type Settings } from "../harness/settings";
-import type { UsageBook } from "../harness/usage";
+import type { DaySpend, UsageBook } from "../harness/usage";
 import { type AgentOutcome, type AgentRunner, Budget, type GateCall, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type ToolGate, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
@@ -59,8 +59,8 @@ export interface JobAsk {
   parent?: ParentCall;
   /** For a job an agent of another job started: that job's budget, which this one's calls and tokens count against too, so a chain of jobs spends no more than the first one may. */
   over?: Budget;
-  /** What all of the user's jobs have spent in the user's day, which this one's calls count into as they are made. */
-  spent: Usage;
+  /** What the user's agents have spent in the last 24 hours, every agent's and his jobs' alone, as it stands each time it is asked: the daily caps this job's calls are held to. */
+  spend: DaySpend;
   /** Limits of its own from the start. The owner's own start (none names an agent) gives his word for this job: each stands in place of the settings', looser or tighter. An agent's start only makes each tighter than the settings', never looser. */
   limits?: JobLimits;
 }
@@ -121,8 +121,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const calls = limit(settings.jobs.run.calls, given.calls);
   const tokensIn = limit(settings.jobs.run.tokensIn, given.tokensIn);
   const tokensOut = limit(settings.jobs.run.tokensOut, given.tokensOut);
-  // A job started by another job's agent spends from that job's run, which spends from the day; any other, from the day.
-  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, undefined, { used: ask.spent, cachedWeight: settings.jobs.cachedWeight });
+  // A job started by another job's agent spends from that job's run, which spends from the user's jobs' day, which spends from every agent's day; any other, from the jobs' day. The usage book counts every call into the day as it ends, so these budgets only read the counts.
+  const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.jobs.cachedWeight });
+  const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.jobs.cachedWeight });
   // Its own `tokens` count a cached re-read at the weight the day's job tokens do, so the two limits on a job's tokens mean the same; tokens in and out count in full, as the run limits they tighten.
   const budget = new Budget(
     "job",

@@ -4,6 +4,7 @@ description: The layout of the briefing the lead is given at the start of every 
 # Briefing for this turn
 
 - This turn: {{turn.kind}}{{#turn.speaker}}, replying as {{turn.speaker}}{{/turn.speaker}}.
+- The chat's latest messages are this conversation's user and assistant turns, oldest first: each user turn a message of the player's, each assistant turn a reply.
 {{#asked}}
 - The player asked for: {{.}}
 {{/asked}}

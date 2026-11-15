@@ -1,7 +1,8 @@
 // The contract between RPH and its host (Appendix A): what a host implements, and what RPH offers
 // it. Types only. A host imports this; `createHarness` from `rp-harness`; the one module of pure
-// helpers, `rp-harness/helpers` (`src/helpers.ts`), which holds the list of settings RPH reads and
-// the merge of levels it reads them by; and nothing else.
+// helpers, `rp-harness/helpers` (`src/helpers.ts`), which holds the list of settings RPH reads, the
+// merge of levels it reads them by, the one check of a setting's value, and the reader of a
+// definition's header with its list of fields; and nothing else.
 
 export type * from "./approvals";
 export type * from "./chat";

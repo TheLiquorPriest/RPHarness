@@ -108,7 +108,8 @@ export interface Clock {
   clearTimeout(handle: unknown): void;
   /**
    * The user's calendar day at `at` (now when not given), as `YYYY-MM-DD` in the user's own time
-   * zone. Daily caps (§10.11) count by it.
+   * zone. No daily cap counts by it: a day is the last 24 hours (§10.11). Only the jobs' count of
+   * jobs a day still reads it; once that counts 24 hours too, it leaves the contract.
    */
   day(at?: number): string;
 }

@@ -65,6 +65,8 @@ export interface RawMessage {
   parts: RawPart[];
   /** How many pictures it carries, where it carries any. `length` and `hash` are of the text alone. */
   images?: number;
+  /** The thinking the chat application sent back with it (an earlier reply's, Lumiverse's `reasoning_content`), read apart: no part of `length`, `hash` or the parts; absent where none. */
+  thinking?: { length: number; hash: TextHash };
 }
 
 /** A block of the preset as the chat application's own breakdown has it (§4.8): its name, type and resolved text, and the kind its own block says. */

@@ -100,7 +100,7 @@ class Run implements RuleRun {
   readonly #rules: readonly Rule[];
   readonly #facts: Facts;
   readonly #factNames: ReadonlySet<string>;
-  readonly #memory: RuleMemory;
+  readonly #memory: RuleMemory & { session: NonNullable<RuleMemory["session"]> };
   readonly #window: number | undefined;
   /** `<rule> <agent id>`: what fired in this run, for `once per turn`. */
   readonly #thisRun = new Set<string>();
@@ -116,7 +116,9 @@ class Run implements RuleRun {
     this.#window = input.window;
     const defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
     this.#factNames = new Set(defs.keys());
-    this.#memory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
+    const memory: RuleMemory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
+    // A run in another session than the one the memory notes begins that session's list: a rule `repeat: once per session` fires again in it.
+    this.#memory = { ...memory, session: memory.session !== undefined && memory.session.id === input.scope.session ? memory.session : { id: input.scope.session, fired: [] } };
     for (const rule of input.rules) this.problems.push(...checkFacts(rule, defs));
     this.runEnd = { due: (moment) => this.#due(moment.agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "run-end" ? "run-end" : undefined)) };
   }
@@ -127,22 +129,25 @@ class Run implements RuleRun {
 
   /** Whether `repeat:` lets the rule fire for this agent now. */
   #may(rule: Rule, agent: AgentRef): boolean {
-    const last = this.#memory.fired[`${rule.name} ${agent.definition}`];
+    const key = `${rule.name} ${agent.definition}`;
+    const last = this.#memory.fired[key];
     switch (rule.repeat.per) {
       case "always":
         return true;
       case "turn":
         return !this.#thisRun.has(`${rule.name} ${agent.id}`);
       case "session":
-        return last === undefined;
+        return !this.#memory.session.fired.includes(key);
       case "turns":
         return last === undefined || this.#memory.turns - last >= rule.repeat.turns;
     }
   }
 
   #mark(rule: Rule, agent: AgentRef): void {
+    const key = `${rule.name} ${agent.definition}`;
     this.#thisRun.add(`${rule.name} ${agent.id}`);
-    this.#memory.fired[`${rule.name} ${agent.definition}`] = this.#memory.turns;
+    this.#memory.fired[key] = this.#memory.turns;
+    if (!this.#memory.session.fired.includes(key)) this.#memory.session.fired.push(key);
   }
 
   /**

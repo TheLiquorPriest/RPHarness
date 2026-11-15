@@ -1,9 +1,15 @@
-// A session file whose last line was cut off part-way (a write that stopped, a process that ended
-// mid-line), read by a harness started again: the cut line is passed over, and what is written
-// after it stays whole, so every later restart finds the session's history as it stood.
+// A harness started again (every update restarts RPE) finds the session as it stood: a session file
+// whose last line was cut off part-way (a write that stopped, a process that ended mid-line) has the
+// cut line passed over, and what is written after it stays whole, so every later restart finds the
+// session's history as it stood; the lead's opening block is the one the session file keeps, so the
+// cached front holds; and what the session file and the store keep is plain JSON, carried whole.
 import { afterEach, expect, test } from "bun:test";
-import type { Scope, TurnRequest } from "../../src/contract";
+import { join } from "node:path";
+import type { JsonObject, Scope, TurnRequest } from "../../src/contract";
+import type { RuleMemory } from "../../src/files/api";
+import { keepMemory, keptOpening, memoryAt, type Opening, Sessions } from "../../src/harness/sessions";
 import { createHarness } from "../../src/index";
+import { lineOf, parseSession, SessionLog } from "../../src/sessions/file";
 import { scriptedModel } from "../../src/testing/rig";
 import { CHAT, PROMPT, type RecordedRequest, request, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
 
@@ -69,4 +75,55 @@ test("after a line cut off part-way, the first turn played after a restart stays
   } finally {
     await again.close();
   }
+});
+
+const lead = (words: string, tools: string) => `---\nname: lead\ndescription: Fixture lead.\nmodel: default\ntools: [${tools}]\ngiven:\n  - prompt:*\n  - session:carry\n  - briefing\n---\nFixture lead: ${words}\n`;
+
+test("a harness started again mid-scene sends the lead the same opening block and the same tool list, byte for byte; a file edited in between reaches the briefing as changed, not the block", async () => {
+  const s = (open = await stage({ files: { ".agents/lead.md": lead("first words.", "todo") }, answers: [{ pieces: [{ text: "<intent>Intent one.</intent><reply>Reply one.</reply>" }] }] }));
+  await s.harness.sessions!.open(S1);
+  expect((await s.turn(turn("t1"))).outcome.status).toBe("released");
+
+  await Bun.write(join(s.dir, "files", ".agents", "lead.md"), lead("second words.", "todo, file_read"));
+  const second = await restarted(s, "second", "<intent>Intent two.</intent><reply>Reply two.</reply>", turn("t2", "t1"));
+  const first = s.model.requests[0]!;
+  expect(textOf(first.messages[0]!)).toContain("Fixture lead: first words.");
+  expect(textOf(second.messages[0]!)).toBe(textOf(first.messages[0]!));
+  expect(JSON.stringify(second.tools)).toBe(JSON.stringify(first.tools));
+  expect(second.tools.map((tool) => tool.name)).not.toContain("file_read");
+  expect(textOf(second.messages.at(-1)!)).toContain("Fixture lead: second words.");
+});
+
+test("an Opening and a RuleMemory survive a round trip through JSON unchanged", async () => {
+  const s = (open = await stage({ answers: [] }));
+  // Each with a field no code here knows, as a later package may add one.
+  const opening = {
+    text: "Fixture opening block.",
+    snapshot: { agent: "lead", parts: [{ part: "definition", path: ".agents/lead.md", level: "global", hash: "0f1e", layered: true }] },
+    skills: "Fixture skills.",
+    tools: ["todo"],
+    given: ["prompt:*", "briefing"],
+    outOfReach: ["web"],
+    declared: { todo: { description: "Fixture todo.", parameters: { type: "object", properties: { items: { type: "array" } }, required: ["items"] } } },
+    closing: "Fixture closing.",
+    form: "tags",
+    stream: true,
+    tags: { reply: "reply", intent: "intent" },
+    intentFile: "intent.md",
+    contract: "Fixture contract.",
+    later: { added: ["by a later package"] },
+  } as unknown as Opening;
+  const parsed = parseSession(lineOf({ type: "opening", id: "o1", parent: null, at: 0, lead: "lead", opening: opening as unknown as JsonObject }));
+  expect(keptOpening(new SessionLog(parsed.entries), "lead")).toStrictEqual(opening);
+
+  const memory = {
+    turns: 4,
+    fired: { "fixture-every lead": 3 },
+    held: [{ agent: "lead", firing: { rule: "fixture-lantern", path: ".rules/fixture-lantern.md", level: "global", moment: "after-message", watched: "reply", matched: "yes" }, text: "Fixture held text." }],
+    session: { id: "s1", fired: ["fixture-once lead"] },
+    later: { added: 1 },
+  } as unknown as RuleMemory;
+  // Kept, and let go of in memory at once: what is read back is the store's.
+  await keepMemory(new Sessions().of(S1), s.env, { ...S1, turn: "t4" }, memory, new Set());
+  expect(await memoryAt(new Sessions().of(S1), s.env, S1, new SessionLog(), null, "t4")).toStrictEqual(memory);
 });

@@ -6,7 +6,7 @@
 //
 // Which entries are on the path is worked out from the file alone, by reading it in order, so a
 // harness that starts again finds the session as it stood.
-import type { JsonValue, TurnKind } from "../contract";
+import type { JsonObject, JsonValue, TurnKind } from "../contract";
 import { isMapping } from "../files/header";
 
 /** The file's first line: which session, whose, when it began, and for a branch, where it was forked from. */
@@ -125,7 +125,20 @@ export interface CompactEntry extends EntryBase {
   turn?: undefined;
 }
 
-export type SessionEntry = OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry;
+/**
+ * A lead's opening block (§10.2 block 1), as it was made: at the session's first turn for that lead,
+ * or afresh by "Apply now". The newest for a lead, in the order of the file, is the one its turns go
+ * on with, wherever the turn that made it stands. Kept as plain JSON, so what the block comes to hold
+ * is carried here unchanged. A mark: it belongs to no turn, is never the leaf, and no entry follows it.
+ */
+export interface OpeningEntry extends EntryBase {
+  type: "opening";
+  lead: string;
+  opening: JsonObject;
+  turn?: undefined;
+}
+
+export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -168,6 +181,8 @@ function isEntry(v: Record<string, unknown>): boolean {
       return str(v["turn"]) && str(v["summary"]) && str(v["kept"]);
     case "compact":
       return v["turn"] === undefined;
+    case "opening":
+      return v["turn"] === undefined && str(v["lead"]) && isMapping(v["opening"]);
     default:
       return false;
   }
@@ -220,7 +235,9 @@ export function parseSession(text: string): ParsedSession {
  *   in one of them goes to it;
  * - a compaction the host asked for is waiting from its mark until a compaction is written after it,
  *   in the order of the file, wherever either stands; the mark is never the leaf, so a turn at work
- *   when it was given goes on where the session stands.
+ *   when it was given goes on where the session stands;
+ * - a lead's opening block stands from its mark until a newer one for that lead is written, in the
+ *   order of the file, wherever either stands; the mark is never the leaf either.
  *
  * Each entry keeps its place in the file, so what the host said can be told apart from what was
  * written before it (a summary written before a turn it stands for left the path).
@@ -242,6 +259,8 @@ export class SessionLog {
   #opened: OpenedEntry | undefined;
   /** The host's mark asking for a compaction, while no compaction has been written after it. */
   #asked: CompactEntry | undefined;
+  /** Each lead's newest opening block, in the order of the file. */
+  readonly #openings = new Map<string, OpeningEntry>();
 
   constructor(entries: readonly SessionEntry[] = []) {
     for (const entry of entries) this.add(entry);
@@ -292,6 +311,9 @@ export class SessionLog {
       case "compact":
         this.#asked = entry;
         return;
+      case "opening":
+        this.#openings.set(entry.lead, entry);
+        return;
       default: {
         if (entry.type === "compacted") this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
@@ -317,6 +339,16 @@ export class SessionLog {
   /** The host's mark asking for a compaction, while none has been written since. */
   get asked(): CompactEntry | undefined {
     return this.#asked;
+  }
+
+  /** A lead's newest opening block, in the order of the file: the one its turns go on with. */
+  opening(lead: string): OpeningEntry | undefined {
+    return this.#openings.get(lead);
+  }
+
+  /** Each lead's newest opening block, in the order they were written. */
+  openings(): OpeningEntry[] {
+    return [...this.#openings.values()].sort((a, b) => this.place(a.id) - this.place(b.id));
   }
 
   /** A turn's first entry. */

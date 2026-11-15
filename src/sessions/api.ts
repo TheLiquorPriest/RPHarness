@@ -86,6 +86,8 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
             const before = entries.findIndex((step) => step.type === "compacted" && source.log.place(step.id) > source.log.place(mark.id));
             entries.splice(before < 0 ? entries.length : before, 0, { ...mark, parent: last.id });
           }
+          // And each lead's newest opening block, so the branch goes on with the front its session had (§10.2).
+          for (const opening of source.log.openings()) entries.push({ ...opening, parent: tip });
           target.copy(entries, { chat: from.chat, session: from.session, turn: from.turn });
           await target.settled();
           return view(target);

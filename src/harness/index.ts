@@ -4,9 +4,9 @@
 // sessions when the host says so, and compacts one at a turn's start when the lead's first call
 // would not fit (or its provider refused it as too long) or the host asked; it runs the jobs agents
 // and the user start (§13.5); and it gives the pages their ways in: the live view, usage,
-// definitions, rules, models and jobs. It has no way to talk with an agent outside a turn. What a
-// session holds in memory besides its file (each lead's opening block, what the rules remembered)
-// is gone after a restart, or once the host closes the session; the file is read again. A job a
+// definitions, rules, models and jobs. It has no way to talk with an agent outside a turn. Each lead's
+// opening block is kept in the session's file, and what the rules remembered at each turn's end in
+// the host's store, so a restart, or a session open again after a close, goes on with both. A job a
 // restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";

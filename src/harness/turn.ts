@@ -40,7 +40,7 @@ import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { requestPath, sentMessages } from "./requests";
-import { keepOnly, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
+import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
@@ -293,8 +293,8 @@ export class Turn {
 
     const session = this.#c.sessions.of(scope);
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
-    // The rules go on from what they remembered where this run starts in the session file, so a swipe starts where the attempt it replaces did, and a continue where its turn left off.
-    const memory = memoryAt(session, file.log, from);
+    // The rules go on from what they remembered where this run starts in the session file, or at the turn it follows in the scene before, so a swipe starts where the attempt it replaces did, and a continue where its turn left off.
+    const memory = await memoryAt(session, env, scope, file.log, from, req.parent);
     const rules = await guidance.ruleRun({ facts, window: settings.ruleWindow, ...(memory !== undefined ? { memory } : {}) });
     this.#rules = rules;
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
@@ -360,13 +360,15 @@ export class Turn {
       late: (agent, judged) => this.#late(agent, judged),
     });
     this.#judges = judges;
-    let opening = session.openings.get(req.lead);
+    // The block the session opened with: as memory holds it, or, after a restart or once the session is open again after a close, as its file keeps it. Made afresh, it is kept in the file.
+    let opening = session.openings.get(req.lead) ?? keptOpening(file.log, req.lead);
     if (opening === undefined) {
       const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing));
       if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: "failed", detail: opened } });
       opening = opened;
-      session.openings.set(req.lead, opening);
+      file.add({ type: "opening", parent: begun.id, lead: req.lead, opening: opening as unknown as JsonObject });
     }
+    session.openings.set(req.lead, opening);
     this.#opening = opening;
     this.#texts = runnerTexts(this.#words, template(goOn), opening.closing, settings.schemaShown);
 
@@ -495,10 +497,9 @@ export class Turn {
     if (outcome !== undefined && compacting !== undefined && refusedAsTooLong(outcome, model.model) && (await this.#compact(compacting, true))) outcome = await leadWork(leadRunner());
     // Nothing more started: the turn was stopped, or its own time ran out on the way (during a compaction, say), and it ends at that limit.
     if (outcome === undefined) return this.#timeUp !== undefined ? this.#outcome({ status: "limit", limit: this.#timeUp }) : this.#outcome({ status: "stopped" });
-    // What the rules remembered is kept once every judgment still running has come in, and only for the turns a later turn can still follow.
+    // What the rules remembered is kept once every judgment still running has come in: through the host's store, and in memory only for the turns a later turn can still follow.
     await judges.settled();
-    session.memories.set(scope.turn, rules.memory());
-    keepOnly(session, new Set(pathTurns(file.log, file.log.tip(scope.turn) ?? null).map((turn) => turn.entry.turn)));
+    await keepMemory(session, env, scope, rules.memory(), new Set(pathTurns(file.log, file.log.tip(scope.turn) ?? null).map((turn) => turn.entry.turn)));
     return this.#outcomeOf(outcome);
   }
 

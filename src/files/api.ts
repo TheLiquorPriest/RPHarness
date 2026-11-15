@@ -295,21 +295,28 @@ export interface Facts {
 // ---------------------------------------------------------------- the rule engine
 
 /**
- * What the rules remember across the turns of a session (JSON): the caller keeps it with the session
- * and hands it back to the next run. A new session starts with none.
+ * What the rules remember across a chat's turns (JSON): the caller keeps it with each turn, through
+ * the host's store, and hands the memory of the turn a run follows back to that run, across a
+ * scene's end and a restart. A chat's first turn starts with none.
  */
 export interface RuleMemory {
-  /** Turns begun under it (`RuleRun.turnStart`): what `every:` and `repeat: after N turns` count. */
+  /** The chat's turns begun under it (`RuleRun.turnStart`): what `every:` and `repeat: after N turns` count. */
   turns: number;
   /** The turn count at which a rule last fired, by `<rule> <agent definition>`. */
   fired: Record<string, number>;
   /** Texts held for the next briefing: a question rule answered yes about a reply already shown. */
   held: { agent: string; firing: Fired["firing"]; text: string }[];
+  /**
+   * The session it was last run in, with the rules that fired in that session, by `<rule> <agent
+   * definition>`: what `repeat: once per session` asks, so a run in another session begins the list
+   * anew. Absent in a memory that has not run yet.
+   */
+  session?: { id: string; fired: string[] };
 }
 
 export interface RuleRunOptions {
   facts: Facts;
-  /** The session's memory; none for a new session. */
+  /** What the rules remembered at the end of the turn the run follows; none for a chat's first turn. */
   memory?: RuleMemory;
   /**
    * How many characters a pattern looks at at a time: the newest of what is being written, and

@@ -51,8 +51,11 @@ test("the lines a turn makes while an append is under way reach the file togethe
     .split("\n")
     .filter((line) => line !== "")
     .map((line) => JSON.parse(line) as { type: string; id: string; parent: string | null });
-  expect(lines.map((line) => line.type)).toEqual(["session", "turn", "intent", "message", "call", "result", "message"]);
-  for (const [i, line] of lines.entries()) if (i > 1) expect(line.parent).toBe(lines[i - 1]!.id);
+  expect(lines.map((line) => line.type)).toEqual(["session", "turn", "opening", "intent", "message", "call", "result", "message"]);
+  // The lead's opening block is a mark hung from the turn; the turn's own entries follow one another, the first from the turn.
+  const entries = lines.filter((line) => line.type !== "opening");
+  expect(lines[2]!.parent).toBe(lines[1]!.id);
+  for (const [i, line] of entries.entries()) if (i > 1) expect(line.parent).toBe(entries[i - 1]!.id);
   // The first append, then what the turn made while it waited, in one; the last message joins it or follows. Never one append per entry.
   expect(appends).toBeLessThanOrEqual(3);
 });

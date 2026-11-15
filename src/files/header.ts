@@ -83,11 +83,62 @@ export function splitHeader(text: string, at: At): Split {
   return split;
 }
 
+/** A text as a pattern that matches it alone. */
+function literal(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /** The file's line a top-level field is on: the first of `lines` (the file's line `firstLine` onwards) that starts with `name:`. A header's lines start on line 2. */
 export function fieldLine(lines: readonly string[], name: string, firstLine = 2): number | undefined {
-  const starts = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}[ \\t]*:`);
+  const starts = new RegExp(`^${literal(name)}[ \\t]*:`);
   const i = lines.findIndex((line) => starts.test(line));
   return i === -1 ? undefined : i + firstLine;
+}
+
+/**
+ * Where the items of a top-level field's value are written, found by their text in the order YAML
+ * reads them: each search goes on from where the last one found its text, so a name written twice is
+ * found at each place in turn, in a block (`- STYLE` lines, `gm:` lines below the field) or a flow
+ * (`[STYLE, house/canon.md]`) alike. The value runs from the field's line to the next line that
+ * starts at the margin with anything but a list's `- ` or a comment (another field, a header's `---`).
+ */
+export class WrittenItems {
+  readonly #lines: readonly string[];
+  readonly #first: number;
+  /** The field's own line; undefined where no line starts with it. */
+  readonly field: number | undefined;
+  readonly #end: number;
+  #row: number;
+  #col: number;
+
+  constructor(lines: readonly string[], name: string, firstLine = 2) {
+    this.#lines = lines;
+    this.#first = firstLine;
+    const starts = new RegExp(`^${literal(name)}[ \\t]*:`);
+    const row = lines.findIndex((line) => starts.test(line));
+    this.field = row === -1 ? undefined : row + firstLine;
+    this.#row = Math.max(row, 0);
+    this.#col = row === -1 ? 0 : (lines[row] ?? "").indexOf(":") + 1;
+    let end = row + 1;
+    while (row !== -1 && end < lines.length && !/^(?:[^\s#-]|-\S)/.test(lines[end] ?? "")) end++;
+    this.#end = row === -1 ? 0 : end;
+  }
+
+  /** The line `text` is next written on, as a value, or as a key (`text:`) where `key` is set; the search goes on after it. Undefined where it is not written from there on: the search stays where it was. */
+  find(text: string, key = false): number | undefined {
+    const pattern = new RegExp(key ? `(?<![\\w.-])["']?${literal(text)}["']?[ \\t]*:` : literal(text));
+    for (let row = this.#row; row < this.#end; row++) {
+      const line = this.#lines[row] ?? "";
+      if (/^\s*#/.test(line)) continue;
+      const from = row === this.#row ? this.#col : 0;
+      const match = pattern.exec(line.slice(from));
+      if (match === null) continue;
+      this.#row = row;
+      this.#col = from + match.index + match[0].length;
+      return row + this.#first;
+    }
+    return undefined;
+  }
 }
 
 /** A header field given as one name or a list of names: the names, or undefined when it is neither. */

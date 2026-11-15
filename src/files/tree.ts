@@ -2,11 +2,11 @@
 // holds, their texts, and what the levels' config files switch off, add, add to stacks and pin. The
 // names of the levels, their folders and their config files are the host's; nothing here names one.
 
-import type { FileText, FilesPort, GuidanceKind, Layer, LayerLevel, Scope, UserScope } from "../contract/index";
+import type { FileText, FilesPort, FindStopped, GuidanceKind, Layer, LayerLevel, Scope, UserScope } from "../contract/index";
 import type { Problem } from "./api";
 import { CONFIG_KEYS } from "./api";
 import type { At } from "./header";
-import { fieldLine, isMapping, nameList, normalized, parseYaml, problemAt } from "./header";
+import { fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, WrittenItems } from "./header";
 
 /** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`). */
 export type Listing = "instructions" | "agents" | "rules" | "examples" | "skills" | "prompts" | "tools";
@@ -24,7 +24,9 @@ export interface InstructionsList {
   agent?: string;
   /** As written: instruction files by name (`STYLE`), or paths or globs in the agents' view (`house/*.md`). */
   entries: string[];
-  /** The config file it is in, and the line of its key. */
+  /** The line each entry is written on, by its place in `entries`; undefined where its text was not found as written (the list's line stands for it). */
+  lines: (number | undefined)[];
+  /** The config file it is in, and the line of the list: the agent's, in a mapping, else the key's. */
   at: At;
   line?: number;
 }
@@ -35,7 +37,7 @@ export interface Pin {
   file: string;
   /** The definition it is pinned for. */
   agent: string;
-  /** The config file it is in, and the line of its key. */
+  /** The config file it is in, and the line the pin is written on (the key's, where its text was not found). */
   at: At;
   line?: number;
 }
@@ -110,6 +112,20 @@ function nameOf(listing: Listing, rest: string): string | undefined {
   return m?.[1];
 }
 
+/** The texts of a config item's values, in the order they are written: what finds the item's line. */
+function scalars(value: unknown): string[] {
+  if (typeof value === "string") return value.trim() === "" ? [] : [value.trim()];
+  if (typeof value === "number" || typeof value === "boolean") return [String(value)];
+  if (Array.isArray(value)) return value.flatMap(scalars);
+  return isMapping(value) ? Object.values(value).flatMap(scalars) : [];
+}
+
+/** Why a host stopped a listing or a search before its end, in a problem's words. */
+export function stoppedWhy(stopped: FindStopped): string {
+  const why = [...(stopped.limit !== undefined ? [`at its cap of ${stopped.limit.max} files`] : []), ...(stopped.time !== undefined ? [`when its ${stopped.time.ms} ms ran out`] : [])];
+  return why.length === 0 ? "before its end" : why.join(" and ");
+}
+
 export class Tree {
   readonly files: FilesPort;
   readonly scope: Scope | UserScope;
@@ -168,6 +184,8 @@ export class Tree {
           this.problems.push({ path, level: layer.level, message: `The host refused to list this folder (${found.reason}).` });
           return [];
         }
+        // Every file is loaded (R-183): a listing the host cut is said, never taken as the whole.
+        if (found.stopped !== undefined) this.problems.push({ path, level: layer.level, message: `The host stopped listing this folder ${stoppedWhy(found.stopped)}, so the files past where it stopped are not loaded.` });
         const prefix = path === "" || path.endsWith("/") ? path : `${path}/`;
         return found.hits.flatMap((hit) => {
           if (hit.type !== "file" || !hit.path.startsWith(prefix)) return [];
@@ -243,32 +261,41 @@ export class Tree {
 
       const instructions = parsed.value[CONFIG_KEYS.instructions];
       if (instructions !== undefined && instructions !== null) {
-        const line = fieldLine(lines, CONFIG_KEYS.instructions, 1);
-        const where = { at, ...(line !== undefined ? { line } : {}) };
+        const written = new WrittenItems(lines, CONFIG_KEYS.instructions, 1);
+        const line = written.field;
+        const listOf = (entries: string[], listLine: number | undefined, agent?: string): InstructionsList => ({ ...(agent !== undefined ? { agent } : {}), entries, lines: entries.map((entry) => written.find(entry)), at, ...(listLine !== undefined ? { line: listLine } : {}) });
         if (isMapping(instructions)) {
           for (const [agent, value] of Object.entries(instructions)) {
+            const agentLine = written.find(agent, true) ?? line;
             const entries = nameList(value);
-            if (entries === undefined) this.problems.push(problemAt(at, line, `\`instructions:\` gives \`${agent}\` something other than a list of files: \`${agent}: [STYLE, house/canon.md]\`.`));
-            else config.instructions.push({ agent, entries, ...where });
+            if (entries === undefined) this.problems.push(problemAt(at, agentLine, `\`instructions:\` gives \`${agent}\` something other than a list of files: \`${agent}: [STYLE, house/canon.md]\`.`));
+            else config.instructions.push(listOf(entries, agentLine, agent));
           }
         } else {
           const entries = nameList(instructions);
           if (entries === undefined) this.problems.push(problemAt(at, line, "`instructions:` is a list of files added to the stack of every agent that reads instruction files, `instructions: [STYLE, house/canon.md]`, or such a list for each agent by name: `instructions: { gm: [house/rules.md] }`."));
-          else config.instructions.push({ entries, ...where });
+          else config.instructions.push(listOf(entries, line));
         }
       }
 
       const pins = parsed.value[CONFIG_KEYS.pins];
       if (pins !== undefined && pins !== null) {
-        const line = fieldLine(lines, CONFIG_KEYS.pins, 1);
-        const where = { at, ...(line !== undefined ? { line } : {}) };
+        const written = new WrittenItems(lines, CONFIG_KEYS.pins, 1);
+        const line = written.field;
         if (!Array.isArray(pins)) this.problems.push(problemAt(at, line, "`pins:` is a list of files, each pinned for an agent: `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`."));
         else {
           for (const [i, pin] of pins.entries()) {
+            // A pin is written where the first of its values is; the search goes on past them all.
+            let pinLine: number | undefined;
+            for (const text of scalars(pin)) {
+              const found = written.find(text);
+              pinLine ??= found;
+            }
+            pinLine ??= line;
             const file = isMapping(pin) && typeof pin.file === "string" ? pin.file.trim() : "";
             const agent = isMapping(pin) && typeof pin.agent === "string" ? pin.agent.trim() : "";
-            if (file === "" || agent === "") this.problems.push(problemAt(at, line, `Pin ${i + 1} of \`pins:\` needs a \`file\` and an \`agent\`, as in \`{ file: persistent-workspace/plan.md, agent: keeper }\`, so it is left out.`));
-            else config.pins.push({ file, agent, ...where });
+            if (file === "" || agent === "") this.problems.push(problemAt(at, pinLine, `Pin ${i + 1} of \`pins:\` needs a \`file\` and an \`agent\`, as in \`{ file: persistent-workspace/plan.md, agent: keeper }\`, so it is left out.`));
+            else config.pins.push({ file, agent, at, ...(pinLine !== undefined ? { line: pinLine } : {}) });
           }
         }
       }

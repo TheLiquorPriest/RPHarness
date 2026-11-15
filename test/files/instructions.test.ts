@@ -53,7 +53,7 @@ test("a list reaches every agent that reads instruction files, after WORLD and b
   expect(brief(await g.stack("keeper"))).toEqual(["house/scene.md", "agents/keeper"]);
   expect(brief(await g.stack("sorter"))).toEqual(["agents/sorter"]);
 
-  const notes: Problem = { path: "config.yml", level: "chat", line: 2, message: "`instructions:` names persistent-workspace/notes.md, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing." };
+  const notes: Problem = { path: "config.yml", level: "chat", line: 3, message: "`instructions:` names persistent-workspace/notes.md, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing." };
   expect(await g.problems()).toEqual([notes]);
   expect(scribe.problems).toEqual([notes]);
   expect((await g.stack("keeper")).problems).toEqual([]);
@@ -74,9 +74,9 @@ test("an entry finding only generated files or nothing, a list for an agent no d
   // Each is found as its entry is read, so the order they come in says nothing.
   expect((await g.problems()).map((p) => `${p.path}:${p.line} ${p.message}`).sort()).toEqual([
     "@global/config.yml:1 `instructions:` is a list of files added to the stack of every agent that reads instruction files, `instructions: [STYLE, house/canon.md]`, or such a list for each agent by name: `instructions: { gm: [house/rules.md] }`.",
-    "config.yml:1 `instructions:` gives a list to scrib, and no agent definition has that name, so the list reaches no stack.",
-    "config.yml:1 `instructions:` names PROMPT-MAP, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.",
-    "config.yml:1 `instructions:` names house/*.md, and no file matches it, so it adds nothing.",
-    "config.yml:1 `instructions:` names persistent-workspace/*.md, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.",
+    "config.yml:2 `instructions:` names PROMPT-MAP, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.",
+    "config.yml:2 `instructions:` names house/*.md, and no file matches it, so it adds nothing.",
+    "config.yml:2 `instructions:` names persistent-workspace/*.md, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.",
+    "config.yml:3 `instructions:` gives a list to scrib, and no agent definition has that name, so the list reaches no stack.",
   ]);
 });

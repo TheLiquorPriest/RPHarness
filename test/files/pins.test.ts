@@ -83,7 +83,7 @@ test("a note pinned for the keeper in a chat's RPE.yml and one in RPE-global.yml
   expect(fourth.brief).toContain(LEDGER);
   expect(fourth.brief).not.toContain(HOUSE);
   const gone = "The file pinned for keeper, @global/persistent-workspace/house.md, is not there, so keeper is handed nothing for it.";
-  expect(await loadGuidance(s.env.files, request("t4").scope).problems()).toContainEqual({ path: "@global/config.yml", level: "global", line: 1, message: gone });
+  expect(await loadGuidance(s.env.files, request("t4").scope).problems()).toContainEqual({ path: "@global/config.yml", level: "global", line: 2, message: gone });
   expect(s.logged.filter((line) => line.fields?.problem === gone).map((line) => line.fields?.agent)).toEqual(["keeper"]);
   expect(s.trace.of("agent_ended").filter((record) => record.agent.definition === "keeper").map((record) => record.event.status)).toEqual(["done", "done", "done", "done"]);
 });
@@ -136,7 +136,7 @@ test("a pin that is not a file and an agent, a `pins:` that is no list, and a pi
   expect((await g.definition("keeper"))?.given).toEqual(["file:persistent-workspace/ledger.md"]);
   expect((await g.problems()).map((p) => `${p.path}:${p.line} ${p.message}`).sort()).toEqual([
     "@global/config.yml:1 `pins:` is a list of files, each pinned for an agent: `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`.",
-    "config.yml:1 Pin 1 of `pins:` needs a `file` and an `agent`, as in `{ file: persistent-workspace/plan.md, agent: keeper }`, so it is left out.",
-    "config.yml:1 `pins:` pins persistent-workspace/plan.md for keepr, and no agent definition has that name, so nobody is handed it.",
+    "config.yml:2 Pin 1 of `pins:` needs a `file` and an `agent`, as in `{ file: persistent-workspace/plan.md, agent: keeper }`, so it is left out.",
+    "config.yml:3 `pins:` pins persistent-workspace/plan.md for keepr, and no agent definition has that name, so nobody is handed it.",
   ]);
 });

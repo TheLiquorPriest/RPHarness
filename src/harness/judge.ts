@@ -113,7 +113,8 @@ export class Judges implements QuestionRules {
     }
     // A session of its own, for this one call, let go when it ends.
     const session = d.ids();
-    const agent: AgentRef = { id: d.ids(), definition: question.agent.definition, parent: question.agent.id };
+    // A judge of a job's agent is that job's: what it spends counts as the job's, against the jobs' day too.
+    const agent: AgentRef = { id: d.ids(), definition: question.agent.definition, parent: question.agent.id, ...(question.agent.job !== undefined ? { job: question.agent.job } : {}) };
     const keep = d.keep?.(agent);
     const runner = new AgentRunner({
       agent,

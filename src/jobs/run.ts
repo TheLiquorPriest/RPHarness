@@ -135,10 +135,10 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const keep = (agent: AgentRef): KeepRequest | undefined => {
     const turn = places.turn;
     if (settings.requests === "none" || turn === undefined) return undefined;
-    return (call, messages) => {
+    return (call, messages, opening) => {
       if (settings.requests === "first" && call !== 1) return undefined;
       const path = requestPath(turn, agent, call);
-      void env.files.write(scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages) }) }, "harness").then(
+      void env.files.write(scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages, opening) }) }, "harness").then(
         (done) => {
           if (done.status !== "written") env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, status: done.status });
         },

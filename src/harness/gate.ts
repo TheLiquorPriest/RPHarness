@@ -8,7 +8,8 @@
 // turn. A tool found through `tool_use` is asked about as itself. Every word the model is told comes
 // from the tool answers' file. A tool's own answer stands whatever fails around it: a rule on its
 // result that could not be asked, or a whole that could not be kept, is a line beside it, and the log
-// names what failed. Every refusal says why, as a fact, for the call's end record.
+// names what failed. Every refusal says why, as a fact, for the call's end record. Every read and
+// search a call makes is saved whole in the turn's `queries/` (the session's, for a run with no turn).
 import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Log, Places, Scope, SwitchesPort, ToolContent } from "../contract";
 import type { RuleRun } from "../files/api";
 import type { Fired } from "../loop/rules";
@@ -16,9 +17,12 @@ import type { ParentCall, RunTrace } from "../loop/trace";
 import type { Bounded, GateAfter, GateBefore, GateCall, LoopToolResult, ToolGate } from "../loop/types";
 import type { HeldTool } from "../tools/registry";
 import { answer, type Words } from "../tools/kit";
+import { agentFileName } from "./requests";
 
 /** Where a clipped result's whole is kept, inside the turn's own `cache/` folder, or the session's. */
 const KEPT_RESULTS = "cache/results/";
+/** Where every read and search is saved, beside the gap checks (§5.3). */
+const QUERIES = "queries/";
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -94,6 +98,8 @@ export class TurnGate implements ToolGate {
 
   async after(call: GateCall, result: LoopToolResult, _signal?: AbortSignal, added: readonly string[] = [], room?: number): Promise<GateAfter> {
     const d = this.#d;
+    // Every search and read is saved whole beside the gap checks, so another agent, a query, the live view and he can see what was looked at (§5.3).
+    if (d.tools.get(call.tool)?.tier === "read") await this.#saveRead(call, result);
     // The rules see the result whole; the model reads it held to the bound, with every rule's text after it.
     let remind: Fired[] = [];
     const beside: string[] = [];
@@ -107,6 +113,20 @@ export class TurnGate implements ToolGate {
     }
     const bounded = await this.#bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())], room, beside);
     return { ...bounded, remind };
+  }
+
+  /** A read or a search, saved whole in the turn's `queries/` (the session's, for a run with no turn), named by agent, call and tool; logged when it cannot be. */
+  async #saveRead(call: GateCall, result: LoopToolResult): Promise<void> {
+    const d = this.#d;
+    const name = `${agentFileName(d.agent)}.${call.callId}.${call.tool}`.replace(/[^A-Za-z0-9._-]/g, "_");
+    const at = `${d.places.turn ?? d.places.session}${QUERIES}${name}.md`;
+    const text = [...result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])), ...(result.reports ?? [])].join("\n");
+    try {
+      const written = await d.files.write(d.scope, at, { op: "write", text }, "harness");
+      if (written.status !== "written") d.log.warn("A read's result could not be saved in queries/.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status });
+    } catch (error) {
+      d.log.warn("A read's result could not be saved in queries/.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
+    }
   }
 
   /**

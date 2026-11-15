@@ -21,8 +21,13 @@
 import { contentText, getSystemMessageText, type Message } from "@earendil-works/pi-ai";
 import type { AgentRef } from "../contract";
 
-/** The folder of the turn's folder the requests are kept in: the transcripts' (§5.3). */
-const FOLDER = "transcripts/";
+/** The folder of the turn's folder the transcripts and the requests are kept in (§5.3). */
+export const TRANSCRIPTS = "transcripts/";
+
+/** An agent's name in the transcripts folder, `<definition>-<handle>`, one that reaches no other folder. */
+export function agentFileName(agent: AgentRef): string {
+  return `${agent.definition}-${agent.id}`.replace(/[^A-Za-z0-9_-]/g, "-");
+}
 
 /** One message as the file keeps it. */
 export interface SentMessage {
@@ -49,7 +54,7 @@ export function sentMessages(messages: readonly Message[], opening?: Message): S
   });
 }
 
-/** Where one call's request is kept: `transcripts/<definition>-<handle>.call-<n>.json`, beside that agent's transcript, a name that reaches no other folder. */
+/** Where one call's request is kept: `transcripts/<definition>-<handle>.call-<n>.json`, beside that agent's transcript. */
 export function requestPath(turn: string, agent: AgentRef, call: number): string {
-  return `${turn}${FOLDER}${`${agent.definition}-${agent.id}`.replace(/[^A-Za-z0-9_-]/g, "-")}.call-${call}.json`;
+  return `${turn}${TRANSCRIPTS}${agentFileName(agent)}.call-${call}.json`;
 }

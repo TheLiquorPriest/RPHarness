@@ -36,12 +36,12 @@ import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { JobsWork } from "../jobs/tool";
 import { noticeLines, promptSlice, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
-import { TurnGate } from "./gate";
+import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
-import { placed, requestPath, sentMessages } from "./requests";
+import { placed } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { callTerms, DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
@@ -177,6 +177,8 @@ export class Turn {
   /** The turn's sub-agents, the writer among them once `write_reply` starts it. */
   #team: Team | undefined;
   #places: Places | undefined;
+  /** How each agent of the turn is made: its gate, its kept requests, its transcript. */
+  #runs: AgentRuns | undefined;
   #opening: Opening | undefined;
   /** The turn's prompt, its parts named (§4.8): what `prompt`, a `prompt:` name and the views read. */
   #prompt: TurnPrompt | undefined;
@@ -300,6 +302,17 @@ export class Turn {
     ]);
     this.#settings = settings;
     this.#places = places;
+    this.#runs = new AgentRuns({
+      env,
+      scope,
+      trace: this.#trace,
+      places,
+      settings: () => this.#settings,
+      rules: () => this.#rulesRun(),
+      words: (name, fields) => this.#words(name, fields),
+      tools: () => this.#registry?.all() ?? [],
+      tell: (written) => void this.#tell(written),
+    });
     // The turn's first entry in the session file: after the session's latest turn when the request names no parent, after no turn when it names none (null), and a swipe after the entry before the turn it replaces (§11).
     // A continue is the same turn, extended (§10.10): a turn the file holds already is not begun again, and its work goes on from the turn's newest entry.
     this.#file = file;
@@ -360,7 +373,7 @@ export class Turn {
       connection: (definition) => this.#connection(definition),
       hold: (names) => this.#registry?.hold(names) ?? { tools: [], missing: [...names] },
       unregistered: (name, tools) => this.#unregistered("Tools a sub-agent's definition lists are registered by nobody; it holds the rest.", name, tools),
-      gate: (agent, parent) => this.#gate(agent, parent),
+      gate: (agent, parent) => this.#agentRuns().gate(agent, parent),
       texts: () => this.#texts,
       rules: () => this.#rulesRun(),
       questions: () => this.#judges,
@@ -539,7 +552,7 @@ export class Turn {
         stream: streamRules,
         runEnd: rules.runEnd,
         questions: judges,
-        gate: this.#gate(this.#lead, undefined),
+        gate: this.#agentRuns().gate(this.#lead, undefined),
         channel,
         ...this.#keeper(this.#lead),
       });
@@ -628,7 +641,7 @@ export class Turn {
         limits: { ...c.definition.limits, calls: Math.min(settings.compaction.saveCalls, c.definition.limits?.calls ?? settings.compaction.saveCalls) },
         turn: this.#budget,
         stream: c.rules.stream(this.#lead),
-        gate: this.#gate(this.#lead, undefined),
+        gate: this.#agentRuns().gate(this.#lead, undefined),
       });
       if (this.#ended()) return false;
       const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: c.handed });
@@ -863,25 +876,9 @@ export class Turn {
     return Promise.resolve({ content: [], error: true });
   }
 
-  #gate(agent: AgentRef, parent: ParentCall | undefined): TurnGate {
-    const { env } = this.#c;
-    return new TurnGate({
-      scope: this.scope,
-      agent,
-      ...(parent !== undefined ? { parent } : {}),
-      trace: this.#trace,
-      clock: env.clock,
-      files: env.files,
-      log: env.log,
-      ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
-      ...(env.switches !== undefined ? { switches: env.switches } : {}),
-      places: this.#places ?? { notes: "", session: "", writable: [] },
-      rules: this.#rulesRun(),
-      words: (name, fields) => this.#words(name, fields),
-      // Every tool the agent may reach, so a tool found by `tool_use` is permitted and ruled on by its own tier and lane.
-      tools: new Map((this.#registry?.all() ?? []).map((tool) => [tool.name, tool])),
-      clipChars: this.#settings.clipChars,
-    });
+  #agentRuns(): AgentRuns {
+    if (this.#runs === undefined) throw new Error("The turn's agents were made before its places were read.");
+    return this.#runs;
   }
 
   #rulesRun(): RuleRun {
@@ -896,22 +893,10 @@ export class Turn {
     if (fresh.length > 0) this.#c.env.log.warn(message, { agent: definition, tools: fresh });
   }
 
-  /** Keeps what an agent's calls are sent, as `trace.requests` names them: each call's messages, in order, as role and text, in the turn's folder beside the transcripts. */
+  /** What an agent's calls are sent, kept as `trace.requests` names them (`AgentRuns.keep`), as the runner's option. */
   #keeper(agent: AgentRef): { keep?: KeepRequest } {
-    const which = this.#settings.requests;
-    const turn = this.#places?.turn;
-    if (which === "none" || turn === undefined) return {};
-    const { env } = this.#c;
-    const keep: KeepRequest = (call, messages, opening) => {
-      if (which === "first" && call !== 1) return undefined;
-      const path = requestPath(turn, agent, call);
-      const written = env.files.write(this.scope, path, { op: "write", text: JSON.stringify({ messages: sentMessages(messages, opening) }) }, "harness").then((done) => {
-        if (done.status !== "written") env.log.warn("What a model call was sent could not be kept.", { agent: agent.id, call, path, status: done.status });
-      });
-      this.#tell(written);
-      return path;
-    };
-    return { keep };
+    const keep = this.#agentRuns().keep(agent);
+    return keep === undefined ? {} : { keep };
   }
 
   /** RPH's own facts for an agent, now (§5.4 "Facts"). */
@@ -1097,7 +1082,7 @@ export class Turn {
       stream: streamRules,
       runEnd: rules.runEnd,
       ...(this.#judges !== undefined ? { questions: this.#judges } : {}),
-      gate: this.#gate(ref, parent),
+      gate: this.#agentRuns().gate(ref, parent),
       channel,
       ...this.#keeper(ref),
     });

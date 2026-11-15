@@ -8,7 +8,7 @@ import { JOB_SEARCHED, jobTools } from "../jobs/tools";
 import { PROMPT_TOOLS, promptMapWrite, promptTool, type TurnPrompt } from "../prompt";
 import { fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, replyRelease, type ReplyWork, todo, type TodoDeps, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
-import { SEARCH_TOOLS, searchTools, TOOL_USE, type ToolReach } from "../tools/search";
+import { SEARCH_TOOLS, searchTools, type ToolReach } from "../tools/search";
 import { toolTextOf } from "./means";
 import type { Settings } from "./settings";
 
@@ -74,8 +74,7 @@ export function ownTools(d: OwnToolsDeps): OwnTool[] {
       notices: d.words,
       texts,
       hits: settings.searchHits,
-      // `tool_use` carries the call of the tool it found, which the agent's runner runs as itself.
-    }).map((tool) => (tool.name === TOOL_USE ? { ...tool, carrier: true } : tool)),
+    }),
   ];
 }
 

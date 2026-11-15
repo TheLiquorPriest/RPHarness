@@ -5,7 +5,7 @@ import { joined } from "../agents/attachments";
 import type { Log, ModelsApi } from "../contract";
 import type { AgentDefinition, LinesPart, PromptPart, TemplatePart } from "../files/api";
 import type { RunnerTexts } from "../loop";
-import type { AgentChoice } from "../model/source";
+import type { UserChoice } from "../model/source";
 import { invalidFields, type ToolText, type Words } from "../tools";
 import { effortFor, type Settings } from "./settings";
 
@@ -47,19 +47,19 @@ export function runnerTexts(words: Words, goOn: TemplatePart | undefined, closin
   };
 }
 
-/** A definition's connection, as its header names it: the choice for the model layer, and the connection's id and name where they are known. */
+/** A definition's connection, as its header names it among the user's connections: the choice for the model layer, and the connection's id and name where they are known. */
 export interface Connection {
-  choice: AgentChoice;
+  choice: UserChoice;
   id: string | null;
   name: string | null;
   /** How the trace names it. */
   label: string;
 }
 
-/** The connection a definition (or a rule's `judge:`) names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
-export async function connectionOf(connections: ModelsApi, settings: Settings, definition: Pick<AgentDefinition, "model" | "effort">, log: Log): Promise<Connection> {
+/** The connection a definition (or a rule's `judge:`) names among `user`'s connections: `default` (or none) is his default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
+export async function connectionOf(connections: ModelsApi, user: string, settings: Settings, definition: Pick<AgentDefinition, "model" | "effort">, log: Log): Promise<Connection> {
   const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
-  const list = await connections.list().catch((error: unknown) => {
+  const list = await connections.list(user).catch((error: unknown) => {
     log.warn("The connections could not be listed.", { error: error instanceof Error ? error.message : String(error) });
     return undefined;
   });
@@ -68,7 +68,7 @@ export async function connectionOf(connections: ModelsApi, settings: Settings, d
   const name = view?.name ?? named;
   const effort = effortFor(settings, { id: id ?? null, name }) ?? definition.effort;
   return {
-    choice: { connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}) },
+    choice: { user, connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}) },
     id: id ?? null,
     name,
     label: name ?? "default",

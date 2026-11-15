@@ -13,7 +13,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { anthropicProvider } from "@earendil-works/pi-ai/providers/anthropic";
 import type { Rig } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, chatStream, chunk, eventStream, rig, scriptedFetch, textOf } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, chatStream, chunk, eventStream, rig, scriptedFetch, textOf, USER } from "./support";
 
 const OPENING = "You are the Author of a story set in a harbour town.";
 const PRESET = "Narrate the harbour town in the second person.";
@@ -58,7 +58,7 @@ afterEach(async () => {
 
 /** Runs the prompt through pi's Agent on the layer's model for `connection`, its opening block the system prompt, and gives back the request that left. */
 async function sent(made: Rig, connection: string): Promise<Record<string, unknown>> {
-  const agent = await made.layer.agentModel({ connectionId: connection, model: null, effort: "off" });
+  const agent = await made.layer.agentModel({ user: USER, connectionId: connection, model: null, effort: "off" });
   const run = new Agent({ initialState: { systemPrompt: OPENING, model: agent.model, thinkingLevel: agent.thinkingLevel, tools: [LOOKUP] }, streamFn: agent.streamFn });
   await run.prompt(PROMPT as AgentMessage[]);
   expect(run.state.errorMessage).toBeUndefined();
@@ -69,7 +69,7 @@ async function sent(made: Rig, connection: string): Promise<Record<string, unkno
 describe("an agent's call keeps every system message where it stood", () => {
   test("on Anthropic's API: the leading ones are the system prompt, in order; the middle and the last are the user's turns where they stood", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "The tide turns." }))) });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
     const body = await sent(r, saved.id);
     expect(textOf(body.system)).toBe(`${OPENING}\n\n${PRESET}\n\n${CARD}`);
     expect(spoken(body.messages)).toEqual([
@@ -84,7 +84,7 @@ describe("an agent's call keeps every system message where it stood", () => {
 
   test("where a system message goes as a user's message, it goes with the host's mark, and unmarked where the host gives none", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "The tide turns." }))), markNote: (text) => `[Fixture mark] ${text}` });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
     expect(spoken((await sent(r, saved.id)).messages)).toEqual([
       ["user", "Where is Ilse?"],
       ["assistant", "At the mill."],
@@ -96,7 +96,7 @@ describe("an agent's call keeps every system message where it stood", () => {
 
   test("on an Anthropic model that takes system messages itself, which pi-ai would hold back until the next answer: the same, in place", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ model: "claude-opus-5", text: "The tide turns." }))) });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-opus-5" }, "sk-ant-api03-0123456789abcdef");
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-opus-5" }, "sk-ant-api03-0123456789abcdef");
     const body = await sent(r, saved.id);
     expect(textOf(body.system)).toBe(`${OPENING}\n\n${PRESET}\n\n${CARD}`);
     expect(spoken(body.messages)).toEqual([
@@ -110,7 +110,7 @@ describe("an agent's call keeps every system message where it stood", () => {
 
   test("on chat completions (DeepSeek): each one a system message in its place", async () => {
     r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "The tide turns." }), chunk({}, "stop")])) });
-    const saved = await r.layer.api.save({ name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-flash" }, "sk-deepseek-0123456789abcdef");
+    const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-flash" }, "sk-deepseek-0123456789abcdef");
     const body = await sent(r, saved.id);
     expect(spoken(body.messages)).toEqual([
       ["system", `${OPENING}\n\n${PRESET}\n\n${CARD}`],
@@ -124,7 +124,7 @@ describe("an agent's call keeps every system message where it stood", () => {
 
   test("on an OpenAI-compatible server: the same, with the `system` role every server knows", async () => {
     r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "The tide turns." }), chunk({}, "stop")])) });
-    const saved = await r.layer.api.save({ name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    const saved = await r.layer.api.save(USER, { name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
     const body = await sent(r, saved.id);
     expect(r.sent[0]?.url).toBe("http://127.0.0.1:8080/v1/chat/completions");
     expect(spoken(body.messages).map(([role]) => role)).toEqual(["system", "user", "assistant", "system", "user", "system"]);

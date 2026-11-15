@@ -45,8 +45,8 @@ describe("the session's id on every request", () => {
 
   test("an OpenAI request made by pi-ai carries the session as its prompt cache key", async () => {
     r = rig({ script: () => openAIAnswer("At the quay.") });
-    const saved = await r.layer.api.save({ name: "OpenAI", provider: "openai", auth: "key", model: "gpt-4.1" }, "sk-proj-0123456789abcdef");
-    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const saved = await r.layer.api.save(scope.user, { name: "OpenAI", provider: "openai", auth: "key", model: "gpt-4.1" }, "sk-proj-0123456789abcdef");
+    const agent = await r.layer.agentModel({ user: scope.user, connectionId: saved.id, model: null, effort: "off" });
     const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "OpenAI", session: "scene-7", texts });
 
     // The layer's HTTP is a scripted fetch, which answers at once: nothing waits on the clock.
@@ -59,8 +59,8 @@ describe("the session's id on every request", () => {
 
   test("a connection that turns Anthropic's message threads on: the session's later calls go on its thread, and once the layer is told the session with the runner's id ended, its next call starts anew", async () => {
     r = rig({ script: (_sent, index) => eventStream(anthropicStream(index === 0 ? anthropicTurn({ tool: { id: "toolu_1", name: "lookup", input: { what: "keys" } } }) : anthropicTurn({ text: "Under the mat." }))) });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", messageThreads: true }, "sk-ant-api03-0123456789abcdef");
-    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const saved = await r.layer.api.save(scope.user, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", messageThreads: true }, "sk-ant-api03-0123456789abcdef");
+    const agent = await r.layer.agentModel({ user: scope.user, connectionId: saved.id, model: null, effort: "off" });
     const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "Claude", session: "scene-7", texts, tools: [LOOKUP] });
 
     expect((await runner.start({ messages: [user("Where are the keys?")] }).done).status).toBe("done");

@@ -134,7 +134,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     connections: core.connections,
     settings,
     budget,
-    own: async (agent) => connectionOf(core.connections, settings, (await guidance.definition(agent.definition)) ?? {}, env.log),
+    own: async (agent) => connectionOf(core.connections, scope.user, settings, (await guidance.definition(agent.definition)) ?? {}, env.log),
     track: (entry) => {
       working.add(entry);
       return () => working.delete(entry);
@@ -148,7 +148,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     guidance,
     ids: () => core.ids(),
     models: core.models,
-    connection: (definition) => connectionOf(core.connections, settings, definition, env.log),
+    connection: (definition) => connectionOf(core.connections, scope.user, settings, definition, env.log),
     hold: (names) => registry?.hold(names) ?? { tools: [], missing: [...names] },
     unregistered: (name, tools) => env.log.warn("Tools an agent's definition lists are registered by nobody; it holds the rest.", { agent: name, tools: [...tools] }),
     gate: (agent, parent) =>
@@ -226,7 +226,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   if (!("runner" in made)) return made;
   if (made.missing.length > 0) env.log.warn("A job's agent was not given what nobody could find.", { job: ask.id, agent: made.ref.id, missing: made.missing });
   const definition = await guidance.definition(ask.call.agent);
-  const connection = definition === undefined ? { id: null, name: null } : await connectionOf(core.connections, settings, definition, env.log);
+  const connection = definition === undefined ? { id: null, name: null } : await connectionOf(core.connections, scope.user, settings, definition, env.log);
   const { runner, ref } = made;
 
   return {

@@ -6,7 +6,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { bodyOf, chatStream, chunk, eventStream, type Sent, scriptedFetch } from "../model/support";
-import { request, type Stage, stage } from "./support";
+import { request, type Stage, stage, USER } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -18,9 +18,9 @@ afterEach(async () => {
 async function served(): Promise<{ s: Stage; sent: Sent[]; doc: string }> {
   const { fetch, sent } = scriptedFetch(() => eventStream(chatStream([chunk({ role: "assistant", content: "<reply>No boat tonight.</reply>" }), chunk({}, "stop")])));
   const s = (open = await stage({ fetch, answers: [] }));
-  const saved = await s.harness.models.save({ name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "first-model" });
-  await s.harness.models.setDefault(saved.id);
-  return { s, sent, doc: join(s.dir, "host", "models", "connections.json") };
+  const saved = await s.harness.models.save(USER, { name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "first-model" });
+  await s.harness.models.setDefault(USER, saved.id);
+  return { s, sent, doc: join(s.dir, "host", "user", USER, "models", "connections.json") };
 }
 
 test("a connection edited by hand between two turns is the one the second turn's first request goes to", async () => {

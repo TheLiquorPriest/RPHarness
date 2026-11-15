@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { Rig } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, eventStream, rig, textOf } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, eventStream, rig, textOf, USER } from "./support";
 
 const KEY = "sk-ant-api03-0123456789abcdef";
 
@@ -19,8 +19,8 @@ afterEach(async () => {
 
 /** A turn whose model first calls `lookup`, then answers; the requests that left, and what the agent heard and did. */
 async function lookupTurn(made: Rig, sessionId?: string, messageThreads?: true): Promise<{ run: Agent; asked: unknown[]; pieces: string[]; bodies: Record<string, unknown>[] }> {
-  const saved = await made.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", ...(messageThreads ? { messageThreads } : {}) }, KEY);
-  const agent = await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "high" });
+  const saved = await made.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", ...(messageThreads ? { messageThreads } : {}) }, KEY);
+  const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "high" });
   expect(agent.thinkingLevel).toBe("high");
   const asked: unknown[] = [];
   const lookup: AgentTool = {
@@ -98,8 +98,8 @@ describe("a turn on the layer's model, run by pi's Agent", () => {
 
   test("a model the layer didn't make has no connection to go on, and the call says so", async () => {
     r = rig();
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null });
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null });
     const run = new Agent({ initialState: { model: { ...agent.model }, thinkingLevel: "off" }, streamFn: agent.streamFn });
     await run.prompt("Hello?");
     expect(run.state.errorMessage).toBe("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
@@ -109,11 +109,11 @@ describe("a turn on the layer's model, run by pi's Agent", () => {
   test("a call's connection is read as it stands at the time of the call: a key changed since goes with the next call", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "At the quay." }))) });
     const claude = { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" } as const;
-    const saved = await r.layer.api.save(claude, KEY);
-    const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const saved = await r.layer.api.save(USER, claude, KEY);
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
     const run = new Agent({ initialState: { model: agent.model, thinkingLevel: agent.thinkingLevel }, streamFn: agent.streamFn });
     await run.prompt("Where is Ilse?");
-    await r.layer.api.save({ ...claude, id: saved.id }, "sk-ant-api03-fedcba9876543210");
+    await r.layer.api.save(USER, { ...claude, id: saved.id }, "sk-ant-api03-fedcba9876543210");
     await run.prompt("And Okoro?");
     expect(r.sent.map((s) => s.headers["x-api-key"])).toEqual([KEY, "sk-ant-api03-fedcba9876543210"]);
   });

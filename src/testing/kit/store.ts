@@ -6,44 +6,63 @@ import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { AgentRef, JsonValue, Scope, TraceEvent, TraceKind, TraceRecord, Usage } from "../../contract/index";
 import type { KitContext } from "./context";
+import { KIT_OTHER_USER, unlessRefused } from "./context";
 
 export function storeCases(ctx: KitContext<"store">): void {
   test("a value is kept whole, and a key with none gives undefined", async () => {
     const value: JsonValue = { jobs: [{ id: "kit-job-1", state: "running", spent: { calls: 3 } }], note: null, ok: true };
-    await ctx.env.store.set("kit/jobs/kit-job-1", value);
-    expect(await ctx.env.store.get("kit/jobs/kit-job-1")).toEqual(value);
-    await ctx.env.store.set("kit/jobs/kit-job-1", 7);
-    expect(await ctx.env.store.get("kit/jobs/kit-job-1")).toBe(7);
-    expect(await ctx.env.store.get("kit/jobs/kit-no-such-job")).toBeUndefined();
+    await ctx.env.store.set(ctx.scope, "kit/jobs/kit-job-1", value);
+    expect(await ctx.env.store.get(ctx.scope, "kit/jobs/kit-job-1")).toEqual(value);
+    await ctx.env.store.set(ctx.scope, "kit/jobs/kit-job-1", 7);
+    expect(await ctx.env.store.get(ctx.scope, "kit/jobs/kit-job-1")).toBe(7);
+    expect(await ctx.env.store.get(ctx.scope, "kit/jobs/kit-no-such-job")).toBeUndefined();
   });
 
   test("changes to one key run one at a time, so counts made at once add up", async () => {
-    await Promise.all(Array.from({ length: 25 }, () => ctx.env.store.update("kit/usage/day", (n) => (typeof n === "number" ? n : 0) + 1)));
-    expect(await ctx.env.store.get("kit/usage/day")).toBe(25);
-    expect(await ctx.env.store.update("kit/usage/day", () => undefined)).toBeUndefined();
-    expect(await ctx.env.store.get("kit/usage/day")).toBeUndefined();
+    await Promise.all(Array.from({ length: 25 }, () => ctx.env.store.update(ctx.scope, "kit/usage/day", (n) => (typeof n === "number" ? n : 0) + 1)));
+    expect(await ctx.env.store.get(ctx.scope, "kit/usage/day")).toBe(25);
+    expect(await ctx.env.store.update(ctx.scope, "kit/usage/day", () => undefined)).toBeUndefined();
+    expect(await ctx.env.store.get(ctx.scope, "kit/usage/day")).toBeUndefined();
   });
 
   test("keys list by prefix, and a deleted key is gone", async () => {
-    await ctx.env.store.set("kit/approvals/a", 1);
-    await ctx.env.store.set("kit/approvals/b", 2);
-    await ctx.env.store.set("kit/other", 3);
-    expect((await ctx.env.store.list("kit/approvals/")).sort()).toEqual(["kit/approvals/a", "kit/approvals/b"]);
-    await ctx.env.store.delete("kit/approvals/a");
-    await ctx.env.store.delete("kit/approvals/never-set");
-    expect(await ctx.env.store.list("kit/approvals/")).toEqual(["kit/approvals/b"]);
+    await ctx.env.store.set(ctx.scope, "kit/approvals/a", 1);
+    await ctx.env.store.set(ctx.scope, "kit/approvals/b", 2);
+    await ctx.env.store.set(ctx.scope, "kit/other", 3);
+    expect((await ctx.env.store.list(ctx.scope, "kit/approvals/")).sort()).toEqual(["kit/approvals/a", "kit/approvals/b"]);
+    await ctx.env.store.delete(ctx.scope, "kit/approvals/a");
+    await ctx.env.store.delete(ctx.scope, "kit/approvals/never-set");
+    expect(await ctx.env.store.list(ctx.scope, "kit/approvals/")).toEqual(["kit/approvals/b"]);
+  });
+
+  test("two users' values under the same key stay apart, and a list by prefix gives only the user's own keys", async () => {
+    const other = { user: KIT_OTHER_USER };
+    await ctx.env.store.set(ctx.scope, "kit/apart/note", "mine");
+    await ctx.env.store.set({ user: ctx.scope.user }, "kit/apart/only-mine", 1);
+    // A host that serves one user only may refuse another's scope outright; one that keeps both keeps each his own.
+    const accepted = await unlessRefused(ctx.env.store.set(other, "kit/apart/note", "theirs").then(() => true));
+    await unlessRefused(ctx.env.store.set(other, "kit/apart/only-theirs", 2));
+    await unlessRefused(ctx.env.store.update(other, "kit/apart/count", () => 5));
+
+    expect(await ctx.env.store.get(ctx.scope, "kit/apart/note")).toBe("mine");
+    expect(await ctx.env.store.get(ctx.scope, "kit/apart/count")).toBeUndefined();
+    // A chat's scope and the user's alone are the same user's: his keys, whichever of the two set them.
+    expect((await ctx.env.store.list({ user: ctx.scope.user }, "kit/apart/")).sort()).toEqual(["kit/apart/note", "kit/apart/only-mine"]);
+    expect((await ctx.env.store.list(ctx.scope, "kit/apart/")).sort()).toEqual(["kit/apart/note", "kit/apart/only-mine"]);
+    const theirs = { note: await unlessRefused(ctx.env.store.get(other, "kit/apart/note")), keys: ((await unlessRefused(ctx.env.store.list(other, "kit/apart/"))) ?? []).sort() };
+    expect(theirs).toEqual(accepted === true ? { note: "theirs", keys: ["kit/apart/count", "kit/apart/note", "kit/apart/only-theirs"] } : { note: undefined, keys: [] });
   });
 
   test("a value survives a new instance over the same place", async () => {
     const place = await mkdtemp(join(tmpdir(), "rph-kit-store-"));
     try {
       const first = await ctx.make(ctx.seed, place);
-      await first.store.set("kit/survives", { turn: "kit-turn-1", calls: 4 });
-      await first.store.update("kit/count", () => 1);
+      await first.store.set(ctx.scope, "kit/survives", { turn: "kit-turn-1", calls: 4 });
+      await first.store.update(ctx.scope, "kit/count", () => 1);
       await first.close();
       const second = await ctx.make(ctx.seed, place);
-      expect(await second.store.get("kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
-      expect(await second.store.get("kit/count")).toBe(1);
+      expect(await second.store.get(ctx.scope, "kit/survives")).toEqual({ turn: "kit-turn-1", calls: 4 });
+      expect(await second.store.get(ctx.scope, "kit/count")).toBe(1);
       await second.close();
     } finally {
       await rm(place, { recursive: true, force: true });

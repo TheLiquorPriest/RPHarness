@@ -756,7 +756,7 @@ export class Turn {
 
   /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
   #connection(definition: AgentDefinition): Promise<Connection> {
-    return connectionOf(this.#c.connections, this.#settings, definition, this.#c.env.log);
+    return connectionOf(this.#c.connections, this.scope.user, this.#settings, definition, this.#c.env.log);
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {

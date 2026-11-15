@@ -1,10 +1,12 @@
 // Models (§13.2): RPH's model layer calls every provider through pi-ai, on the user's connections.
-// The host keeps two documents for it (`ModelsPort`): the connections, and their secrets. The
+// The host keeps two documents for each user (`ModelsPort`): his connections, and their secrets. The
 // layer holds the rules (what a connection may say, keys kept only with their server, sign-in
 // tokens pi-ai refreshes); the host persists. The host reaches the layer through `ModelsApi`, so no
-// host code ever calls a model itself (§4.1, §18.4).
+// host code ever calls a model itself (§4.1, §18.4). Every document is one user's and every call
+// names the user it acts for (READINGS R-52; Appendix B: every table carries the user): one user's
+// connections, keys and sign-ins are never listed, used or changed for another.
 
-import type { Effort, Usage } from "./common";
+import type { Effort, Usage, UserScope } from "./common";
 import type { JsonObject, JsonValue } from "./json";
 
 /** How a connection signs its calls: with its own key, with the sign-in to its provider, or with nothing (a local server that asks for none). */
@@ -87,20 +89,21 @@ export interface SecretsDoc {
 }
 
 /**
- * Where the host keeps the two documents. Storage only: keep each document whole as last given and
- * give it back. RPH writes one at a time. The connections may live in the user's own config file,
- * and a hand edit there is honoured: RPH reads them through this port whenever it needs them and
- * keeps nothing of them past a turn. Keys and header values are never in the connections document.
- * The secrets are written so a reader never meets half a file, readable by the user alone, and
- * never in the agents' file tree, a transcript or a page (§16).
+ * Where the host keeps each user's two documents. Storage only: keep each document whole as last
+ * given for the user `scope` names and give it back, never another user's. RPH writes one at a
+ * time. The connections may live in the user's own config file, and a hand edit there is honoured:
+ * RPH reads them through this port whenever it needs them and keeps nothing of them past a turn.
+ * Keys and header values are never in the connections document. The secrets are written so a reader
+ * never meets half a file, readable by the user alone, and never in the agents' file tree, a
+ * transcript or a page (§16).
  */
 export interface ModelsPort {
-  /** The connections document as last saved or as the user edited it, as it comes (the layer checks it); null when there is none. */
-  loadConnections(): Promise<unknown>;
-  saveConnections(doc: ConnectionsDoc): Promise<void>;
-  /** The secrets document as last saved, as it comes; null when none was ever saved. */
-  loadSecrets(): Promise<unknown>;
-  saveSecrets(doc: SecretsDoc): Promise<void>;
+  /** The user's connections document as last saved or as he edited it, as it comes (the layer checks it); null when there is none. */
+  loadConnections(scope: UserScope): Promise<unknown>;
+  saveConnections(scope: UserScope, doc: ConnectionsDoc): Promise<void>;
+  /** The user's secrets document as last saved, as it comes; null when none was ever saved. */
+  loadSecrets(scope: UserScope): Promise<unknown>;
+  saveSecrets(scope: UserScope, doc: SecretsDoc): Promise<void>;
 }
 
 // ---------------------------------------------------------------- what the host calls
@@ -252,22 +255,27 @@ export interface PassSink {
   error(e: PassError): void;
 }
 
-/** The host's way to the model layer: the Connections page, sign-ins, each model's limits, and requests passed through. */
+/**
+ * The host's way to the layer: the Connections page, sign-ins, each model's limits, and requests
+ * passed through. Each member names first the user it acts for, and works on his documents alone: a
+ * connection's id is his own, and so is which connection is his default.
+ */
 export interface ModelsApi {
-  list(): Promise<ConnectionList>;
-  /** Adds or changes a connection. `key`: a new key; null takes it away; absent keeps it. */
-  save(input: ConnectionInput, key?: string | null): Promise<ConnectionView>;
-  remove(id: string): Promise<void>;
-  setDefault(id: string | null): Promise<void>;
-  /** One tiny call on the connection. */
-  test(id: string, signal?: AbortSignal): Promise<ConnectionTest>;
-  /** The models a connection offers (null: the default connection). */
-  models(connection: string | null): Promise<ModelChoice[]>;
+  list(user: string): Promise<ConnectionList>;
+  /** Adds or changes a connection of the user's. `key`: a new key; null takes it away; absent keeps it. */
+  save(user: string, input: ConnectionInput, key?: string | null): Promise<ConnectionView>;
+  remove(user: string, id: string): Promise<void>;
+  setDefault(user: string, id: string | null): Promise<void>;
+  /** One tiny call on the user's connection. */
+  test(user: string, id: string, signal?: AbortSignal): Promise<ConnectionTest>;
+  /** The models a connection of the user's offers (null: his default connection). */
+  models(user: string, connection: string | null): Promise<ModelChoice[]>;
   /** A model's limits as RPH uses them; the connection's own model when `model` is absent. */
-  limits(connection: string | null, model?: string): Promise<ModelLimits>;
+  limits(user: string, connection: string | null, model?: string): Promise<ModelLimits>;
   // `embed`, for search by meaning (§9.4, §10.5), comes here with the search lane, so a host's
   // indexes are built through RPH's model layer and never by the host calling a model.
-  signIn: SignInApi;
-  /** Passes a request through to its connection and streams the answer to `sink`. Resolves after `finish` or `error`. */
-  pass(request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void>;
+  /** The user's sign-ins: their tokens are his alone. */
+  signIn(user: string): SignInApi;
+  /** Passes a request through to the user's connection and streams the answer to `sink`. Resolves after `finish` or `error`. */
+  pass(user: string, request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void>;
 }

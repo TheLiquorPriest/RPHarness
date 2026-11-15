@@ -184,10 +184,10 @@ describe("the script", () => {
   test("a rig of scripted models answers an agent's choice by the model it names, and refuses one no script names", async () => {
     const author = scriptedModel([{ pieces: [{ text: "Hm." }] }], { id: "author", contextWindow: 200_000 });
     const source = scriptedSource({ author });
-    const chosen = await source.agentModel({ connectionId: null, model: "author", effort: "high" });
+    const chosen = await source.agentModel({ user: "reader", connectionId: null, model: "author", effort: "high" });
     expect([chosen.model.id, chosen.thinkingLevel, chosen.limits.contextWindow?.tokens]).toEqual(["author", "high", 200_000]);
     expect(chosen.streamFn).toBe(author.streamFn);
-    await expect(source.agentModel({ connectionId: null, model: "gm" })).rejects.toThrow('No scripted model is named "gm".');
+    await expect(source.agentModel({ user: "reader", connectionId: null, model: "gm" })).rejects.toThrow('No scripted model is named "gm".');
   });
 
   test("work that waits on what no timer brings is said to, rather than left hanging", async () => {

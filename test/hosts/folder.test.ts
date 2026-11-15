@@ -149,16 +149,16 @@ describe("folder host", () => {
   });
 
   test("the model layer's documents come back as saved, the secrets readable by their owner alone and outside the tree", async () => {
-    expect(await host.models.loadConnections()).toBeNull();
-    expect(await host.models.loadSecrets()).toBeNull();
+    expect(await host.models.loadConnections(scope)).toBeNull();
+    expect(await host.models.loadSecrets(scope)).toBeNull();
     const connections = { v: 1 as const, default: "kit-conn", connections: [{ id: "kit-conn", name: "Kit", provider: "deepseek", auth: "key" as const, model: "kit-model" }] };
     const secrets = { v: 1 as const, keys: { "kit-conn": "sk-kit-0000000000000000" }, signins: {} };
-    await host.models.saveConnections(connections);
-    await host.models.saveSecrets(secrets);
-    expect(await host.models.loadConnections()).toEqual(connections);
-    expect(await host.models.loadSecrets()).toEqual(secrets);
-    expect((await stat(join(place, "host", "secrets", "secrets.json"))).mode & 0o777).toBe(0o600);
-    expect((await stat(join(place, "host", "secrets"))).mode & 0o777).toBe(0o700);
+    await host.models.saveConnections(scope, connections);
+    await host.models.saveSecrets(scope, secrets);
+    expect(await host.models.loadConnections(scope)).toEqual(connections);
+    expect(await host.models.loadSecrets(scope)).toEqual(secrets);
+    expect((await stat(join(place, "host", "user", scope.user, "secrets", "secrets.json"))).mode & 0o777).toBe(0o600);
+    expect((await stat(join(place, "host", "user", scope.user, "secrets"))).mode & 0o777).toBe(0o700);
     const anywhere = await host.files.find(scope, { by: "grep", pattern: "sk-kit", path: "@global/" });
     expect(anywhere).toEqual([]);
   });

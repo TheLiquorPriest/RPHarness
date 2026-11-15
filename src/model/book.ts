@@ -1,4 +1,6 @@
-// The user's connections and their secrets, kept through the host (`ModelsPort`) in two documents.
+// One user's connections and their secrets, kept through the host (`ModelsPort`) in two documents
+// that are his alone: every read and write names him (READINGS R-52), and the layer keeps a book for
+// each user it acts for (index.ts), so nothing of one user's reaches another's.
 // The connections document holds each connection (its provider, how it signs its calls, its address,
 // model and effort, the names of the headers its calls send, whether it takes one tool call per
 // answer, whether its Anthropic calls keep a message thread, how many times a failed call is made
@@ -40,7 +42,7 @@
 // before anything can use the old one again.
 
 import type { Credential, CredentialStore, OAuthCredential } from "@earendil-works/pi-ai";
-import type { ConnectionInput, ConnectionsDoc, Effort, ModelLimitsEntry, ModelsPort, SecretsDoc, SignInToken, StoredConnection } from "../contract";
+import type { ConnectionInput, ConnectionsDoc, Effort, ModelLimitsEntry, ModelsPort, SecretsDoc, SignInToken, StoredConnection, UserScope } from "../contract";
 import { isRecord, isTokenCount, own } from "./json";
 import type { ProviderKind } from "./kinds";
 import { kindOf } from "./kinds";
@@ -100,6 +102,8 @@ interface Read {
 
 export interface BookDeps {
   store: ModelsPort;
+  /** The user whose documents these are. */
+  scope: UserScope;
   log(text: string): void;
 }
 
@@ -370,7 +374,7 @@ export class Book {
   private async readSecrets(): Promise<void> {
     let raw: unknown;
     try {
-      raw = await this.deps.store.loadSecrets();
+      raw = await this.deps.store.loadSecrets(this.deps.scope);
     } catch {
       return;
     }
@@ -410,7 +414,7 @@ export class Book {
   private async reread(): Promise<string[]> {
     let raw: unknown;
     try {
-      raw = await this.deps.store.loadConnections();
+      raw = await this.deps.store.loadConnections(this.deps.scope);
     } catch {
       this.trouble = NOT_READ;
       throw new Error(NOT_READ);
@@ -555,7 +559,7 @@ export class Book {
     const asGiven = entries as StoredConnection[];
     const doc: ConnectionsDoc = { v: FORMAT, default: chosen, connections: asGiven };
     try {
-      await this.deps.store.saveConnections(structuredClone(doc));
+      await this.deps.store.saveConnections(this.deps.scope, structuredClone(doc));
     } catch {
       throw new Error(NOT_WRITTEN);
     }
@@ -579,7 +583,7 @@ export class Book {
       ...(Object.keys(at).length > 0 ? { places: at } : {}),
     };
     try {
-      await this.deps.store.saveSecrets(structuredClone(doc));
+      await this.deps.store.saveSecrets(this.deps.scope, structuredClone(doc));
     } catch {
       throw new Error(SECRETS_NOT_WRITTEN);
     }

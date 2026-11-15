@@ -12,7 +12,7 @@ import { normalizeContext } from "@earendil-works/pi-ai";
 import type { ConnectionInput } from "../../src/contract";
 import type { ModelEffort } from "../../src/model";
 import type { Rig, Script } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, rig } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, rig, USER } from "./support";
 
 const ANTHROPIC_KEY = "sk-ant-api03-Ilse0123456789abcdefOkoro";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -33,8 +33,8 @@ afterEach(async () => {
 /** The body a call on a connection sent, the agent asking `effort`, the call asking `options`. */
 async function bodyFor(script: Script, connection: ConnectionInput, key: string | undefined, effort: ModelEffort | undefined, options: SimpleStreamOptions = {}): Promise<Record<string, unknown>> {
   r = rig({ script });
-  const saved = await r.layer.api.save(connection, key);
-  const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, ...(effort !== undefined ? { effort } : {}) });
+  const saved = await r.layer.api.save(USER, connection, key);
+  const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, ...(effort !== undefined ? { effort } : {}) });
   const answer = await call(agent, ASK, { ...options, ...(agent.thinkingLevel !== "off" ? { reasoning: agent.thinkingLevel } : {}) });
   expect(answer.errorMessage).toBeUndefined();
   return bodyOf(r.sent[0]);
@@ -105,8 +105,8 @@ describe("a chat-completions call", () => {
 async function anthropicFailure(script: Script): Promise<string> {
   const made = rig({ script });
   r = made;
-  const saved = await made.layer.api.save(claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
-  const answer = await made.clock.settle(call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK));
+  const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+  const answer = await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK));
   expect(answer.stopReason).toBe("error");
   return answer.errorMessage ?? "";
 }
@@ -115,8 +115,8 @@ async function anthropicFailure(script: Script): Promise<string> {
 async function serverFailure(script: Script, headers?: Record<string, string>): Promise<string> {
   const made = rig({ script });
   r = made;
-  const saved = await made.layer.api.save({ name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", ...(headers ? { headers } : {}) }, SERVER_KEY);
-  const answer = await made.clock.settle(call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK));
+  const saved = await made.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", ...(headers ? { headers } : {}) }, SERVER_KEY);
+  const answer = await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK));
   expect(answer.stopReason).toBe("error");
   return answer.errorMessage ?? "";
 }
@@ -156,8 +156,8 @@ describe("a call that failed before any piece of its answer came", () => {
   test("a 429, then a good answer: one answer, begun once, from the second request, a second after the first", async () => {
     const made = rig({ script: (_sent, index) => (index === 0 ? rateLimited() : eventStream(anthropicStream(anthropicTurn({ text: "At the quay." })))) });
     r = made;
-    const saved = await made.layer.api.save(claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
-    const agent = await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
     const began = made.clock.now();
     const { kinds, answer } = await made.clock.settle(
       (async () => {
@@ -184,9 +184,9 @@ describe("a call that failed before any piece of its answer came", () => {
     await r?.done();
     const made = rig({ script: rateLimited });
     r = made;
-    const once = await made.layer.api.save(claude("claude-sonnet-4-5", { retries: 1 }), ANTHROPIC_KEY);
-    const never = await made.layer.api.save(claude("claude-sonnet-4-5", { retries: 0 }), ANTHROPIC_KEY);
-    for (const id of [once.id, never.id]) await made.clock.settle(call(await made.layer.agentModel({ connectionId: id, model: null, effort: "off" }), ASK));
+    const once = await made.layer.api.save(USER, claude("claude-sonnet-4-5", { retries: 1 }), ANTHROPIC_KEY);
+    const never = await made.layer.api.save(USER, claude("claude-sonnet-4-5", { retries: 0 }), ANTHROPIC_KEY);
+    for (const id of [once.id, never.id]) await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: id, model: null, effort: "off" }), ASK));
     expect(made.sent.length).toBe(2 + 1);
   });
 
@@ -196,9 +196,9 @@ describe("a call that failed before any piece of its answer came", () => {
     await r?.done();
     const made = rig({ script: rateLimited });
     r = made;
-    const saved = await made.layer.api.save(claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
     const stop = new AbortController();
-    const calling = call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK, { signal: stop.signal });
+    const calling = call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK, { signal: stop.signal });
     await made.clock.idle();
     expect(made.clock.pending).toBe(1);
     stop.abort(new Error("The reply was stopped."));
@@ -221,27 +221,27 @@ describe("a call its connection can't make", () => {
   test("says what to do, and sends nothing", async () => {
     const made = rig();
     r = made;
-    const keyless = await made.layer.api.save(claude("claude-sonnet-4-5"));
-    const unnamed = await made.layer.api.save({ name: "No model", provider: "anthropic", auth: "key" }, ANTHROPIC_KEY);
-    const answer = async (connectionId: string): Promise<string | undefined> => (await call(await made.layer.agentModel({ connectionId, model: null, effort: "off" }), ASK)).errorMessage;
+    const keyless = await made.layer.api.save(USER, claude("claude-sonnet-4-5"));
+    const unnamed = await made.layer.api.save(USER, { name: "No model", provider: "anthropic", auth: "key" }, ANTHROPIC_KEY);
+    const answer = async (connectionId: string): Promise<string | undefined> => (await call(await made.layer.agentModel({ user: USER, connectionId, model: null, effort: "off" }), ASK)).errorMessage;
     expect(await answer(keyless.id)).toBe('The connection "Claude" has no key: add one on the Connections page.');
-    await expect(made.layer.agentModel({ connectionId: unnamed.id, model: null })).rejects.toThrow('The connection "No model" names no model');
-    await expect(made.layer.agentModel({ connectionId: "gone", model: null })).rejects.toThrow("This call's connection is no longer there");
-    await made.layer.api.setDefault(null);
-    await expect(made.layer.agentModel({ connectionId: null, model: null })).rejects.toThrow("There is no default connection");
+    await expect(made.layer.agentModel({ user: USER, connectionId: unnamed.id, model: null })).rejects.toThrow('The connection "No model" names no model');
+    await expect(made.layer.agentModel({ user: USER, connectionId: "gone", model: null })).rejects.toThrow("This call's connection is no longer there");
+    await made.layer.api.setDefault(USER, null);
+    await expect(made.layer.agentModel({ user: USER, connectionId: null, model: null })).rejects.toThrow("There is no default connection");
     // A connection taken away after its agent's model was made: the call says so.
-    const agent = await made.layer.agentModel({ connectionId: unnamed.id, model: "claude-sonnet-4-5" });
-    await made.layer.api.remove(unnamed.id);
+    const agent = await made.layer.agentModel({ user: USER, connectionId: unnamed.id, model: "claude-sonnet-4-5" });
+    await made.layer.api.remove(USER, unnamed.id);
     expect((await call(agent, ASK)).errorMessage).toBe("This call's connection is no longer there: pick another on the Connections page.");
     expect(made.sent).toEqual([]);
   });
 
   test("stopped before it began ends as stopped, and sends nothing", async () => {
     r = rig({ script: anthropicAnswer });
-    const saved = await r.layer.api.save(claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const saved = await r.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
     const stop = new AbortController();
     stop.abort(new Error("The reply was stopped."));
-    const answer = await call(await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK, { signal: stop.signal });
+    const answer = await call(await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK, { signal: stop.signal });
     expect([answer.stopReason, answer.errorMessage]).toEqual(["aborted", "The reply was stopped."]);
     expect(r.sent).toEqual([]);
   });

@@ -16,7 +16,7 @@ import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun,
 import { userMessage } from "../harness/prompt";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
-import type { AgentChoice, AgentModel, ModelSource } from "../model/source";
+import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { skillsIndex } from "../tools/base";
 import { attach, joined, type Wanted } from "./attachments";
@@ -45,7 +45,7 @@ export interface TeamDeps {
   /** The models agents run on. */
   models: ModelSource;
   /** The connection a definition names, found as the lead's is: the model layer's choice, and the name the trace gives it. */
-  connection(definition: AgentDefinition): Promise<{ choice: AgentChoice; label: string }>;
+  connection(definition: AgentDefinition): Promise<{ choice: UserChoice; label: string }>;
   /** The tools an agent whose definition lists `names` holds: the turn's registry, which holds these three tools too. */
   hold(names: readonly string[]): Held;
   /** Tools a sub-agent's definition lists that nobody registered: the turn says so, once in its session. */

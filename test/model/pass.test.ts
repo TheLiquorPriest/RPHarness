@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { fauxAssistantMessage, fauxProvider, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { JsonObject, PassError, PassResult } from "../../src/contract";
 import type { Rig } from "./support";
-import { anthropicStream, anthropicTurn, bodyOf, chatStream, chunk, eventStream, forever, rig } from "./support";
+import { anthropicStream, anthropicTurn, bodyOf, chatStream, chunk, eventStream, forever, rig, USER } from "./support";
 
 const LOOKUP = { type: "function", function: { name: "lookup", description: "Looks a thing up.", parameters: { type: "object", properties: { what: { type: "string" } } } } };
 
@@ -67,7 +67,7 @@ interface Heard {
 /** Passes `body` on the connection `connection` and gathers what the sink heard. */
 async function pass(made: Rig, body: JsonObject, connection: string | null = "id1", signal: AbortSignal = forever()): Promise<Heard> {
   const heard: Heard = { content: [], reasoning: [], ends: 0 };
-  await made.layer.api.pass({ connection, body }, { content: (d) => heard.content.push(d), reasoning: (d) => heard.reasoning.push(d), finish: (result) => ((heard.result = result), (heard.ends += 1)), error: (e) => ((heard.error = e), (heard.ends += 1)) }, signal);
+  await made.layer.api.pass(USER, { connection, body }, { content: (d) => heard.content.push(d), reasoning: (d) => heard.reasoning.push(d), finish: (result) => ((heard.result = result), (heard.ends += 1)), error: (e) => ((heard.error = e), (heard.ends += 1)) }, signal);
   expect(heard.ends).toBe(1);
   return heard;
 }
@@ -87,7 +87,7 @@ describe("a request passed through", () => {
     const faux = fauxProvider({ provider: "groq", models: [{ id: "faux-1" }], tokenSize: { min: 1, max: 1 } });
     faux.setResponses([fauxAssistantMessage([fauxText("Let me look."), fauxToolCall("lookup", { what: "mill" }, { id: "call_9" })], { stopReason: "toolUse" })]);
     r = rig({ providers: [faux.provider] });
-    await r.layer.api.save({ name: "Writer", provider: "groq", auth: "key", model: "faux-1" }, "gsk_0123456789abcdefghij");
+    await r.layer.api.save(USER, { name: "Writer", provider: "groq", auth: "key", model: "faux-1" }, "gsk_0123456789abcdefghij");
     const heard = await pass(r, BODY);
     expect(heard.content.join("")).toBe("Let me look.");
     expect(heard.result).toMatchObject({ content: "Let me look.", finishReason: "tool_calls", model: "faux-1", toolCalls: [{ id: "call_9", name: "lookup", args: { what: "mill" } }] });
@@ -96,7 +96,7 @@ describe("a request passed through", () => {
 
   test("sends every other field of its body as it came to a server that speaks the body's own API", async () => {
     r = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "The wheel broke." }), chunk({}, "stop")])) });
-    await r.layer.api.save({ name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    await r.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
     expect((await pass(r, BODY)).result?.content).toBe("The wheel broke.");
     const body = bodyOf(r.sent[0]);
     expect(body).toMatchObject({ model: "served-model", temperature: 0.4, top_p: 0.8, reasoning_effort: "low", parallel_tool_calls: false, response_format: { type: "json_object" }, user: "harbour-reader", logit_bias: { "50256": -100 } });
@@ -105,7 +105,7 @@ describe("a request passed through", () => {
 
   test("gives a provider with another API what it has a place for, and continues a prefix where Anthropic can", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: " broke at dawn." }))) });
-    await r.layer.api.save({ name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    await r.layer.api.save(USER, { name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
     const messages = [...(BODY.messages as JsonObject[]), { role: "assistant", content: "The wheel", prefix: true }];
     expect((await pass(r, { ...BODY, messages, reasoning_effort: "none" })).result?.content).toBe(" broke at dawn.");
     const body = bodyOf(r.sent[0]);
@@ -116,7 +116,7 @@ describe("a request passed through", () => {
 
   test("continues a prefix after the tools' results where Anthropic can: the results go back as the user's turn, and the prefix last", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: " since last spring." }))) });
-    await r.layer.api.save({ name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    await r.layer.api.save(USER, { name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
     expect((await pass(r, { ...BODY, messages: [...LOOKED_UP, PREFIX], reasoning_effort: "none" })).result?.content).toBe(" since last spring.");
     const sent = bodyOf(r.sent[0]).messages as { role: string; content: string | { type: string }[] }[];
     expect(sent.map((m) => [m.role, typeof m.content === "string" ? ["text"] : m.content.map((b) => b.type)])).toEqual([
@@ -131,7 +131,7 @@ describe("a request passed through", () => {
   test("refuses what has no way to the model on any connection, in words that name it by its place in the body and say what to do, and sends nothing", async () => {
     const made = rig();
     r = made;
-    await made.layer.api.save({ name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    await made.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
     const user = (content: unknown, more: JsonObject = {}): JsonObject => ({ ...BODY, messages: [{ role: "user", content, ...more }] as JsonObject[] });
     const refusals: [JsonObject, string][] = [
       [user("Hello", { name: "Okoro" }), "message 1 names its speaker (`name`), which model calls have no place for: put the name in the message's text, or leave it out"],
@@ -157,7 +157,7 @@ describe("a request passed through", () => {
 
   test("refuses a prefix where the connection's API can't continue one, after the tools' results too, and sends nothing", async () => {
     r = rig();
-    await r.layer.api.save({ name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    await r.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
     const words = refused('the last message is a prefix to continue (`prefix`), and the connection "Writer" (OpenAI-compatible, served-model) can\'t continue one: only Anthropic\'s API continues a message given to it. Take the mark off to send the message as one the model wrote before, or use a connection to an earlier Claude model than 4.6');
     expect(await refusal(r, { ...BODY, messages: [...(BODY.messages as JsonObject[]), PREFIX] })).toBe(words);
     expect(await refusal(r, { ...BODY, messages: [...LOOKED_UP, PREFIX] })).toBe(words);
@@ -169,9 +169,9 @@ describe("a request passed through", () => {
   test("refuses a prefix Anthropic itself would: to Claude 4.6 and later whatever they are asked, and to an earlier model asked to think, by the request or by its connection", async () => {
     const made = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: " since last spring." }))) });
     r = made;
-    const saved = await made.layer.api.save({ name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
+    const saved = await made.layer.api.save(USER, { name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, "sk-ant-api03-0123456789abcdef");
     const writer = async (model: string, effort?: "medium"): Promise<void> => {
-      await made.layer.api.save({ id: saved.id, name: "Writer", provider: "anthropic", auth: "key", model, effort: effort ?? null });
+      await made.layer.api.save(USER, { id: saved.id, name: "Writer", provider: "anthropic", auth: "key", model, effort: effort ?? null });
     };
     const prefixed = (more: JsonObject = {}): JsonObject => ({ ...BODY, reasoning_effort: "none", messages: [...LOOKED_UP, PREFIX], ...more });
     // pi-ai marks the models from Claude 4.6 on as thinking adaptively; on those that take an effort mark (5 and later), its mark would follow the prefix, which then wouldn't be last.
@@ -194,7 +194,7 @@ describe("a request passed through", () => {
     const made = rig({ script: () => eventStream(chatStream([chunk({ role: "assistant", content: "The wheel" })]).replace("data: [DONE]\n\n", "")) });
     r = made;
     expect((await pass(made, BODY, "id9")).error).toEqual({ code: "no-connection", detail: "This call's connection is no longer there: pick another on the Connections page." });
-    await made.layer.api.save({ name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    await made.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
     expect((await pass(made, BODY, null)).error?.code).toBe("provider");
     const stop = new AbortController();
     stop.abort(new Error("The request was stopped."));

@@ -1,19 +1,21 @@
 // RPH's model layer (STANDALONE-PLAN §13.2): every model call an agent makes, and every request
-// passed through, goes straight to its provider through pi-ai, on the user's own connections.
-// `createModelLayer` gives:
+// passed through, goes straight to its provider through pi-ai, on the user's own connections. Each
+// user's connections, keys and sign-ins are his alone (READINGS R-52): the layer keeps a desk for each
+// user it acts for (his documents read and kept through the host by his scope, pi-ai's models over
+// his sign-ins, his sign-in flows), and every way in names the user. `createModelLayer` gives:
 //
 // - for each agent, the model pi's `Agent` runs on, the level it thinks at and the stream function
-//   it calls its model through (`agentModel`, `streamFn`); each call is shaped from the agent's
-//   connection as it stands at the time of the call;
+//   it calls its model through (`agentModel`, whose choice names the user the agent acts for); each
+//   call is shaped from the agent's connection as it stands at the time of the call;
 // - the host's way in (the contract's `ModelsApi`): the connections as the Connections page keeps
 //   them, a connection's test call and its models, each model's limits, the sign-ins to Anthropic
-//   and OpenAI, and requests passed through;
+//   and OpenAI, and requests passed through, each for the user it names;
 // - the end of an agent session's prompt cache (`ended`);
-// - a turn's start (`turnStarting`): the connections are read again through the host, so that a hand
-//   edit made since holds from the turn's first call.
+// - a turn's start (`turnStarting`): the user's connections are read again through the host, so that
+//   a hand edit made since holds from the turn's first call.
 //
 // What the layer is handed (`ModelLayerDeps`) is everything it reaches the world through: where the
-// host keeps the connections and their secrets, the clock, ids, timers, `fetch`, the log, the
+// host keeps each user's connections and their secrets, the clock, ids, timers, `fetch`, the log, the
 // environment it takes the SDKs' own settings out of, its three waits (how long an answer may go
 // silent, how long a provider may take to answer a test or list its models, how long a sign-in
 // stays open), each read as it is used so a change of its setting holds from the next, and the text
@@ -24,7 +26,7 @@ import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { cleanupSessionResources, createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort } from "../contract";
+import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, SignInApi } from "../contract";
 import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
@@ -34,10 +36,10 @@ import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
 import { passRequest } from "./pass";
 import { createSignIn } from "./signin";
-import type { AgentChoice, ModelSource } from "./source";
+import type { ModelSource, UserChoice } from "./source";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact } from "./words";
 
-export type { AgentChoice, AgentModel, ModelEffort, ModelSource } from "./source";
+export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
 export { DEFAULT_CHARS_PER_TOKEN, callUsage, estimateOf, messageText, promptTokens, tokensOf } from "./tokens";
 export type { CallUsage, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
@@ -47,7 +49,7 @@ export { limitsOf } from "./limits";
 export type ModelWait = "silentMs" | "askMs" | "signInMs";
 
 export interface ModelLayerDeps {
-  /** Where the host keeps the connections and their secrets. */
+  /** Where the host keeps each user's connections and their secrets. */
   store: ModelsPort;
   now(): number;
   /** A new id: a connection's, a sign-in flow's. */
@@ -80,20 +82,18 @@ export interface ModelLayerDeps {
 }
 
 export interface ModelLayer extends ModelSource {
-  /** pi's stream function for every model `agentModel` makes: the `streamFn` of each agent's `Agent`. */
-  streamFn: StreamFn;
   /** The host's way to the layer. */
   api: ModelsApi;
   /** An agent session ended: what pi-ai keeps for its prompt cache (Anthropic's message threads) is let go. */
   ended(sessionId: string): void;
   /**
-   * A turn starts: the connections are read again through the host (book.ts), so that a hand edit
-   * made since holds from this turn's first call. Resolves with what that read had to say, in words,
-   * each also in the log once: a document that can't be read (the connections read before it stay in
-   * use), a saved connection left out, a key or headers' values taken from a connection that now goes
-   * elsewhere. Never rejects.
+   * A turn of `user`'s starts: his connections are read again through the host (book.ts), so that a
+   * hand edit made since holds from this turn's first call. Resolves with what that read had to say,
+   * in words, each also in the log once: a document that can't be read (the connections read before
+   * it stay in use), a saved connection left out, a key or headers' values taken from a connection
+   * that now goes elsewhere. Never rejects.
    */
-  turnStarting(): Promise<readonly string[]>;
+  turnStarting(user: string): Promise<readonly string[]>;
   /** Ends open sign-ins and waits for the documents to be written. */
   close(): Promise<void>;
 }
@@ -178,6 +178,14 @@ async function cappedText(response: Response, max: number): Promise<string | nul
   return Buffer.concat(chunks).toString("utf8");
 }
 
+/** One user's part of the layer (see the head of this file): his documents, the calls made on his connections over pi-ai's models with his sign-ins, his sign-in flows, and the stream function of the models made for his agents. */
+interface Desk {
+  book: Book;
+  calls: CallDeps;
+  signIn: SignInApi & { close(): void };
+  streamFn: StreamFn;
+}
+
 export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   const env = deps.env ?? process.env;
   const steering = STEERING.filter((name) => env[name] !== undefined);
@@ -187,15 +195,30 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   // pi-ai loads its sign-in flows by a path a single-file bundle can't follow; these load them from the bundle. pi-ai registers all its flows at once (its other providers' too): it has no way to register two alone.
   registerLazyOAuthFlows();
   const settingWords = (wait: ModelWait): string => deps.settingWords?.(wait) ?? WAIT_NAMES[wait];
-  const book = new Book({ store: deps.store, log: deps.log });
-  const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
-  for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-  const callDeps: CallDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => (await deps.silentMs?.()) ?? SILENT_MS, silentSetting: () => settingWords("silentMs"), ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
-  const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: async () => (await deps.signInMs?.()) ?? SIGN_IN_MS, signInSetting: () => settingWords("signInMs"), appName: deps.appName });
 
-  /** Each model `agentModel` made, with the agent's choice it was made for. */
-  const made = new WeakMap<Model<Api>, AgentChoice>();
-  const streamFn = streamFunction(callDeps, (model) => made.get(model));
+  /** Each model `agentModel` made, with the user's choice it was made for. */
+  const made = new WeakMap<Model<Api>, UserChoice>();
+  /** Each user's desk, by the user, made the first time the layer acts for him. */
+  const desks = new Map<string, Desk>();
+
+  /** The user's desk: his documents are first read when it is made (book.ts). */
+  const deskOf = (user: string): Desk => {
+    const known = desks.get(user);
+    if (known !== undefined) return known;
+    const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
+    const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
+    for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
+    const calls: CallDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => (await deps.silentMs?.()) ?? SILENT_MS, silentSetting: () => settingWords("silentMs"), ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
+    const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: async () => (await deps.signInMs?.()) ?? SIGN_IN_MS, signInSetting: () => settingWords("signInMs"), appName: deps.appName });
+    // A model made for another user's agent is none of this desk's: its call goes on no connection of his.
+    const streamFn = streamFunction(calls, (model) => {
+      const choice = made.get(model);
+      return choice?.user === user ? choice : undefined;
+    });
+    const desk: Desk = { book, calls, signIn, streamFn };
+    desks.set(user, desk);
+    return desk;
+  };
 
   /** A signal the layer's own wait ends after the provider wait (`askMs`, else `ASK_MS`), with words that say what didn't come in time (`late`, given the wait in words) and where that wait is changed; and its timer's release. */
   const deadline = async (late: (wait: string) => string): Promise<{ signal: AbortSignal; clear(): void }> => {
@@ -205,7 +228,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     return { signal: stop.signal, clear: () => deps.clearTimeout(timer) };
   };
 
-  const viewOf = async (c: Connection, chosen: string | null): Promise<ConnectionView> => {
+  const viewOf = async (book: Book, c: Connection, chosen: string | null): Promise<ConnectionView> => {
     const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const { headers, ...shown } = c;
     return {
@@ -222,7 +245,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
    * it says of each one's limits: no redirect followed, since its key and headers would go with it,
    * and no more of it read than `LIST_MAX`.
    */
-  const serverModels = async (c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
+  const serverModels = async (book: Book, c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
     const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const anthropic = api === "anthropic-messages";
     const signs: Record<string, string> = key === undefined ? {} : anthropic ? { "x-api-key": key } : { authorization: `Bearer ${key}` };
@@ -254,27 +277,30 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   };
 
   const api: ModelsApi = {
-    async list() {
+    async list(user) {
+      const { book } = deskOf(user);
       const chosen = await book.defaultId();
-      const views = await Promise.all((await book.connections()).map((c) => viewOf(c, chosen)));
+      const views = await Promise.all((await book.connections()).map((c) => viewOf(book, c, chosen)));
       return { connections: views, default: chosen, providers: KINDS.map((k) => ({ id: k.id, name: k.name, auth: [...k.auth], apis: [...k.apis], needsBaseUrl: k.needsBaseUrl })) };
     },
-    async save(input, key) {
+    async save(user, input, key) {
+      const { book } = deskOf(user);
       const saved = await book.save(input, key, deps.id);
-      return viewOf(saved, await book.defaultId());
+      return viewOf(book, saved, await book.defaultId());
     },
-    remove: (id) => book.remove(id),
-    setDefault: (id) => book.setDefault(id),
-    async test(id, signal) {
+    remove: (user, id) => deskOf(user).book.remove(id),
+    setDefault: (user, id) => deskOf(user).book.setDefault(id),
+    async test(user, id, signal) {
+      const { calls } = deskOf(user);
       const t0 = deps.now();
       const wait = await deadline((ms) => `The provider didn't answer within ${ms}.`);
       const ended = signal === undefined ? wait.signal : AbortSignal.any([signal, wait.signal]);
       try {
-        const shape = await shapeOf(callDeps, { connectionId: id, model: null, effort: "off" });
+        const shape = await shapeOf(calls, { connectionId: id, model: null, effort: "off" });
         const context = normalizeContext({ messages: [{ role: "user", content: await deps.testPrompt(), timestamp: deps.now() }] });
         const out = createAssistantMessageEventStream();
         // A test says how the connection stands now: it is never made again.
-        await makeCall(callDeps, shape, context, { maxTokens: TEST_ROOM, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, ended, out);
+        await makeCall(calls, shape, context, { maxTokens: TEST_ROOM, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, ended, out);
         const result = await out.result();
         if (result.stopReason !== "error" && result.stopReason !== "aborted") return { ok: true, ms: deps.now() - t0, model: result.responseModel ?? result.model };
         return { ok: false, ms: deps.now() - t0, error: wait.signal.aborted ? errorWords(wait.signal.reason) : (result.errorMessage ?? "") };
@@ -284,41 +310,42 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
         wait.clear();
       }
     },
-    async models(connectionId) {
+    async models(user, connectionId) {
+      const { book, calls } = deskOf(user);
       const c = await book.connection(connectionId);
       if (c === null) throw new Error(connectionId === null ? "There is no default connection to list models for." : "That connection is no longer there: reload the page.");
       const kind = kindOf(c.provider);
       if (kind === undefined) throw new Error(`The connection "${c.name}" names a provider that isn't offered.`);
-      if (!kind.needsBaseUrl) return pi.getModels(kind.id).map((m) => ({ id: m.id, name: m.name }));
-      const listed = await serverModels(c, c.api ?? kind.apis[0]);
+      if (!kind.needsBaseUrl) return calls.pi.getModels(kind.id).map((m) => ({ id: m.id, name: m.name }));
+      const listed = await serverModels(book, c, c.api ?? kind.apis[0]);
       // What the server says of each model's limits is kept with the connection, for a model pi doesn't know.
       await book.noteReported(c, Object.fromEntries(listed.filter((m) => Object.keys(m.reported).length > 0).map((m) => [m.id, m.reported])));
       return listed.map(({ id, name }) => ({ id, name }));
     },
-    async limits(connectionId, model) {
-      return (await shapeOf(callDeps, { connectionId, model: model ?? null })).limits;
+    async limits(user, connectionId, model) {
+      return (await shapeOf(deskOf(user).calls, { connectionId, model: model ?? null })).limits;
     },
-    signIn,
-    pass: (request, sink, signal) => passRequest(callDeps, request, sink, signal),
+    signIn: (user) => deskOf(user).signIn,
+    pass: (user, request, sink, signal) => passRequest(deskOf(user).calls, request, sink, signal),
   };
 
   return {
-    streamFn,
     async agentModel(choice) {
-      const shape = await shapeOf(callDeps, choice);
-      // A model of the agent's own: the stream function knows the agent's choice by it.
+      const desk = deskOf(choice.user);
+      const shape = await shapeOf(desk.calls, choice);
+      // A model of the agent's own: its user's stream function knows the agent's choice by it.
       const model: Model<Api> = { ...shape.model };
       made.set(model, { ...choice });
-      return { model, thinkingLevel: shape.reasoning ?? "off", streamFn, limits: shape.limits };
+      return { model, thinkingLevel: shape.reasoning ?? "off", streamFn: desk.streamFn, limits: shape.limits };
     },
     api,
     ended(sessionId) {
       cleanupSessionResources(sessionId);
     },
-    turnStarting: () => book.refresh(),
+    turnStarting: (user) => deskOf(user).book.refresh(),
     async close() {
-      signIn.close();
-      await book.settled();
+      for (const desk of desks.values()) desk.signIn.close();
+      await Promise.all([...desks.values()].map((desk) => desk.book.settled()));
     },
   };
 }

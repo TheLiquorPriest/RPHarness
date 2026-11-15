@@ -10,7 +10,7 @@ import { fauxAssistantMessage, fauxProvider, normalizeContext } from "@earendil-
 import type { AgentModel } from "../../src/model";
 import { KINDS } from "../../src/model/kinds";
 import type { Rig } from "./support";
-import { anthropicStream, anthropicTurn, call, failed, rig } from "./support";
+import { anthropicStream, anthropicTurn, call, failed, rig, USER } from "./support";
 
 const KEY = "sk-ant-api03-Ilse0123456789abcdefWXYZ";
 const SERVER_KEY = "sk-proxy-0123456789abcdefghijklmnop";
@@ -63,8 +63,8 @@ const PING = event({ type: "ping" });
 
 /** An Anthropic connection's agent model, its API answering with `held`. */
 async function heldClaude(made: Rig): Promise<AgentModel> {
-  const saved = await made.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-  return made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+  const saved = await made.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+  return made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
 }
 
 /** Reads a call's events until its first piece of text has come. */
@@ -98,16 +98,16 @@ describe("redirects", () => {
     const made = rig({ fetch: globalThis.fetch });
     r = made;
     const moved = { baseUrl: `http://127.0.0.1:${mover.port}/v1`, model: "served-model", headers: { "x-gateway-token": GATEWAY }, limits: { "served-model": { contextWindow: 100_000, maxTokens: 4_096 } } };
-    const listing = await made.layer.api.save({ name: "Moved", provider: "openai-compatible", auth: "key", ...moved }, SERVER_KEY);
+    const listing = await made.layer.api.save(USER, { name: "Moved", provider: "openai-compatible", auth: "key", ...moved }, SERVER_KEY);
     const redirected = "the server answered with a redirect to another address, which isn't followed, so that the connection's key and headers never go with it: give the connection the address it moved to.";
-    await expect(made.layer.api.models(listing.id)).rejects.toThrow(`The server didn't list its models: ${redirected}`);
-    expect((await call(await made.layer.agentModel({ connectionId: listing.id, model: null, effort: "off" }), ASK)).errorMessage).toBe(`The call wasn't made: ${redirected}`);
+    await expect(made.layer.api.models(USER, listing.id)).rejects.toThrow(`The server didn't list its models: ${redirected}`);
+    expect((await call(await made.layer.agentModel({ user: USER, connectionId: listing.id, model: null, effort: "off" }), ASK)).errorMessage).toBe(`The call wasn't made: ${redirected}`);
     const offered = KINDS.filter((kind) => kind.ownAddress !== true);
     expect(offered.map((kind) => kind.id)).toEqual(["anthropic", "openai", "openrouter", "deepseek", "xai", "groq", "mistral", "openai-compatible", "anthropic-compatible"]);
     for (const kind of offered) {
-      const saved = await made.layer.api.save({ name: kind.name, provider: kind.id, auth: "key", ...moved }, SERVER_KEY);
+      const saved = await made.layer.api.save(USER, { name: kind.name, provider: kind.id, auth: "key", ...moved }, SERVER_KEY);
       const before = asked;
-      const answer = await call(await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" }), ASK);
+      const answer = await call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK);
       // The call went out, met the redirect, and went no further.
       expect([kind.id, answer.stopReason, asked - before]).toEqual([kind.id, "error", 1]);
     }
@@ -116,7 +116,7 @@ describe("redirects", () => {
 
   test("a provider whose calls can't go through the layer's own fetch, which would follow one, takes no address but its own", async () => {
     r = rig();
-    await expect(r.layer.api.save({ name: "Gemini", provider: "google", auth: "key", baseUrl: "https://proxy.example.com/v1beta", model: "gemini-2.5-flash" }, SERVER_KEY)).rejects.toThrow(
+    await expect(r.layer.api.save(USER, { name: "Gemini", provider: "google", auth: "key", baseUrl: "https://proxy.example.com/v1beta", model: "gemini-2.5-flash" }, SERVER_KEY)).rejects.toThrow(
       "A Google Gemini connection goes to its provider's own address: its calls can't be kept from following a redirect, which would take its key elsewhere. Leave the address out.",
     );
     expect(r.store.writes).toEqual([]);
@@ -171,8 +171,8 @@ describe("a stream that goes silent", () => {
       const faux = fauxProvider({ provider: "groq", models: [{ id: "faux-1" }], tokenSize: { min: 1, max: 1 } });
       faux.setResponses([fauxAssistantMessage("The mill is closed.")]);
       const made = rig({ providers: [faux.provider], silentMs });
-      const saved = await made.layer.api.save({ name: "Groq", provider: "groq", auth: "key", model: "faux-1" }, "gsk_0123456789abcdefghij");
-      const agent = await made.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+      const saved = await made.layer.api.save(USER, { name: "Groq", provider: "groq", auth: "key", model: "faux-1" }, "gsk_0123456789abcdefghij");
+      const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
       const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
       // What waits while the answer streams.
       const waiting: number[] = [];
@@ -186,8 +186,8 @@ describe("a stream that goes silent", () => {
 describe("a provider that never answers", () => {
   test("a connection's test says so after the provider wait, naming that setting", async () => {
     r = rig({ script: () => new Promise<Response>(() => undefined), askMs: 90_000 });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-    const testing = r.layer.api.test(saved.id);
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    const testing = r.layer.api.test(USER, saved.id);
     await r.clock.idle();
     r.clock.advance(90_000);
     expect(await testing).toEqual({ ok: false, ms: 90_000, error: 'The provider didn\'t answer within 90 seconds. The setting "Provider wait" says how long to wait for it.' });
@@ -195,12 +195,12 @@ describe("a provider that never answers", () => {
 
   test("a test that is answered says by which model, and sends the text it was given", async () => {
     r = rig({ script: () => new Response(anthropicStream(anthropicTurn({ model: "claude-sonnet-4-5-20250929", text: "Ready." })), { status: 200, headers: { "content-type": "text/event-stream" } }) });
-    const saved = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-    expect(await r.layer.api.test(saved.id)).toMatchObject({ ok: true, model: "claude-sonnet-4-5-20250929" });
+    const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    expect(await r.layer.api.test(USER, saved.id)).toMatchObject({ ok: true, model: "claude-sonnet-4-5-20250929" });
     expect(JSON.stringify(r.sent[0]?.body)).toContain("Answer with one word.");
     await r.done();
     r = rig({ script: () => failed(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }) });
-    const refused = await r.layer.api.save({ name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-    expect(await r.layer.api.test(refused.id)).toMatchObject({ ok: false, error: "401: invalid x-api-key (authentication_error)" });
+    const refused = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
+    expect(await r.layer.api.test(USER, refused.id)).toMatchObject({ ok: false, error: "401: invalid x-api-key (authentication_error)" });
   });
 });

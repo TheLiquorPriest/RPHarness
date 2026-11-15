@@ -1,6 +1,7 @@
-// What every part of the contract uses: where a call happens (`Scope`), which agent acts
-// (`AgentRef`), what model calls cost in tokens (`Usage`), how hard a model reasons (`Effort`),
-// a found thing (`SearchHit`), time (`Clock`) and diagnostics (`Log`).
+// What every part of the contract uses: where a call happens (`Scope`, or `UserScope` for a call
+// that acts for a user and no chat), which agent acts (`AgentRef`), what model calls cost in tokens
+// (`Usage`), how hard a model reasons (`Effort`), a found thing (`SearchHit`), time (`Clock`) and
+// diagnostics (`Log`).
 
 import type { JsonValue } from "./json";
 
@@ -25,6 +26,17 @@ export interface Scope {
    * the user started, a talk with an agent.
    */
   turn?: string;
+}
+
+/**
+ * The scope of a call that acts for a user and no chat (READINGS R-52; Appendix B: every table
+ * carries the user): what is the user's across his chats, as his day's counts, his connections and
+ * his keys. Every `Scope` is one too, so a call made for a chat may be given where this is taken; the
+ * host keeps what it holds for one user apart from every other user's.
+ */
+export interface UserScope {
+  /** The user the host serves. */
+  user: string;
 }
 
 /** One agent of a run, as RPH names it to the host: for the record of who wrote what, for dropping one agent's staged writes, and for who reads lore. */

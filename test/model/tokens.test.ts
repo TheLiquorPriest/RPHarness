@@ -8,7 +8,7 @@ import type { Api, AssistantMessage, Message, Model, Usage } from "@earendil-wor
 import type { ConnectionInput } from "../../src/contract";
 import { callUsage, estimateOf, promptTokens, tokensOf } from "../../src/model";
 import type { Rig, Script } from "./support";
-import { anthropicStream, anthropicTurn, call, chatStream, chunk, eventStream, rig } from "./support";
+import { anthropicStream, anthropicTurn, call, chatStream, chunk, eventStream, rig, USER } from "./support";
 
 /** An estimate never the answer here, so that a count taken from it shows. */
 const GUESS = { in: 1, out: 1, reasoningOut: 1 };
@@ -23,8 +23,8 @@ afterEach(async () => {
 /** The answer a call on `connection` gets when its provider answers as `script` does, and the model it went to. */
 async function answered(script: Script, connection: ConnectionInput, key?: string): Promise<{ answer: AssistantMessage; model: Model<Api> }> {
   r = rig({ script });
-  const saved = await r.layer.api.save(connection, key);
-  const agent = await r.layer.agentModel({ connectionId: saved.id, model: null, effort: "off" });
+  const saved = await r.layer.api.save(USER, connection, key);
+  const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
   const answer = await call(agent, ASK);
   expect(answer.errorMessage).toBeUndefined();
   return { answer, model: agent.model };

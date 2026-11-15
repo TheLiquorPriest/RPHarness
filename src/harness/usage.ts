@@ -1,6 +1,7 @@
 // What runs spent (Appendix A `UsageApi`): calls and tokens per run and per agent, what each user's
-// runs spent on a day (kept in the host's store, so it outlives a restart), and how full each
-// working agent's context is. Counted from the trace, as each agent's work ends.
+// runs spent on a day (kept in the host's store under the user alone, so it outlives a restart and
+// is never another user's), and how full each working agent's context is. Counted from the trace, as
+// each agent's work ends.
 import type { AgentRef, Clock, JsonValue, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
 import { addUsage, emptyUsage } from "../loop/budget";
 
@@ -75,15 +76,14 @@ export class UsageBook implements UsageApi {
       addUsage(entry.usage, event.usage);
       book.agents.set(record.agent.id, entry);
     }
-    const user = record.scope.user;
+    // The user's day's counts are his across his chats: they are kept under his scope alone.
+    const user = { user: record.scope.user };
     const day = this.#clock.day(record.at);
     const writing = this.#store
-      .update(`usage/days/${day}`, (current) => {
-        const days = typeof current === "object" && current !== null && !Array.isArray(current) ? { ...current } : {};
-        const total = storedUsage(days[user]);
+      .update(user, `usage/days/${day}`, (current) => {
+        const total = storedUsage(current);
         addUsage(total, event.usage);
-        days[user] = { ...total };
-        return days;
+        return { ...total };
       })
       .catch((error: unknown) => this.#log.error("A day's usage could not be kept.", { day, error: error instanceof Error ? error.message : String(error) }));
     this.#writing.add(writing);
@@ -113,9 +113,7 @@ export class UsageBook implements UsageApi {
   }
 
   async day(user: string, day?: string): Promise<Usage> {
-    const value = await this.#store.get(`usage/days/${day ?? this.#clock.day()}`);
-    const kept = typeof value === "object" && value !== null && !Array.isArray(value) ? value[user] : undefined;
-    return storedUsage(kept);
+    return storedUsage(await this.#store.get({ user }, `usage/days/${day ?? this.#clock.day()}`));
   }
 
   async window(scope: Scope, agent: string): Promise<WindowGauge | undefined> {

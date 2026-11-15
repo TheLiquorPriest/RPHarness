@@ -1,6 +1,6 @@
 // What a turn does with its prompt at its start (§4.8 "What code does every turn"), and what a
-// chat's newest turns' prompts held, kept through the host's store by chat so that the next turn,
-// or a swipe of one, is compared with the turn it follows.
+// chat's newest turns' prompts held, kept through the host's store under the chat's scope so that
+// the next turn, or a swipe of one, is compared with the turn it follows.
 import type { Environment, JsonValue, LocatedSlices, PromptMessage, Scope, StorePort } from "../contract";
 import { TurnPrompt } from "./prompt";
 import { locatedOf, type PromptRecord, recordOf } from "./shape";
@@ -31,7 +31,7 @@ export class PromptMemory {
   /** What the turn `parent` held: the one a turn follows. `undefined`: the chat's newest kept turn; `null`: the turn follows none. */
   async before(scope: Scope, parent: string | null | undefined): Promise<PromptRecord | undefined> {
     if (parent === null) return undefined;
-    const kept = keptOf(await this.#store.get(keyOf(scope)));
+    const kept = keptOf(await this.#store.get(scope, keyOf(scope)));
     return (parent === undefined ? kept.at(-1) : kept.find((k) => k.turn === parent))?.record;
   }
 
@@ -39,7 +39,7 @@ export class PromptMemory {
   async keep(scope: Scope, record: PromptRecord): Promise<void> {
     const turn = scope.turn;
     if (turn === undefined) return;
-    await this.#store.update(keyOf(scope), (current) => {
+    await this.#store.update(scope, keyOf(scope), (current) => {
       const kept = keptOf(current).filter((k) => k.turn !== turn);
       kept.push({ turn, record });
       return { turns: kept.slice(-this.#keep) } as unknown as JsonValue;

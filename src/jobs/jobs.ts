@@ -7,9 +7,10 @@
 // may spend. A job an agent of another job started spends from that job's run as well as its own, so
 // that a chain of jobs never spends more than its first may. A job is tied to the turn that started
 // it: the host saying that turn left the path cancels it, and a stop of the turn does not. Each change
-// of a job's state is kept in the host's store, told to the host and traced, so a restart finds a job
-// that was running and lists it as interrupted, with what it had done; the day's counts of jobs and
-// of their tokens are kept there too.
+// of a job's state is kept in the host's store under its user, told to the host and traced, so a
+// restart finds a job that was running and lists it as interrupted, with what it had done; the day's
+// counts of jobs and of their tokens are kept there too, under the user alone. RPH cannot list the
+// users a store holds, so what a restart cut off is found for each user at his first call.
 import type { DelegateCall } from "../agents/tools";
 import type { JobsApi, JobStart, JobState, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
 import { loadGuidance } from "../files";
@@ -108,12 +109,11 @@ export class Jobs implements JobsApi, JobsWork {
   readonly #writes = new Map<string, Promise<unknown>>();
   /** What each user's jobs have spent today, by the day and the user, read from the store once in this process. */
   readonly #days = new Map<string, Promise<DaySpend>>();
-  /** Settles once the jobs a restart found under way are kept as interrupted. */
-  readonly #recovered: Promise<void>;
+  /** For each user this process has acted for: settles once the jobs a restart found him under way are kept as interrupted. */
+  readonly #recovered = new Map<string, Promise<void>>();
 
   constructor(core: Omit<JobCore, "jobs">) {
     this.#core = core;
-    this.#recovered = this.#recover();
   }
 
   /**
@@ -152,24 +152,25 @@ export class Jobs implements JobsApi, JobsWork {
   // ---------------------------------------------------------------- the Jobs page (`JobsApi`)
 
   async list(filter: { user: string; chat?: string; states?: JobState[] }): Promise<JobView[]> {
-    await this.#recovered;
+    const user = { user: filter.user };
+    await this.#recovery(filter.user);
     await Promise.allSettled([...this.#writes.values()]);
     const { store } = this.#core.env;
     const views = new Map<string, JobView>();
-    for (const key of await store.list(KEPT)) {
-      const view = keptView(await store.get(key));
+    for (const key of await store.list(user, KEPT)) {
+      const view = keptView(await store.get(user, key));
       if (view !== undefined) views.set(view.id, view);
     }
-    for (const live of this.#live.values()) views.set(live.view.id, live.view);
-    return [...views.values()].filter((view) => view.scope.user === filter.user && (filter.chat === undefined || view.scope.chat === filter.chat) && (filter.states === undefined || filter.states.includes(view.state))).map((view) => ({ ...view }));
+    for (const live of this.#live.values()) if (live.view.scope.user === filter.user) views.set(live.view.id, live.view);
+    return [...views.values()].filter((view) => (filter.chat === undefined || view.scope.chat === filter.chat) && (filter.states === undefined || filter.states.includes(view.state))).map((view) => ({ ...view }));
   }
 
-  async get(id: string): Promise<JobView | undefined> {
-    await this.#recovered;
+  async get(user: string, id: string): Promise<JobView | undefined> {
+    await this.#recovery(user);
     const live = this.#live.get(id);
-    if (live !== undefined) return { ...live.view };
+    if (live !== undefined && live.view.scope.user === user) return { ...live.view };
     await this.#writes.get(id);
-    return keptView(await this.#core.env.store.get(`${KEPT}${id}`));
+    return keptView(await this.#core.env.store.get({ user }, `${KEPT}${id}`));
   }
 
   /** The user starts a job, tied to no turn, held to the limits it was given where they are tighter than the settings'. It rejects when none can be started; the error says why, for the host. */
@@ -183,9 +184,9 @@ export class Jobs implements JobsApi, JobsWork {
     throw new Error(`No job was started: there is no agent definition named "${start.agent}", or no model for it to run on.`);
   }
 
-  async cancel(id: string): Promise<JobView | undefined> {
+  async cancel(user: string, id: string): Promise<JobView | undefined> {
     const live = this.#live.get(id);
-    if (live === undefined) return this.get(id);
+    if (live === undefined || live.view.scope.user !== user) return this.get(user, id);
     return this.#stop(live, "cancelled");
   }
 
@@ -200,7 +201,7 @@ export class Jobs implements JobsApi, JobsWork {
 
   /** Stops every job, kept as interrupted (§13.5), and waits for what is kept and told to settle. */
   async close(): Promise<void> {
-    await this.#recovered;
+    await Promise.allSettled([...this.#recovered.values()]);
     await Promise.all([...this.#live.values()].map((live) => this.#stop(live, "interrupted")));
     while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
   }
@@ -216,6 +217,8 @@ export class Jobs implements JobsApi, JobsWork {
   async #begin(ask: Omit<JobAsk, "id" | "spent">): Promise<Begun> {
     const { scope, call, by, parent } = ask;
     const core = this.#core;
+    // What a restart cut off of the user's is kept as interrupted first, so no job of this process is taken for one.
+    await this.#recovery(scope.user);
     const id = core.ids();
     const spend = await this.#spend(scope.user);
     const prepared = await prepareJob({ ...core, jobs: this }, { ...ask, id, spent: spend.used });
@@ -253,9 +256,8 @@ export class Jobs implements JobsApi, JobsWork {
   async #count(user: string, settings: Settings, own: readonly ConnectionCounts[]): Promise<LimitHit | undefined> {
     const limits: { max: number; connection?: string }[] = [...(settings.jobs.perDay !== undefined ? [{ max: settings.jobs.perDay }] : []), ...own.flatMap(({ key, counts }) => (counts.perDay !== undefined ? [{ max: counts.perDay, connection: key }] : []))];
     let hit: LimitHit | undefined;
-    await this.#core.env.store.update(`${DAYS}${this.#core.env.clock.day()}`, (current) => {
-      const days = isObject(current) ? { ...current } : {};
-      const count = dayCount(days[user]);
+    await this.#core.env.store.update({ user }, `${DAYS}${this.#core.env.clock.day()}`, (current) => {
+      const count = dayCount(current);
       for (const { max, connection } of limits) {
         const value = connection === undefined ? count.all : (count.connections[connection] ?? 0);
         if (value >= max) {
@@ -265,8 +267,7 @@ export class Jobs implements JobsApi, JobsWork {
       }
       count.all += 1;
       for (const { key } of own) count.connections[key] = (count.connections[key] ?? 0) + 1;
-      days[user] = { all: count.all, connections: count.connections, tokens: count.tokens };
-      return days;
+      return { all: count.all, connections: count.connections, tokens: count.tokens };
     });
     return hit;
   }
@@ -284,9 +285,9 @@ export class Jobs implements JobsApi, JobsWork {
     if (known !== undefined) return known;
     for (const other of this.#days.keys()) if (!other.startsWith(`${day}\n`)) this.#days.delete(other);
     const key = `${DAYS}${day}`;
-    const read = this.#core.env.store.get(key).then((value): DaySpend => {
+    const read = this.#core.env.store.get({ user }, key).then((value): DaySpend => {
       // What was spent before this process, as it was spent: each job's day holds it to the weight of a cached token in force.
-      const { tokens } = dayCount(isObject(value) ? value[user] : undefined);
+      const { tokens } = dayCount(value);
       return { key, user, used: { ...emptyUsage(), ...tokens } };
     });
     this.#days.set(at, read);
@@ -299,11 +300,9 @@ export class Jobs implements JobsApi, JobsWork {
 
   /** Keeps what the user's jobs have spent in a day, as counted so far, beside that day's count of jobs; once a job has ended, so that it holds across a restart. */
   #keepSpend(spend: DaySpend, job: string): void {
-    const kept = this.#core.env.store.update(spend.key, (current) => {
-      const days = isObject(current) ? { ...current } : {};
-      const count = dayCount(days[spend.user]);
-      days[spend.user] = { all: count.all, connections: count.connections, tokens: { input: spend.used.input, cacheRead: spend.used.cacheRead, output: spend.used.output } };
-      return days;
+    const kept = this.#core.env.store.update({ user: spend.user }, spend.key, (current) => {
+      const count = dayCount(current);
+      return { all: count.all, connections: count.connections, tokens: { input: spend.used.input, cacheRead: spend.used.cacheRead, output: spend.used.output } };
     });
     this.#pend(kept, "What the user's jobs spent today could not be kept.", job);
   }
@@ -374,46 +373,57 @@ export class Jobs implements JobsApi, JobsWork {
     this.#tell(view);
   }
 
-  #keep(view: JobView): void {
+  /** Keeps the job's view under its user, after its writes before; resolves once kept, or once it could not be (logged). */
+  #keep(view: JobView): Promise<unknown> {
     const { store, log } = this.#core.env;
     const write = (this.#writes.get(view.id) ?? Promise.resolve())
-      .then(() => store.set(`${KEPT}${view.id}`, view as unknown as JsonValue))
+      .then(() => store.set(view.scope, `${KEPT}${view.id}`, view as unknown as JsonValue))
       .catch((error: unknown) => log.error("A job could not be kept.", { job: view.id, error: errorWords(error) }));
     this.#writes.set(view.id, write);
     this.#pend(write, "A job could not be kept.", view.id);
     void write.finally(() => {
       if (this.#writes.get(view.id) === write) this.#writes.delete(view.id);
     });
+    return write;
   }
 
-  #tell(view: JobView): void {
+  /** Tells the host of the job; resolves once told, or once it could not be (logged). */
+  #tell(view: JobView): Promise<unknown> {
     const told = this.#core.env.events.job?.(view.scope, view);
-    if (told !== undefined) this.#pend(told, "The host could not be told of a job.", view.id);
+    return told === undefined ? Promise.resolve() : this.#pend(told, "The host could not be told of a job.", view.id);
   }
 
-  #pend(promise: Promise<unknown>, message: string, job: string): void {
+  #pend(promise: Promise<unknown>, message: string, job: string): Promise<unknown> {
     const pending = promise.catch((error: unknown) => this.#core.env.log.error(message, { job, error: errorWords(error) }));
     this.#pending.add(pending);
     void pending.finally(() => this.#pending.delete(pending));
+    return pending;
   }
 
-  /** After a restart: a job the store holds as under way was cut off by it. It is kept as interrupted, with what it had done, and told (§13.5). */
-  async #recover(): Promise<void> {
-    const { store, clock, log } = this.#core.env;
-    let keys: string[];
-    try {
-      keys = await store.list(KEPT);
-    } catch (error) {
-      log.error("The jobs a restart cut off could not be found.", { error: errorWords(error) });
-      return;
-    }
-    for (const key of keys) {
-      const view = keptView(await store.get(key).catch(() => undefined));
+  /** The user's finding of what a restart cut off, begun at his first call; a finding that failed is begun again by his next. */
+  #recovery(user: string): Promise<void> {
+    const known = this.#recovered.get(user);
+    if (known !== undefined) return known;
+    const finding = this.#recover(user).catch((error: unknown) => {
+      this.#core.env.log.error("The jobs a restart cut off could not be found.", { user, error: errorWords(error) });
+      if (this.#recovered.get(user) === finding) this.#recovered.delete(user);
+    });
+    this.#recovered.set(user, finding);
+    return finding;
+  }
+
+  /** After a restart: a job the store holds as the user's and under way was cut off by it. It is kept as interrupted, with what it had done, and told (§13.5). */
+  async #recover(user: string): Promise<void> {
+    const { store, clock } = this.#core.env;
+    const scope = { user };
+    const done: Promise<unknown>[] = [];
+    for (const key of await store.list(scope, KEPT)) {
+      const view = keptView(await store.get(scope, key).catch(() => undefined));
       if (view === undefined || UNDER_WAY[view.state] !== true) continue;
       const interrupted: JobView = { ...view, state: "interrupted", ended: clock.now() };
-      this.#keep(interrupted);
-      this.#tell(interrupted);
+      done.push(this.#keep(interrupted), this.#tell(interrupted));
     }
-    while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+    // Its own writes and words alone: other users' jobs may be running and writing meanwhile.
+    await Promise.all(done);
   }
 }

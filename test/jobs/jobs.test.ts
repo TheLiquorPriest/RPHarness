@@ -79,7 +79,7 @@ describe("a job an agent starts", () => {
     // Its chat and the turn that started it, in a session of its own.
     expect(done.scope).toMatchObject({ user: USER, turn: "t1" });
     expect(done.scope.session).not.toBe("s1");
-    expect(await s.harness.jobs!.get(id)).toMatchObject({ state: "done", report: done.report });
+    expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ state: "done", report: done.report });
     // Its run is its own, hung under the call that started it.
     const own = s.trace.records.filter((record: TraceRecord) => record.run === id);
     expect(own.find((record) => record.event.kind === "agent_started")?.parent).toEqual({ agent: (running!.startedBy as AgentRef).id, run: "t1", call: "start-1" });
@@ -331,11 +331,11 @@ describe("what stops a job", () => {
     stop.abort();
     expect((await turn).outcome.status).toBe("stopped");
     const [one, two] = [...new Set(toldJobs(s).map((job) => job.id))];
-    expect((await s.harness.jobs!.get(one!))?.state).toBe("running");
+    expect((await s.harness.jobs!.get(USER, one!))?.state).toBe("running");
 
-    expect((await s.harness.jobs!.cancel(two!))?.state).toBe("cancelled");
+    expect((await s.harness.jobs!.cancel(USER, two!))?.state).toBe("cancelled");
     await s.harness.turnLeft(request("t1").scope);
-    expect((await s.harness.jobs!.get(one!))?.state).toBe("off-path");
+    expect((await s.harness.jobs!.get(USER, one!))?.state).toBe("off-path");
     expect(toldJobs(s).filter((job) => job.ended !== undefined).map((job) => [job.id === one ? "one" : "two", job.state])).toEqual([
       ["two", "cancelled"],
       ["one", "off-path"],
@@ -352,14 +352,14 @@ describe("what stops a job", () => {
     await s.trace.seen((record) => record.event.kind === "tool_ended" && record.event.tool === "todo");
     const id = toldJobs(s)[0]!.id;
     await s.harness.close();
-    expect(await s.harness.jobs!.get(id)).toMatchObject({ state: "interrupted", report: "Counted three so far." });
+    expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ state: "interrupted", report: "Counted three so far." });
 
     // A process that ended without closing left a job kept as running.
     const crashed = { ...toldJobs(s)[0]!, id: "crashed-1", state: "running" as const, report: "Half the ledger read." };
-    await s.env.store.set("jobs/all/crashed-1", crashed as unknown as JsonValue);
+    await s.env.store.set(crashed.scope, "jobs/all/crashed-1", crashed as unknown as JsonValue);
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
-      expect(await again.jobs!.get("crashed-1")).toMatchObject({ state: "interrupted", report: "Half the ledger read." });
+      expect(await again.jobs!.get(USER, "crashed-1")).toMatchObject({ state: "interrupted", report: "Half the ledger read." });
       expect(toldJobs(s).at(-1)).toMatchObject({ id: "crashed-1", state: "interrupted" });
       expect((await again.jobs!.list({ user: USER, states: ["interrupted"] })).map((job) => job.id).sort()).toEqual(["crashed-1", id].sort());
     } finally {

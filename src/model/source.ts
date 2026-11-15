@@ -14,11 +14,19 @@ import type { ModelLimits } from "../contract";
  */
 export type ModelEffort = "inherit" | "auto" | ModelThinkingLevel;
 
-/** What an agent runs on: a connection (null: the default), a model on it (null: the connection's own), and how hard it reasons (absent: `inherit`). */
+/** What an agent runs on, among one user's connections: a connection (null: his default), a model on it (null: the connection's own), and how hard it reasons (absent: `inherit`). */
 export interface AgentChoice {
   connectionId: string | null;
   model: string | null;
   effort?: ModelEffort;
+}
+
+/**
+ * An agent's choice as the harness asks for it: the user it acts for, whose connections the choice is
+ * among. A connection's id, and which connection is the default, are one user's alone (READINGS R-52).
+ */
+export interface UserChoice extends AgentChoice {
+  user: string;
 }
 
 export interface AgentModel {
@@ -32,6 +40,6 @@ export interface AgentModel {
 }
 
 export interface ModelSource {
-  /** The model an agent runs on; rejects, in words that say what to do, when there is none to run on. */
-  agentModel(choice: AgentChoice): Promise<AgentModel>;
+  /** The model an agent runs on, from the connections of the user the choice names; rejects, in words that say what to do, when there is none to run on. */
+  agentModel(choice: UserChoice): Promise<AgentModel>;
 }

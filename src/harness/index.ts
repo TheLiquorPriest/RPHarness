@@ -80,7 +80,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       // The connections are read again first, so a hand edit made since holds from this turn's first
       // call. What the read has to say goes to the log, never to an agent: the layer writes each line
       // there once, through the `log` it was given. The turn is already registered, so it can be left.
-      const answered = layer.turnStarting().then(() => turn.answer(signal));
+      const answered = layer.turnStarting(req.scope.user).then(() => turn.answer(signal));
       answering.add(answered);
       try {
         return await answered;

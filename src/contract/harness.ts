@@ -69,13 +69,21 @@ export interface JobStart {
   limits?: JobLimits;
 }
 
+/**
+ * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found
+ * only under its own user's name, so no user reads or stops another's job by its id (READINGS R-52).
+ * After a restart, a job the store holds as under way is kept as interrupted, with what it had done,
+ * and told, on its user's first call here; a list is such a call, so it is listed as interrupted
+ * (§13.5). A host that wants that done at its start, as before, calls `list` for each user it knows.
+ */
 export interface JobsApi {
   list(filter: { user: string; chat?: string; states?: JobState[] }): Promise<JobView[]>;
-  get(id: string): Promise<JobView | undefined>;
+  /** The user's job; undefined when he has none by that id. */
+  get(user: string, id: string): Promise<JobView | undefined>;
   /** The user starts a job. Code never does (§13.5). */
   start(scope: Scope, start: JobStart): Promise<JobView>;
-  /** Stops a job; undefined when there is no such job. */
-  cancel(id: string): Promise<JobView | undefined>;
+  /** Stops the user's job; undefined when he has none by that id. */
+  cancel(user: string, id: string): Promise<JobView | undefined>;
 }
 
 // ---------------------------------------------------------------- sessions

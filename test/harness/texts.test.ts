@@ -15,7 +15,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { ApprovalsPort, JsonObject, JsonValue, TurnRequest } from "../../src/contract";
 import { chunk } from "../model/support";
-import { CHARACTER, CHAT, type ChatFixture, PROMPT, request, said, type Stage, stage, type WatchedSink } from "./support";
+import { CHARACTER, CHAT, type ChatFixture, PROMPT, request, said, type Stage, stage, USER, type WatchedSink } from "./support";
 
 const opened: Stage[] = [];
 afterEach(async () => {
@@ -90,8 +90,8 @@ async function served(answers: readonly Said[], options: Omit<Parameters<typeof 
   const { fetch, bodies } = server(answers);
   const s = await stage({ ...options, fetch, answers: [] });
   opened.push(s);
-  const saved = await s.harness.models.save({ name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "fixture-model" });
-  await s.harness.models.setDefault(saved.id);
+  const saved = await s.harness.models.save(USER, { name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "fixture-model" });
+  await s.harness.models.setDefault(USER, saved.id);
   return { s, bodies };
 }
 

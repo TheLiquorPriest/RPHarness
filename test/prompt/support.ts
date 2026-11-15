@@ -257,24 +257,29 @@ export function memoryHost(): MemoryHost {
       warn: (message) => void logged.push(message),
       error: (message) => void logged.push(message),
     },
+    // Each user's values apart, as a host keeps them: the same key is one value per user.
     store: {
-      async get(key) {
-        return kept.get(key);
+      async get(scope, key) {
+        return kept.get(JSON.stringify([scope.user, key]));
       },
-      async set(key, value) {
-        kept.set(key, structuredClone(value));
+      async set(scope, key, value) {
+        kept.set(JSON.stringify([scope.user, key]), structuredClone(value));
       },
-      async update(key, change) {
-        const value = change(kept.get(key));
-        if (value === undefined) kept.delete(key);
-        else kept.set(key, structuredClone(value));
+      async update(scope, key, change) {
+        const at = JSON.stringify([scope.user, key]);
+        const value = change(kept.get(at));
+        if (value === undefined) kept.delete(at);
+        else kept.set(at, structuredClone(value));
         return value;
       },
-      async delete(key) {
-        kept.delete(key);
+      async delete(scope, key) {
+        kept.delete(JSON.stringify([scope.user, key]));
       },
-      async list(prefix) {
-        return [...kept.keys()].filter((key) => key.startsWith(prefix));
+      async list(scope, prefix) {
+        return [...kept.keys()].flatMap((at) => {
+          const [user, key] = JSON.parse(at) as [string, string];
+          return user === scope.user && key.startsWith(prefix) ? [key] : [];
+        });
       },
     },
   };

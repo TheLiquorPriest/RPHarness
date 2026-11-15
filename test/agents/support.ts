@@ -158,7 +158,7 @@ function toolText(part: PromptPart | undefined): ToolText | undefined {
 /** The connection a definition names, in the rig: its `model:` is the scripted model's name. */
 async function connectionOf(definition: AgentDefinition) {
   const name = definition.model ?? "default";
-  return { choice: { connectionId: name, model: null, ...(definition.effort !== undefined ? { effort: definition.effort } : {}) }, label: name };
+  return { choice: { user: USER, connectionId: name, model: null, ...(definition.effort !== undefined ? { effort: definition.effort } : {}) }, label: name };
 }
 
 export async function stage(options: StageOptions): Promise<Stage> {

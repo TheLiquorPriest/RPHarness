@@ -1,10 +1,11 @@
 // What the model layer's tests share: a layer over a store kept in memory, a scripted `fetch` that
 // keeps what each request sent, answers written the way each provider's API streams them, and the
-// rig's clock for every wait. Nothing reaches the network.
+// rig's clock for every wait. Nothing reaches the network. Every call names the user it acts for:
+// the rig's own (`USER`), unless a test puts another beside him.
 
 import type { AssistantMessage, Message, Provider, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import type { ConnectionsDoc, ModelsPort, SecretsDoc } from "../../src/contract";
+import type { ConnectionsDoc, ModelsPort, SecretsDoc, UserScope } from "../../src/contract";
 import type { AgentModel, ModelLayer, ModelWait } from "../../src/model";
 import { createModelLayer } from "../../src/model";
 import { FakeClock } from "../../src/testing/rig";
@@ -136,25 +137,52 @@ export function chunk(delta: Record<string, unknown>, finish: string | null = nu
   return { id: "chatcmpl-1", object: "chat.completion.chunk", created: 1, model: "served-model", choices: [{ index: 0, delta, finish_reason: finish }] };
 }
 
-/** The two documents the layer keeps, held in memory as a host keeps them: whole, as last given. */
+/** The user the rig's calls act for. */
+export const USER = "harbour-reader";
+
+/** The two documents the layer keeps for each user, held in memory as a host keeps them: whole, as last given, each user's apart. */
 export class MemoryStore implements ModelsPort {
-  connectionsDoc: unknown = null;
-  secretsDoc: unknown = null;
-  /** Every document written, by name, in order. */
+  readonly #docs = new Map<string, { connections: unknown; secrets: unknown }>();
+  /** Every document written, by name, in order, whoever's it is. */
   readonly writes: ("connections" | "secrets")[] = [];
 
-  async loadConnections(): Promise<unknown> {
-    return structuredClone(this.connectionsDoc);
+  /** A user's two documents as kept (null: none). */
+  of(user: string): { connections: unknown; secrets: unknown } {
+    let docs = this.#docs.get(user);
+    if (docs === undefined) {
+      docs = { connections: null, secrets: null };
+      this.#docs.set(user, docs);
+    }
+    return docs;
   }
-  async saveConnections(doc: ConnectionsDoc): Promise<void> {
-    this.connectionsDoc = structuredClone(doc);
+
+  /** The rig's user's connections document, as kept or as a test edits it by hand. */
+  get connectionsDoc(): unknown {
+    return this.of(USER).connections;
+  }
+  set connectionsDoc(doc: unknown) {
+    this.of(USER).connections = doc;
+  }
+  /** The rig's user's secrets document, as kept or as a test puts it. */
+  get secretsDoc(): unknown {
+    return this.of(USER).secrets;
+  }
+  set secretsDoc(doc: unknown) {
+    this.of(USER).secrets = doc;
+  }
+
+  async loadConnections(scope: UserScope): Promise<unknown> {
+    return structuredClone(this.of(scope.user).connections);
+  }
+  async saveConnections(scope: UserScope, doc: ConnectionsDoc): Promise<void> {
+    this.of(scope.user).connections = structuredClone(doc);
     this.writes.push("connections");
   }
-  async loadSecrets(): Promise<unknown> {
-    return structuredClone(this.secretsDoc);
+  async loadSecrets(scope: UserScope): Promise<unknown> {
+    return structuredClone(this.of(scope.user).secrets);
   }
-  async saveSecrets(doc: SecretsDoc): Promise<void> {
-    this.secretsDoc = structuredClone(doc);
+  async saveSecrets(scope: UserScope, doc: SecretsDoc): Promise<void> {
+    this.of(scope.user).secrets = structuredClone(doc);
     this.writes.push("secrets");
   }
 }

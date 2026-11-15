@@ -14,8 +14,8 @@
 //   host/facts.json                        the facts the host declares, and their values by chat
 //   host/tools.json                        the tools manifest, unless the host is given another
 //   host/maps/<preset>.json                prompt maps, one per preset
-//   host/models/, host/secrets/            the model layer's documents
-//   host/store/                            small durable state
+//   host/user/<user>/models/, secrets/     the model layer's documents, each user's in his own folder
+//   host/user/<user>/store/                small durable state, each user's in his own folder
 //   host/log.jsonl                         the log
 //
 // Not here: the host's other stores (`stores`), searchers for `gap_check` (none), the user's

@@ -112,3 +112,9 @@ export class TagParser {
     return best;
   }
 }
+
+/** A whole message's text outside every part, as the parser reads it: each tag, and what it holds, taken out. */
+export function outsideTags(text: string, tags: ReplyTags): string {
+  const parser = new TagParser(tags);
+  return [...parser.push(text), ...parser.end()].flatMap((part) => (part.kind === "text" && part.role === undefined ? [part.text] : [])).join("");
+}

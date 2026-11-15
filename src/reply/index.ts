@@ -7,4 +7,4 @@ export { KeepAlive, type KeepAliveOptions } from "./progress";
 export { Release } from "./release";
 export { heldSentences, TagReply, type TagReplyOptions } from "./reply";
 export { lastSentences, sentenceEnds } from "./sentences";
-export { type ReplyTags, type TagPart, TagParser, type TagRole } from "./tags";
+export { outsideTags, type ReplyTags, type TagPart, TagParser, type TagRole } from "./tags";

@@ -24,7 +24,7 @@ import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, Promp
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
-import { heldSentences, KeepAlive, MessageReply, ReplyDesk, type ReplyTags, TagReply } from "../reply";
+import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
@@ -131,7 +131,7 @@ function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefine
   return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
 }
 
-/** What the sink is told when the run ends without a reply released; where it ended with no reply, at a limit or stopped, the lead's last plain text, where it wrote any. */
+/** What the sink is told when the run ends without a reply released; where it ended with no reply, at a limit or stopped, the lead's last plain text outside any mark, where it wrote any. */
 function replyError(outcome: RunOutcome, lastText: string | undefined): ReplyError {
   if (outcome.status === "failed") return outcome.error ?? { code: "failed" };
   const text = lastText !== undefined ? { text: lastText } : {};
@@ -190,7 +190,7 @@ export class Turn {
   /** The judging model of the `question:` rules, once the turn's rules are loaded. */
   #judges: Judges | undefined;
   #intentWritten = false;
-  /** The text of the lead's last message that ended whole with any: what a run with no reply hands the host. */
+  /** The lead's last message that ended whole with any text outside every mark, that text, trimmed: what a run with no reply hands the host. */
   #lastText: string | undefined;
   #notices = 0;
   #stopped = false;
@@ -1177,7 +1177,12 @@ export class Turn {
         return;
       case "call_ended": {
         if (event.stop === "cut") return;
-        if (agent === this.#lead.id && event.error === undefined && event.text.trim() !== "") this.#lastText = event.text;
+        if (agent === this.#lead.id && event.error === undefined) {
+          // In the tag form, its marked parts (the intent record, a reply) taken out: never the record into the chat.
+          const tags = this.#opening?.form === "tags" ? this.#opening.tags : undefined;
+          const plain = (tags !== undefined ? outsideTags(event.text, tags) : event.text).trim();
+          if (plain !== "") this.#lastText = plain;
+        }
         const then: RuleThen | undefined = event.toolCalls.length > 0 ? { did: "called", tools: event.toolCalls.map((call) => call.name) } : event.text !== "" ? { did: "wrote" } : undefined;
         if (then !== undefined) this.#then(agent, (firing) => event.call > firing.call, then);
         return;

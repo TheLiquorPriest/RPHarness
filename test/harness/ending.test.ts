@@ -245,7 +245,7 @@ describe("stop", () => {
           },
         },
       },
-      answers: [{ pieces: [{ text: "<intent>Look it up.</intent>" }, { call: "world_query" }] }, { pieces: [{ text: "<reply>never</reply>" }] }],
+      answers: [{ pieces: [{ text: "<intent>Look it up.</intent>Checking the world first." }, { call: "world_query" }] }, { pieces: [{ text: "<reply>never</reply>" }] }],
     }));
     const stop = new AbortController();
 
@@ -261,8 +261,8 @@ describe("stop", () => {
     expect(late).toEqual(["answered"]);
     expect(s.trace.records).toHaveLength(records);
     expect(s.model.requests).toHaveLength(1);
-    // A stop with no reply carries the lead's last plain text, as written, for a host that sends it in place of its own line.
-    expect(sink.errors).toEqual([{ code: "stopped", text: "<intent>Look it up.</intent>" }]);
+    // A stop with no reply carries the lead's last plain text outside any mark: never its intent record.
+    expect(sink.errors).toEqual([{ code: "stopped", text: "Checking the world first." }]);
   });
 
   test("the turn left the path: its work is cancelled, after the reply as before it", async () => {

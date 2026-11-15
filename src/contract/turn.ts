@@ -60,10 +60,10 @@ export interface TurnRequest {
   parent?: string | null;
   kind: TurnKind;
   /**
-   * Whether the run owes the player a reply (§10.7). Absent or true: it does, and until the reply
-   * is released it is due, so the lead's closing calls do not end its run. False for a run that
-   * writes nothing into the chat (one asked for to settle a turn's records, say): its closing calls
-   * end it, as a job's do.
+   * Whether the run owes the player a reply (§10.7): absent or true, it does; false for a run that
+   * writes nothing into the chat (one asked for to settle a turn's records, say). A fact, and
+   * nothing more: the rules read it as `reply.owed` (1 while a reply is owed and none has been
+   * released), and it changes nothing of how the run ends, which its closing calls and its rules say.
    */
   owesReply?: boolean;
   /** Who the reply speaks as, in a group chat (§10.10). */
@@ -105,11 +105,6 @@ export interface Release {
   path?: string;
   /** The reply's length, in UTF-16 code units. */
   length: number;
-  /**
-   * The reply went out with no intent record of the turn taken before it (§10.3): none was written,
-   * or the host had not taken it when the user's bound on that wait (`reply.intentWait`) ran out.
-   */
-  withoutIntent?: true;
 }
 
 /**

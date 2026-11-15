@@ -198,7 +198,6 @@ const LANDED: Readonly<Record<string, string>> = {
   "reply.heldSentences": "heldSentences",
   "reply.tailSentences": "tailSentences",
   "reply.leadSampling": "leadSampling",
-  "reply.intentWait": "intentWaitMs ms",
   "progress.show": "progress",
   "progress.silence": "silenceMs ms",
   "results.clip": "clipChars",

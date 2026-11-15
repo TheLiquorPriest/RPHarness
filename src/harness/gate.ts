@@ -33,8 +33,6 @@ export interface GateDeps {
   tools: ReadonlyMap<string, HeldTool>;
   /** Characters of one call that the model reads (`results.clip`). */
   clipChars: number;
-  /** Resolves once what the host must hear before any tool runs (the intent record) has been told. */
-  ready(): Promise<void>;
 }
 
 export class TurnGate implements ToolGate {
@@ -46,7 +44,6 @@ export class TurnGate implements ToolGate {
 
   async before(call: GateCall, signal: AbortSignal): Promise<GateBefore> {
     const d = this.#d;
-    await d.ready();
     const tool = d.tools.get(call.tool);
     // A tool that runs a command or calls out does nothing until the host's switches have its thing on, pinned or found (§16).
     const thing = tool?.switchable;

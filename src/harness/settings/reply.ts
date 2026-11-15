@@ -18,9 +18,6 @@ export const REPLY = worded(
     tailSentences: { key: "reply.tailSentences", takes: { type: "whole", least: 1 }, default: 3, perConnection: false, at: "tailSentences" },
     // Appendix D.1: the lead's sampling is its own.
     leadSampling: { key: "reply.leadSampling", takes: { type: "oneOf", values: ["own", "preset"] }, default: "own", perConnection: false, at: "leadSampling" },
-    // The host takes an intent record in the same process: this is room for a slow disk, and short
-    // enough that a host that stalls costs a reply no more than a moment.
-    intentWait: { key: "reply.intentWait", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, at: "intentWaitMs", ms: true },
     // Appendix D.1: progress lines in the thinking block.
     show: { key: "progress.show", takes: { type: "oneOf", values: ["all", "least"] }, default: "all", perConnection: false, at: "progress" },
     // Appendix D.1: a line when nothing has been shown for a minute. §10.7: a generation that sends no

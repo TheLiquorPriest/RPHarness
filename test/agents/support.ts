@@ -6,11 +6,13 @@
 // here is invented.
 //
 // The turns run on the rig's clock without moving it: a scripted answer that must wait holds at a
-// gate the test opens.
+// gate the test opens. The stage's folder goes whatever fails: a set-up that throws removes it, and
+// the stage is closed when the test that made it ends, whether or not the test closed it.
+import { onTestFinished } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { AgentRef, ApprovalsPort, AttachmentRef, ConsentGrant, Environment, JsonValue, Log, Scope, ToolResult, TurnEvents } from "../../src/contract";
+import type { AgentRef, ApprovalsPort, AttachmentRef, ConsentGrant, Environment, JsonValue, Log, Scope, StorePort, ToolResult, TurnEvents } from "../../src/contract";
 import { agentMessage, AGENT_TOOLS, askAuthor, delegate, Team, type TeamDeps } from "../../src/agents";
 import { createFacts, loadGuidance } from "../../src/files";
 import type { AgentDefinition, PromptPart } from "../../src/files/api";
@@ -75,6 +77,8 @@ export interface StageOptions {
   views?: Record<string, string>;
   /** The run's point before each request of every agent the team makes. */
   point?: TeamDeps["point"];
+  /** How the host's store is reached: a test can hold a write back. */
+  store?: (inner: StorePort) => StorePort;
 }
 
 /** A turn under way: the lead's outcome when its run ends, and a stop for every agent of the turn. */
@@ -167,6 +171,20 @@ async function connectionOf(definition: AgentDefinition) {
 
 export async function stage(options: StageOptions): Promise<Stage> {
   const dir = await mkdtemp(join(tmpdir(), "rph-agents-"));
+  let host: FolderHost | undefined;
+  try {
+    const made = await staged(dir, options, (made) => (host = made));
+    onTestFinished(() => made.close());
+    return made;
+  } catch (error) {
+    await host?.close();
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** The stage over its made folder; `hosted` hears of the folder host as soon as it is made. */
+async function staged(dir: string, options: StageOptions, hosted: (host: FolderHost) => void): Promise<Stage> {
   const files = join(dir, "files");
   await cp(SHIPPED_GUIDANCE, join(files, "defaults"), { recursive: true });
   await mkdir(join(files, "chats", CHARACTER, CHAT), { recursive: true });
@@ -191,6 +209,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   const clock = new FakeClock();
   const logged: Stage["logged"] = [];
   const host = await createFolderHost({ dir, user: USER, clock, log: recordingLog(logged), tools: handlers });
+  hosted(host);
   const told: Stage["told"] = [];
   const views = options.views ?? {};
   // The folder host keeps the list and has no views of its own; the stage's host gives these.
@@ -207,12 +226,14 @@ export async function stage(options: StageOptions): Promise<Stage> {
     },
   };
   const trace = new TraceRecorder();
-  const env: Environment = { ...host, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
+  const env: Environment = { ...host, store: options.store?.(host.store) ?? host.store, events, trace, ...(options.approvals !== undefined ? { approvals: options.approvals } : {}) };
   const models = Object.fromEntries(Object.entries(options.models).map(([name, answers]) => [name, scriptedModel(answers, { clock, id: name, contextWindow: 64_000, maxTokens: 4_000 })]));
   const source = scriptedSource(models);
   const hub = new LiveHub();
   const usage = new UsageBook(env.store, clock, env.log);
   const progress: string[] = [];
+  /** Every play's agents at work, so a close stops each. */
+  const plays: Set<{ runner: AgentRunner; work: Work }>[] = [];
   let next = 0;
   const ids = (): string => `id-${(next += 1)}`;
 
@@ -239,8 +260,9 @@ export async function stage(options: StageOptions): Promise<Stage> {
       failed: (fields) => words("failed", fields),
     };
     const working = new Set<{ runner: AgentRunner; work: Work }>();
+    plays.push(working);
     const gateFor = (agent: AgentRef, parent: ParentCall | undefined, tools: readonly HeldTool[]): TurnGate =>
-      new TurnGate({ scope, agent, ...(parent !== undefined ? { parent } : {}), trace: run, clock, files: env.files, ...(env.approvals !== undefined ? { approvals: env.approvals } : {}), places, rules, words, tools: new Map(tools.map((tool) => [tool.name, tool])), clipChars: 12_000, ready: async () => {} });
+      new TurnGate({ scope, agent, ...(parent !== undefined ? { parent } : {}), trace: run, clock, files: env.files, ...(env.approvals !== undefined ? { approvals: env.approvals } : {}), places, rules, words, tools: new Map(tools.map((tool) => [tool.name, tool])), clipChars: 12_000 });
     let registry: Registry | undefined;
     const team = new Team({
       env,
@@ -313,6 +335,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
     };
   }
 
+  let closing: Promise<void> | undefined;
   return {
     dir,
     host,
@@ -339,11 +362,23 @@ export async function stage(options: StageOptions): Promise<Stage> {
         .filter((line) => line.trim() !== "")
         .map((line) => JSON.parse(line) as Record<string, unknown>);
     },
-    async close() {
-      // The usage book's writes to the day's totals are kept first, as the harness's own close keeps them: a write still under way would land in the folder as it goes.
-      await usage.settled();
-      await host.close();
-      await rm(dir, { recursive: true, force: true });
+    close() {
+      closing ??= (async () => {
+        try {
+          // Every agent still at work is stopped and its end waited for, and then the usage book's
+          // writes to the day's totals are kept, as the harness's own close keeps them: a write
+          // still under way, or one an agent's end starts, would land in the folder after it went.
+          for (let left = plays.flatMap((working) => [...working]); left.length > 0; left = plays.flatMap((working) => [...working])) {
+            for (const { work } of left) work.stop();
+            await Promise.allSettled(left.map(({ work }) => work.done));
+          }
+          await usage.settled();
+          await host.close();
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      })();
+      return closing;
     },
   };
 }

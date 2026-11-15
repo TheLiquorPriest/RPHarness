@@ -99,8 +99,12 @@ export type TraceEvent =
   /** A write to a lane set to Confirm waits for the user's word (§6.8). */
   | { kind: "approval_asked"; callId: string; tool: string; lane: string }
   | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: ApprovalAnswer }
-  /** Prompt notices of this turn (§4.8). */
-  | { kind: "prompt_notices"; notices: PromptNotice[] }
+  /**
+   * Prompt notices of this turn (§4.8). `pictures`: each message of the prompt, by its place, that
+   * held pictures the agent's request could not carry (a system or assistant message carries text
+   * alone), with how many; the host words what the agent is told of them, if anything.
+   */
+  | { kind: "prompt_notices"; notices: PromptNotice[]; pictures?: { message: number; count: number }[] }
   /** An agent's `todo` list as it now stands (§6.8). */
   | { kind: "todo"; items: TodoItem[] }
   /** A limit was reached (§10.11). */

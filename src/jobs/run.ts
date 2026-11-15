@@ -165,8 +165,6 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         words,
         tools: new Map((registry?.all() ?? []).map((tool) => [tool.name, tool])),
         clipChars: settings.clipChars,
-        // A job writes no intent record, so nothing waits for one.
-        ready: async () => {},
       }),
     texts: () => texts,
     rules: () => rules,

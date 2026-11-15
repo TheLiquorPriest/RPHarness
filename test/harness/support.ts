@@ -4,7 +4,10 @@
 // is told, the trace and the log. Everything else here is invented.
 //
 // The turns run on the rig's clock without moving it: a scripted answer that must wait holds at a
-// gate the test opens, so nothing depends on how long the disk takes.
+// gate the test opens, so nothing depends on how long the disk takes. The stage's folder goes
+// whatever fails: a set-up that throws removes it, and the stage is closed when the test that made
+// it ends, whether or not the test closed it.
+import { onTestFinished } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -188,6 +191,20 @@ function recordingLog(logged: Stage["logged"]): Log {
 
 export async function stage(options: StageOptions): Promise<Stage> {
   const dir = await mkdtemp(join(tmpdir(), "rph-harness-"));
+  let host: FolderHost | undefined;
+  try {
+    const made = await staged(dir, options, (made) => (host = made));
+    onTestFinished(() => made.close());
+    return made;
+  } catch (error) {
+    await host?.close();
+    await rm(dir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** The stage over its made folder; `hosted` hears of the folder host as soon as it is made. */
+async function staged(dir: string, options: StageOptions, hosted: (host: FolderHost) => void): Promise<Stage> {
   const files = join(dir, "files");
   const shipped = join(files, "defaults");
   await cp(SHIPPED_GUIDANCE, shipped, { recursive: true });
@@ -214,6 +231,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   const logged: Stage["logged"] = [];
   const order: string[] = [];
   const host = await createFolderHost({ dir, user: USER, clock, log: recordingLog(logged), tools: handlers });
+  hosted(host);
   const told: Stage["told"] = [];
   const recorded = (inner: TurnEvents): TurnEvents => {
     const tell = <K extends keyof TurnEvents>(kind: K, scope: Scope, payload: unknown, then: () => ReturnType<NonNullable<TurnEvents[K]>>): ReturnType<NonNullable<TurnEvents[K]>> => {
@@ -270,6 +288,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
   };
   const harness = createHarness(env, { ...(options.fetch !== undefined ? { fetch: options.fetch } : { models: scripted }), ids: () => `id-${(next += 1)}` });
 
+  let closing: Promise<void> | undefined;
   return {
     dir,
     host,
@@ -291,10 +310,16 @@ export async function stage(options: StageOptions): Promise<Stage> {
       for await (const path of new Bun.Glob("**/*").scan({ cwd: files, dot: true, onlyFiles: true })) texts.push(await readFile(join(files, path), "utf8"));
       return texts;
     },
-    async close() {
-      await harness.close();
-      await host.close();
-      await rm(dir, { recursive: true, force: true });
+    close() {
+      closing ??= (async () => {
+        try {
+          await harness.close();
+          await host.close();
+        } finally {
+          await rm(dir, { recursive: true, force: true });
+        }
+      })();
+      return closing;
     },
   };
 }

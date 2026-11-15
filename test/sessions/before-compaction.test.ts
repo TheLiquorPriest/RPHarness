@@ -36,7 +36,7 @@ function replyTools(s: Stage, turnId: string): [string, string, boolean][] {
     .map((record) => [record.event.tool, record.event.result.content.map((part) => (part.type === "text" ? part.text : "")).join(""), record.event.result.error === true]);
 }
 
-test("in the tag form, the call before compaction releases nothing: both reply tools are answered with the file's line, the reply it writes in tags is shown nowhere, and the turn's own work gives the reply", async () => {
+test("in the tag form, both reply tools run in the call before compaction as in any call: the file it releases is the turn's one reply, the reply it writes in tags is shown nowhere, and the turn goes on", async () => {
   const s = (open = await stage({
     config: KEEP_TWO,
     files: { [SAVE_RULE]: SAVE, [TIDE]: "High water at nine.\n", ".prompts/tool-notices.md": await notices() },
@@ -47,22 +47,27 @@ test("in the tag form, the call before compaction releases nothing: both reply t
       { pieces: [{ text: "<reply>Fixture: a reply written before compaction.</reply>" }, { call: "write_reply", args: { brief: "Fixture brief." } }, { call: "reply_release", args: { path: "persistent-workspace/tide.md" } }] },
       said("Fixture summary."),
       played(4),
+      said("Fixture: the reply went out already."),
     ],
   }));
   await play(s, ["t1", "t2", "t3"]);
   await s.harness.sessions!.compact(S1);
   const { outcome, sink } = await s.turn(turn("t4", { parent: "t3" }));
 
-  expect(outcome).toMatchObject({ status: "released", reply: "Reply 4." });
-  expect(sink.text).toBe("Reply 4.");
-  expect(replyTools(s, "t4")).toEqual([
-    ["write_reply", "Fixture: write_reply waits for the turn's own work.", true],
-    ["reply_release", "Fixture: reply_release waits for the turn's own work.", true],
+  expect(outcome).toMatchObject({ status: "released", form: "file", reply: "High water at nine.\n" });
+  expect(sink.text).toBe("High water at nine.\n");
+  // Both ran, neither answered with the line for a call before the turn's own work; the stage has no writer, which write_reply says.
+  const ran = replyTools(s, "t4").sort(([a], [b]) => a.localeCompare(b));
+  expect(ran.map(([tool, , failed]) => [tool, failed])).toEqual([
+    ["reply_release", false],
+    ["write_reply", true],
   ]);
-  // One release in the turn, by its own work, after the compaction.
+  expect(ran.some(([, text]) => text.includes("waits for the turn's own work"))).toBe(false);
+  // One release in the turn, in the call before compaction; the turn's own work goes on after the compaction.
   const kinds = s.trace.records.filter((record) => record.scope.turn === "t4").map((record) => record.event.kind);
   expect(kinds.filter((kind) => kind === "released")).toHaveLength(1);
-  expect(kinds.indexOf("compacted")).toBeLessThan(kinds.indexOf("released"));
+  expect(kinds.indexOf("released")).toBeLessThan(kinds.indexOf("compacted"));
+  expect(kinds.indexOf("compacted")).toBeLessThan(kinds.lastIndexOf("call_started"));
 });
 
 test("in the two-step form, what the lead writes in the call before compaction is shown nowhere, and the turn's own work gives the reply", async () => {

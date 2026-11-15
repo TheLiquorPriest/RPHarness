@@ -8,6 +8,7 @@ import type { CreateFacts, Fields, OwnFactName } from "./api";
 export const OWN_FACTS: readonly (FactDef & { name: OwnFactName })[] = [
   { name: "todo.open", counts: "Items the agent's todo list holds open." },
   { name: "reply.released", counts: "Whether this turn's reply has been released: 1 once it has, 0 until then." },
+  { name: "reply.owed", counts: "Whether this run still owes the player a reply: 1 while the request asks for one and none has been released, 0 once one is, and for a run that asks for none." },
   { name: "prompt.notices", counts: "Notices this turn about the prompt's shape." },
   { name: "session.turns", counts: "Turns the open session holds, the one being played among them." },
 ];

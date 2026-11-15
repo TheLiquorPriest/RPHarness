@@ -38,7 +38,6 @@ import { Judges } from "./judge";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
-import { HeldSink, IntentWait } from "./intents";
 import { requestPath, sentMessages } from "./requests";
 import { keepOnly, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
 import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
@@ -143,10 +142,6 @@ export class Turn {
   readonly #working = new Set<{ runner: AgentRunner; work: Work }>();
   /** What the host is being told, and what is being written for the turn, until it settles. */
   readonly #pending = new Set<Promise<unknown>>();
-  /** The host taking the intent records: what a tool and the reply wait for, no longer than the user's bound. */
-  readonly #intentWait: IntentWait;
-  /** The turn's sink, its reply held until the intent records told before it were taken. */
-  readonly #held: HeldSink;
   /** The call each writer's work hangs under. */
   readonly #parents = new Map<string, ParentCall>();
   /** Each agent's call under way, by its handle. */
@@ -185,8 +180,6 @@ export class Turn {
   #intentWritten = false;
   #notices = 0;
   #stopped = false;
-  /** The call the moment before compaction gives the lead is under way: the reply goes out from the turn's own work, never from it. */
-  #saving = false;
   #timer: unknown;
   /** The turn's own time ran out, at this limit: nothing of the turn starts after it (§10.11). */
   #timeUp: LimitHit | undefined;
@@ -202,8 +195,6 @@ export class Turn {
     this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock);
     this.#trace.watch((record) => this.#watch(record));
     this.#lead = { id: core.ids(), definition: req.lead };
-    this.#intentWait = new IntentWait(core.env.clock, () => this.#settings.intentWaitMs);
-    this.#held = new HeldSink(sink, this.#intentWait, (held) => this.#tell(held));
   }
 
   /** Runs the turn to the end of the lead's run. The reply goes to the sink at release, or the sink is told why there is none. */
@@ -227,7 +218,7 @@ export class Turn {
       if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     }
     this.#keep?.stop();
-    if (!this.#desk.released) this.#held.error(replyError(outcome));
+    if (!this.#desk.released) this.#sink.error(replyError(outcome));
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
     await this.#tell(env.events.ended(this.scope, outcome));
@@ -281,7 +272,7 @@ export class Turn {
     this.#progress = lines(progress);
     const answers = lines(toolNotices);
     this.#words = (name, fields) => answers?.line(name, fields);
-    this.#keep = new KeepAlive({ sink: this.#held, clock: env.clock, silenceMs: settings.silenceMs, still: (fields) => this.#progress?.line("still", fields) });
+    this.#keep = new KeepAlive({ sink: this.#sink, clock: env.clock, silenceMs: settings.silenceMs, still: (fields) => this.#progress?.line("still", fields) });
     this.#keep.start();
     this.#say("started");
     const { time, ...counted } = settings.turn;
@@ -393,12 +384,14 @@ export class Turn {
 
     const due = await rules.turnStart(this.#lead);
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
-    const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, keep: settings.promptKept });
-    this.#prompt = prompt;
-    const promptNotices = located.notices;
-    this.#notices = promptNotices.length;
-    if (promptNotices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: promptNotices });
-    if (places.turn !== undefined) await writeViews(env.files, scope, places.turn, await promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
+    // A request that carries no prompt (a run asked for to settle a turn's records, say) leaves the prompt's record as it was: nothing of it is compared, kept or saved, no view of it is written over the turn's, and its prompt tools find none.
+    if (req.prompt.length > 0) {
+      const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, keep: settings.promptKept });
+      this.#prompt = prompt;
+      this.#notices = located.notices.length;
+      if (located.notices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: located.notices });
+      if (places.turn !== undefined) await writeViews(env.files, scope, places.turn, await promptViews(prompt, guidance, this.#lead, req.leftOut ?? []), env.log);
+    }
 
     const at = env.clock.now();
     const messages: AgentMessage[] = [];
@@ -407,7 +400,7 @@ export class Turn {
       const framing = joined([template(frame)?.render().text ?? ""]);
       if (framing !== "") messages.push(systemMessage(framing, at));
       const prompt = promptMessages(req.prompt, model.model, at);
-      if (prompt.picturesLeft > 0) env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.scope.turn, run: this.run, pictures: prompt.picturesLeft });
+      this.#picturesLeft(this.#lead, undefined, prompt.pictures);
       messages.push(...prompt.messages);
     }
     // What the session carries, from where this run's work starts: fixed for the turn, after the prompt, so it never moves the cached front (§10.2).
@@ -481,8 +474,6 @@ export class Turn {
         questions: judges,
         gate: this.#gate(this.#lead, undefined),
         channel,
-        // The harness's own word on the release; the request's on whether a reply is owed at all.
-        owed: () => req.owesReply !== false && !this.#desk.released,
         ...this.#keeper(this.#lead),
       });
     const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {
@@ -572,16 +563,11 @@ export class Turn {
         gate: this.#gate(this.#lead, undefined),
       });
       if (this.#ended()) return false;
-      this.#saving = true;
-      try {
-        const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
-        const entry = { runner: saver, work };
-        this.#working.add(entry);
-        await work.done;
-        this.#working.delete(entry);
-      } finally {
-        this.#saving = false;
-      }
+      const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
+      const entry = { runner: saver, work };
+      this.#working.add(entry);
+      await work.done;
+      this.#working.delete(entry);
       if (this.#ended()) return false;
     }
 
@@ -835,9 +821,6 @@ export class Turn {
       // Every tool the agent may reach, so a tool found by `tool_use` is permitted and ruled on by its own tier and lane.
       tools: new Map((this.#registry?.all() ?? []).map((tool) => [tool.name, tool])),
       clipChars: this.#settings.clipChars,
-      ready: async () => {
-        await this.#intentWait.taken();
-      },
     });
   }
 
@@ -876,17 +859,30 @@ export class Turn {
     const open = this.#todos.get(agent.id).filter((item) => !item.done);
     return {
       "reply.released": { count: this.#desk.released ? 1 : 0 },
+      // What the request says (§10.7) less what was released: a fact for the rules, which changes nothing of how a run ends.
+      "reply.owed": { count: this.#req.owesReply !== false && !this.#desk.released ? 1 : 0 },
       "todo.open": { count: open.length, names: open.map((item) => item.text) },
       "prompt.notices": { count: this.#notices },
       "session.turns": { count: this.#sessionTurns },
     };
   }
 
-  /** The lead's intent record, the moment its tag closed (§10.3): to the host, to the trace, and into the turn's folder. Never read. */
+  /**
+   * Pictures of the prompt an agent's request cannot carry: pi's system and assistant messages hold
+   * text alone (§10.2). Which message held them and how many are the host's to hear, by the trace,
+   * and to word for the agent if it will; RPH says nothing of them to any agent.
+   */
+  #picturesLeft(agent: AgentRef, parent: ParentCall | undefined, pictures: readonly { message: number; count: number }[]): void {
+    if (pictures.length === 0) return;
+    this.#trace.event(agent, parent, { kind: "prompt_notices", notices: [], pictures: [...pictures] });
+    this.#c.env.log.warn("Pictures in the prompt's system or assistant messages cannot be carried; they were left out.", { turn: this.scope.turn, run: this.run, agent: agent.id, pictures: pictures.reduce((sum, left) => sum + left.count, 0) });
+  }
+
+  /** The lead's intent record, the moment its tag closed (§10.3): to the host, to the trace, and into the turn's folder. Never read, and nothing waits for it. */
   #intent(text: string): void {
     const { env } = this.#c;
     this.#trace.event(this.#lead, undefined, { kind: "intent", text });
-    this.#intentWait.told(this.#tell(env.events.intent(this.scope, text)));
+    this.#tell(env.events.intent(this.scope, text));
     const file = this.#opening?.intentFile;
     const turn = this.#places?.turn;
     if (file === undefined || turn === undefined) return;
@@ -903,27 +899,18 @@ export class Turn {
     const read = await this.#c.env.files.read(this.scope, path);
     if (read.status !== "read" || read.text === "") return;
     this.#trace.event(this.#lead, undefined, { kind: "intent", text: read.text });
-    this.#intentWait.told(this.#tell(this.#c.env.events.intent(this.scope, read.text)));
+    this.#tell(this.#c.env.events.intent(this.scope, read.text));
   }
 
-  /**
-   * The reply went out: the sink is finished, and the reply is kept in the turn's folder. The host
-   * and the trace are told once the reply shows, past the wait for the intent record, with whether
-   * it went out without one.
-   */
+  /** The reply went out: the sink is finished, the host and the trace are told at once, and the reply is kept in the turn's folder. */
   #release(text: string, form: ReleaseForm, by: AgentRef, path?: string): void {
     const { env } = this.#c;
     this.#desk.out();
     this.#released = { text, form, by: by.id };
     this.#keep?.sink.finish({ ...this.#budget.used });
-    const parent = this.#parents.get(by.id);
-    this.#tell(
-      this.#held.out().then((withIntent) => {
-        const release: Release = { by, form, ...(path !== undefined ? { path } : {}), length: text.length, ...(withIntent ? {} : { withoutIntent: true as const }) };
-        this.#trace.event(by, parent, { kind: "released", release });
-        return env.events.released(this.scope, release);
-      }),
-    );
+    const release: Release = { by, form, ...(path !== undefined ? { path } : {}), length: text.length };
+    this.#trace.event(by, this.#parents.get(by.id), { kind: "released", release });
+    this.#tell(env.events.released(this.scope, release));
     const turn = this.#places?.turn;
     if (turn !== undefined) this.#tell(env.files.write(this.scope, `${turn}${RELEASED_FILE}`, { op: "write", text }, "harness"));
   }
@@ -933,7 +920,6 @@ export class Turn {
     const { env } = this.#c;
     const req = this.#req;
     const words = this.#words;
-    if (this.#saving) return answer(words("not_now", { tool: "write_reply" }), true);
     if (this.#desk.taken) return answer(words("second_reply"), true);
     const writer = this.#writer;
     const guidance = this.#guidance;
@@ -955,7 +941,9 @@ export class Turn {
       // A prefilled start is the prompt's last message; it is kept for the very end, where the writer goes on from it.
       const last = req.prompt.at(-1);
       const prompt = req.prefill !== undefined && last?.role === "assistant" && promptText(last) === req.prefill ? req.prompt.slice(0, -1) : req.prompt;
-      messages.push(...promptMessages(prompt, model.model, at).messages);
+      const converted = promptMessages(prompt, model.model, at);
+      this.#picturesLeft(ref, parent, converted.pictures);
+      messages.push(...converted.messages);
     }
     if (instructions !== "") messages.push(systemMessage(instructions, at));
     messages.push(userMessage(brief, at));
@@ -965,7 +953,7 @@ export class Turn {
     const second = words("second_reply");
     const shown = live
       ? new MessageReply({
-          sink: this.#keep?.sink ?? this.#held,
+          sink: this.#keep?.sink ?? this.#sink,
           stream: true,
           heldSentences: heldSentences(streamRules, this.#settings.heldSentences),
           tailSentences: this.#settings.tailSentences,
@@ -1037,7 +1025,6 @@ export class Turn {
   /** `reply_release`: the last draft, or a file's text, sent whole (§10.7). */
   async #releaseReply(path: string | undefined, ctx: ToolCtx): Promise<LoopToolResult> {
     const words = this.#words;
-    if (this.#saving) return answer(words("not_now", { tool: "reply_release" }), true);
     if (this.#desk.taken) return answer(words("second_reply"), true);
     if (path !== undefined) {
       const read = await this.#c.env.files.read(this.scope, path);

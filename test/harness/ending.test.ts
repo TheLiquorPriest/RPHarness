@@ -1,10 +1,11 @@
-// How a turn ends (§10.7, §10.9, §10.10, §5.4): with no reply released, the shipped reminder is put
-// in front of the lead once, and then the host is told; closing calls do not end the run while the
-// reply is still owed, in either form, and end it once the reply is out, or for a run that owes
-// none; the run may go on after the reply; and a stop, from the signal or because the turn left the
-// path, leaves nothing running, even a writer that was still being made.
+// How a turn ends (§10.7, §10.9, §10.10, §13.3, §5.4): a closing call that comes back clean ends the
+// run whether or not a reply is out, and whether a run with no reply goes on is a run-end rule's
+// call (`reply-missing`, a file), which costs exactly one more call; `owesReply` is a fact a rule can
+// test (`reply.owed`) and changes nothing of how a run ends; the run may go on after the reply; and
+// a stop, from the signal or because the turn left the path, leaves nothing running, even a writer
+// that was still being made.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { RuleFiring } from "../../src/contract";
+import type { FilesPort, RuleFiring } from "../../src/contract";
 import { type ChatFixture, gate, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;
@@ -53,8 +54,32 @@ function ended(s: Stage): [string, boolean, boolean][] {
   return s.trace.of("tool_ended").map((record) => [record.event.tool, record.event.clean, record.event.endedRun]);
 }
 
-describe("closing calls while the reply is owed", () => {
-  test("in the tag form, a first call that is one closing read is answered as any call is, and the work goes on to the intent record and the reply; no reminder comes, since the run did not end", async () => {
+/** A finished reply the lead can release, in the chat's folder, as the agents name it. */
+const KEPT = "persistent-workspace/reply.md";
+const KEPT_ON_DISK = `chats/wren-hale/lighthouse/${KEPT}`;
+
+/** A `reply-missing` of the test's own, whose header tests `reply.owed`: what the shipped rule's header is to test (see the report). */
+const OWED_RULE = "---\ndescription: Fixture - a run that owes the player a reply and is ending with none.\nagents: [lead]\nfact: reply.owed > 0\nat: run-end\nrepeat: once per turn\n---\nFixture reminder: the player is still owed a reply.\n";
+
+describe("closing calls", () => {
+  test("a clean closing call ends the run before the reply when no run-end rule is due, in either form", async () => {
+    // RPH ships no run-end rule: nothing is due when the run would end.
+    const tagged = (open = await stage({ chat: CHAT, answers: [{ pieces: [CLOSING_READ] }] }));
+    const { outcome, sink } = await tagged.turn(request("t1", { lead: "lead" }));
+    expect(outcome).toMatchObject({ status: "no-reply", released: false });
+    expect(tagged.model.requests).toHaveLength(1);
+    expect(ended(tagged)).toEqual([["chat_read", true, true]]);
+    expect(firings(tagged)).toEqual([]);
+    expect(sink.errors).toEqual([{ code: "no-reply" }]);
+    await tagged.close();
+
+    const plain = (open = await stage({ config: "reply:\n  form: two-step\n", chat: CHAT, answers: [{ pieces: [CLOSING_READ] }] }));
+    expect((await plain.turn(request("t1", { lead: "lead" }))).outcome).toMatchObject({ status: "no-reply", released: false });
+    expect(plain.model.requests).toHaveLength(1);
+    expect(ended(plain)).toEqual([["chat_read", true, true]]);
+  });
+
+  test("with reply-missing in force, a run that would end on closing calls before the reply gets exactly one more call", async () => {
     const s = (open = await stage({
       drafted: true,
       chat: CHAT,
@@ -65,34 +90,49 @@ describe("closing calls while the reply is owed", () => {
 
     expect(outcome).toMatchObject({ status: "released", form: "tags", reply: "No boat, Wren says." });
     expect(s.model.requests).toHaveLength(2);
-    expect(ended(s)).toEqual([["chat_read", true, false]]);
-    // Its answer went back, and nothing was put after it.
-    expect(s.model.requests[1]!.messages.at(-1)!.role).toBe("toolResult");
+    // The closing read ended the run's batch; the rule's text is what the one more call ends on.
+    expect(ended(s)).toEqual([["chat_read", true, true]]);
+    const reminded = s.model.requests[1]!.messages.at(-1)!;
+    expect(reminded.role).toBe("user");
+    expect(textOf(reminded)).toBe(REMINDER);
+    expect(firings(s)).toMatchObject([{ rule: "reply-missing", moment: "run-end", action: "follow-up", then: { did: "released" } }]);
     expect(sink.text).toBe("No boat, Wren says.");
-    expect(firings(s)).toEqual([]);
-    expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
   });
 
-  test("in the two-step form, a first call that is one closing read is answered, so is the intent record written as a closing call, and the reply follows", async () => {
+  test("a closing reply_release beside another closing call that finishes first: no call after the release", async () => {
+    const read = gate();
+    // The file is held while it is read, until the closing read beside it has finished.
+    const filesPort = (inner: FilesPort): FilesPort => ({
+      layers: (scope) => inner.layers(scope),
+      places: (scope) => inner.places(scope),
+      find: (scope, query) => inner.find(scope, query),
+      write: (scope, path, op, by) => inner.write(scope, path, op, by),
+      read: async (scope, path, range) => {
+        if (path === KEPT) await read.opened;
+        return inner.read(scope, path, range);
+      },
+    });
     const s = (open = await stage({
-      config: "reply:\n  form: two-step\n",
+      drafted: true,
       chat: CHAT,
-      answers: [
-        { pieces: [CLOSING_READ] },
-        { pieces: [{ call: "file_write", args: { path: "sessions/s1/turns/t1/scratch/intent.md", op: "write", text: "News of the boat.", closing: true } }] },
-        { pieces: [{ text: "No boat, Wren says." }] },
-      ],
+      files: { [KEPT_ON_DISK]: "A finished reply.\n" },
+      filesPort,
+      answers: [{ pieces: [CLOSING_READ, { call: "reply_release", args: { path: KEPT, closing: true } }] }],
     }));
 
-    const { outcome } = await s.turn(request("t1", { lead: "lead" }));
+    const playing = s.turn(request("t1"));
+    await s.trace.seen((record) => record.event.kind === "tool_ended" && record.event.tool === "chat_read");
+    read.open();
+    const { outcome, sink } = await playing;
 
-    expect(outcome).toMatchObject({ status: "released", form: "message", reply: "No boat, Wren says." });
-    expect(s.model.requests).toHaveLength(3);
+    expect(outcome).toMatchObject({ status: "released", form: "file", reply: "A finished reply.\n" });
+    expect(s.model.requests).toHaveLength(1);
     expect(ended(s)).toEqual([
-      ["chat_read", true, false],
-      ["file_write", true, false],
+      ["chat_read", true, true],
+      ["reply_release", true, true],
     ]);
-    expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
+    expect(firings(s)).toEqual([]);
+    expect(sink.text).toBe("A finished reply.\n");
   });
 
   test("once the reply is out, the same closing read in the reply's own message ends the run, in either form", async () => {
@@ -116,6 +156,28 @@ describe("closing calls while the reply is owed", () => {
     expect(outcome).toMatchObject({ status: "no-reply", released: false });
     expect(s.model.requests).toHaveLength(1);
     expect(ended(s)).toEqual([["chat_read", true, true]]);
+  });
+
+  test("owesReply false with reply-missing in force: the rule, whose header tests reply.owed, does not fire", async () => {
+    const s = (open = await stage({
+      chat: CHAT,
+      files: { ".rules/reply-missing.md": OWED_RULE },
+      answers: [{ pieces: [CLOSING_READ] }, { pieces: [{ text: "<reply>No boat, Wren says.</reply>" }] }, { pieces: [CLOSING_READ] }],
+    }));
+
+    // A run that owes the reply: the rule fires as the run would end on its closing read, and the lead gets one more call.
+    expect((await s.turn(request("t1", { lead: "lead" }))).outcome).toMatchObject({ status: "released", reply: "No boat, Wren says." });
+    expect(s.model.requests).toHaveLength(2);
+    expect(textOf(s.model.requests[1]!.messages.at(-1)!)).toBe("Fixture reminder: the player is still owed a reply.");
+    expect(firings(s)).toMatchObject([{ rule: "reply-missing", moment: "run-end", fact: { name: "reply.owed", value: { count: 1 } } }]);
+
+    // A run that owes none: the same closing read ends it, and the rule does not fire.
+    const { outcome, sink } = await s.turn(request("t2", { lead: "lead", parent: "t1", owesReply: false }));
+    expect(outcome).toMatchObject({ status: "no-reply", released: false });
+    expect(s.model.requests).toHaveLength(3);
+    expect(s.trace.of("rule_fired").filter((record) => record.scope.turn === "t2")).toEqual([]);
+    expect(firings(s)).toHaveLength(1);
+    expect(sink.errors).toEqual([{ code: "no-reply" }]);
   });
 });
 

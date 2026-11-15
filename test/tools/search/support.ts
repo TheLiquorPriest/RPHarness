@@ -244,7 +244,6 @@ export async function play(b: Bench, options: { answers: Answer[]; fixed: string
     // The gate knows every tool the agent may reach, so a found tool's tier and lane are its own.
     tools: new Map<string, HeldTool>([...own.map((tool) => [tool.name, { ...tool, from: "rph" as const }] as const), ...hosted.map((tool) => [tool.name, { ...tool, from: "host" as const }] as const)]),
     clipChars: DEFAULT_SETTINGS.clipChars,
-    ready: async () => {},
   });
   const held = registry.hold(options.fixed).tools;
   const { runner, scripted } = rigAgent(AUTHOR, options.answers, { tools: held, gate: carrierGate(gate), clock, recorder, trace });

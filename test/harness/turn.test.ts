@@ -66,35 +66,6 @@ describe("a simple turn", () => {
     expect(s.trace.of("intent").map((record) => record.event.text)).toEqual([INTENT]);
   });
 
-  test("the intent record reaches the host before any tool runs, even when the host is slow to take it", async () => {
-    const kept = gate();
-    const order: string[] = [];
-    const s = (open = await stage({
-      drafted: true,
-      tools: { world_query: { tier: "read", description: "Fixture: reads the world.", run: async () => (order.push("tool:world_query"), said("The boat is overdue by two days.")) } },
-      events: (inner) => ({
-        ...inner,
-        intent: async (scope, text) => {
-          await kept.opened;
-          order.push("intent:kept");
-          return inner.intent(scope, text);
-        },
-      }),
-      answers: [{ pieces: [{ text: `<intent>${INTENT}</intent>` }, { call: "world_query" }] }, { pieces: [{ text: "<reply>Overdue, Wren says. Two days now.</reply>" }] }],
-    }));
-
-    const turn = s.turn(request("t1"));
-    // The tool's call has begun, and everything that could happen without the host has happened: the tool has not run.
-    await s.trace.seen((record) => record.event.kind === "tool_started");
-    await s.clock.idle();
-    expect(order).toEqual([]);
-    kept.open();
-    const { outcome } = await turn;
-
-    expect(outcome.status).toBe("released");
-    expect(order).toEqual(["intent:kept", "tool:world_query"]);
-  });
-
   test("the reply reaches the sink as it is written, while the model is still writing it", async () => {
     const more = gate();
     const s = (open = await stage({ drafted: true, answers: [{ pieces: [{ text: "<intent>Short.</intent><reply>The lamp gutters." }, { hold: more }, { text: " Wren swears softly.</reply>" }] }] }));

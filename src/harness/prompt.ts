@@ -34,17 +34,19 @@ export function assistantMessage(text: string, model: Model<Api>, at: number): A
 }
 
 /**
- * The prompt's messages for pi's loop, in order. A system message carries text only: a picture in
- * one has no place to go, and is counted for the notice that says pictures were left out.
+ * The prompt's messages for pi's loop, in order. A system or assistant message carries text only: a
+ * picture in one has no place to go, and each such message is named, by its place in the prompt,
+ * with how many pictures it held, for the host to hear.
  */
-export function promptMessages(prompt: readonly PromptMessage[], model: Model<Api>, at: number): { messages: AgentMessage[]; picturesLeft: number } {
-  let picturesLeft = 0;
-  const messages = prompt.map((message): AgentMessage => {
+export function promptMessages(prompt: readonly PromptMessage[], model: Model<Api>, at: number): { messages: AgentMessage[]; pictures: { message: number; count: number }[] } {
+  const pictures: { message: number; count: number }[] = [];
+  const messages = prompt.map((message, index): AgentMessage => {
     if (message.role === "user") {
       return { role: "user", content: typeof message.content === "string" ? message.content : message.content.map((part) => (part.type === "text" ? { type: "text" as const, text: part.text } : { type: "image" as const, data: part.data, mimeType: part.mimeType })), timestamp: at };
     }
-    if (typeof message.content !== "string") picturesLeft += message.content.filter((part) => part.type === "image").length;
+    const count = typeof message.content === "string" ? 0 : message.content.filter((part) => part.type === "image").length;
+    if (count > 0) pictures.push({ message: index, count });
     return message.role === "system" ? systemMessage(promptText(message), at) : assistantMessage(promptText(message), model, at);
   });
-  return { messages, picturesLeft };
+  return { messages, pictures };
 }

@@ -15,10 +15,10 @@
 // same two hooks under its own name (`runAs`, by pi's `runToolCall`). A stop waits neither on a tool
 // nor on the gate. Per message: the text to the reply as it streams, rules on what is written (stop
 // the call, drop what was not shown, go on), the moment each tool call began to be written, and at
-// the moment the work would end, the rules due then as follow-ups. Closing calls end the work only
-// while nothing else is due: a reply the run still owes the player is. Every event goes to the run's
-// trace with the agent and the run it belongs to, and every time the runner writes is the host's
-// clock's; after a stop, nothing but the agent's end.
+// the moment the work would end, the rules due then as follow-ups. A batch whose every call was a
+// closing one that came back clean ends the work, unless a rule is due then. Every event goes to the
+// run's trace with the agent and the run it belongs to, and every time the runner writes is the
+// host's clock's; after a stop, nothing but the agent's end.
 //
 // No text reaches a model that did not come from a file or from the request: where pi would answer a
 // call in its own words (a tool it does not know, arguments that do not fit or are not JSON,
@@ -109,12 +109,6 @@ export interface RunnerOptions {
   gate?: ToolGate;
   /** Where its text goes as it streams, when it writes the reply. */
   channel?: TextChannel;
-  /**
-   * Whether its run still owes the player the reply (§10.7): while it does, the reply is due, so a
-   * closing call does not end the work. Its answer goes back and the next call comes, as for any
-   * other call. Absent: the run owes the player nothing (a sub-agent's, a job's).
-   */
-  owed?(): boolean;
   /** Keeps what its calls are sent, where the user's setting asks for it; none keeps nothing. */
   keep?: KeepRequest;
 }
@@ -875,10 +869,9 @@ export class AgentRunner {
 
   /**
    * Whether the call ends the work: a question that ends it (`ask_author`, §10.5), or a closing call
-   * that came back clean (§10.7) while nothing else is due: while the run still owes the player its
-   * reply, the reply is, and the call is answered as any other is. Whether something is due at the
-   * run's end is asked once the whole batch is in (`#finishTurn`): pi still takes a follow-up after a
-   * batch that ended this way.
+   * that came back clean (§10.7, §13.3), and nothing else. The batch ends the work only when every
+   * one of its results does, which pi judges once the whole batch is in; what is due at the run's
+   * end is asked then (`#finishTurn`), since pi still takes a follow-up after such a batch.
    */
   #ending(stint: Stint, id: string, args: JsonValue, ran: LoopToolResult, kept: LoopToolResult): AfterToolCallResult {
     if (ran.ask !== undefined) {
@@ -886,7 +879,7 @@ export class AgentRunner {
       stint.ended.add(id);
       return { terminate: true };
     }
-    if (isClosing(args) && kept.error !== true && isClean(kept) && !stint.unclean.has(id) && this.#o.owed?.() !== true) {
+    if (isClosing(args) && kept.error !== true && isClean(kept) && !stint.unclean.has(id)) {
       stint.ended.add(id);
       return { terminate: true };
     }

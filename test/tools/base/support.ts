@@ -92,6 +92,5 @@ export async function turnGate(b: Bench, options: { clipChars?: number; approval
     words: (name, fields) => lines?.line(name, fields),
     tools: new Map((options.tools ?? []).map((tool) => [tool.name, { ...tool, from: "rph" as const }])),
     clipChars: options.clipChars ?? DEFAULT_SETTINGS.clipChars,
-    ready: async () => {},
   });
 }

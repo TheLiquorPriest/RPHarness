@@ -131,12 +131,13 @@ function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefine
   return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
 }
 
-/** What the sink is told when the run ends without a reply released; with no reply, the lead's last plain text, where it wrote any. */
+/** What the sink is told when the run ends without a reply released; where it ended with no reply, at a limit or stopped, the lead's last plain text, where it wrote any. */
 function replyError(outcome: RunOutcome, lastText: string | undefined): ReplyError {
-  if (outcome.status === "limit") return { code: "limit", ...(outcome.limit !== undefined ? { limit: outcome.limit } : {}) };
-  if (outcome.status === "stopped") return { code: "stopped" };
   if (outcome.status === "failed") return outcome.error ?? { code: "failed" };
-  return { code: "no-reply", ...(lastText !== undefined ? { text: lastText } : {}) };
+  const text = lastText !== undefined ? { text: lastText } : {};
+  if (outcome.status === "limit") return { code: "limit", ...(outcome.limit !== undefined ? { limit: outcome.limit } : {}), ...text };
+  if (outcome.status === "stopped") return { code: "stopped", ...text };
+  return { code: "no-reply", ...text };
 }
 
 export class Turn {

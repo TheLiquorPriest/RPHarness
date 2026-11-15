@@ -224,19 +224,19 @@ describe("the lead's tools", () => {
 });
 
 describe("limits", () => {
-  test("the turn's call limit holds: the call past it is never made, and the host is told which limit", async () => {
+  test("the turn's call limit holds: the call past it is never made, and the host is told which limit, with the lead's last plain text", async () => {
     const s = (open = await stage({
       drafted: true,
       config: "limits:\n  turn:\n    calls: 2\n",
       tools: { world_query: { tier: "read", description: "Fixture: reads the world.", run: async () => said("still calm") } },
-      answers: Array.from({ length: 4 }, () => ({ pieces: [{ call: "world_query" }] })),
+      answers: Array.from({ length: 4 }, (_, i) => ({ pieces: [{ text: `Checking the sea, ${i + 1}.` }, { call: "world_query" }] })),
     }));
 
     const { outcome, sink } = await s.turn(request("t1"));
 
     expect(s.model.requests).toHaveLength(2);
     expect(outcome).toMatchObject({ status: "limit", released: false, limit: { limit: "calls", per: "turn", max: 2, value: 2 } });
-    expect(sink.errors).toEqual([{ code: "limit", limit: { limit: "calls", per: "turn", max: 2, value: 2 } }]);
+    expect(sink.errors).toEqual([{ code: "limit", limit: { limit: "calls", per: "turn", max: 2, value: 2 }, text: "Checking the sea, 2." }]);
     expect(s.told.at(-1)?.kind).toBe("ended");
   });
 

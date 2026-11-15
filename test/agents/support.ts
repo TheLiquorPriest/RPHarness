@@ -11,7 +11,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { AgentRef, ApprovalsPort, AttachmentRef, ConsentGrant, Environment, JsonValue, Log, Scope, ToolResult, TurnEvents } from "../../src/contract";
-import { agentMessage, AGENT_TOOLS, askAuthor, delegate, Team } from "../../src/agents";
+import { agentMessage, AGENT_TOOLS, askAuthor, delegate, Team, type TeamDeps } from "../../src/agents";
 import { createFacts, loadGuidance } from "../../src/files";
 import type { AgentDefinition, PromptPart } from "../../src/files/api";
 import { TurnGate } from "../../src/harness/gate";
@@ -73,6 +73,8 @@ export interface StageOptions {
   lore?: LoreFixture[];
   /** The views of the story the host gives by name. */
   views?: Record<string, string>;
+  /** The run's point before each request of every agent the team makes. */
+  point?: TeamDeps["point"];
 }
 
 /** A turn under way: the lead's outcome when its run ends, and a stop for every agent of the turn. */
@@ -80,6 +82,8 @@ export interface Played {
   run: string;
   lead: AgentRef;
   done: Promise<AgentOutcome>;
+  /** The turn's team, which makes a job's first agent as it makes a sub-agent (`Team.first`). */
+  team: Team;
   stop(): void;
 }
 
@@ -262,6 +266,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
         const line = progressPart?.format === "lines" ? progressPart.line(name, fields) : undefined;
         if (line !== undefined) progress.push(line);
       },
+      ...(options.point !== undefined ? { point: options.point } : {}),
     });
     const own = new Map<string, ToolText>();
     for (const name of ["file_read", "file_find", "file_write", ...AGENT_TOOLS]) {
@@ -301,6 +306,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
       run: turn,
       lead,
       done,
+      team,
       stop() {
         for (const { work: each } of working) each.stop();
       },
@@ -334,6 +340,8 @@ export async function stage(options: StageOptions): Promise<Stage> {
         .map((line) => JSON.parse(line) as Record<string, unknown>);
     },
     async close() {
+      // The usage book's writes to the day's totals are kept first, as the harness's own close keeps them: a write still under way would land in the folder as it goes.
+      await usage.settled();
       await host.close();
       await rm(dir, { recursive: true, force: true });
     },

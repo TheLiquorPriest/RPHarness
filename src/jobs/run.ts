@@ -10,7 +10,6 @@ import { TurnGate } from "../harness/gate";
 import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
-import { userMessage } from "../harness/prompt";
 import { requestPath, sentMessages } from "../harness/requests";
 import { readSettings, type Settings } from "../harness/settings";
 import type { UsageBook } from "../harness/usage";
@@ -257,7 +256,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       const stop = (): void => {
         for (const entry of working) entry.work.stop();
       };
-      const work = runner.start({ messages: [userMessage(made.first, startedAt)] }, { ...(ask.parent !== undefined ? { parent: ask.parent } : {}), given: made.given });
+      // Its brief is its runner's fixed context (`Team.first`), which every request carries after its opening block.
+      const work = runner.start({ messages: [] }, { ...(ask.parent !== undefined ? { parent: ask.parent } : {}), given: made.given });
       const entry = { runner, work };
       working.add(entry);
       signal.addEventListener("abort", stop, { once: true });

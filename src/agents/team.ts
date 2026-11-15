@@ -16,6 +16,7 @@ import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun,
 import { userMessage } from "../harness/prompt";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { skillsIndex } from "../tools/base";
@@ -74,6 +75,8 @@ export interface TeamDeps {
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
   /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); none keeps nothing. */
   keep?(agent: AgentRef): KeepRequest | undefined;
+  /** The run's point before each request of an agent the team makes (§11), a sub-agent's or a job's agent's; none: each request goes out as set. */
+  point?(agent: AgentRef): RequestPoint | undefined;
   /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
   job?: string;
 }
@@ -89,11 +92,10 @@ interface Member {
   ended?(outcome: AgentOutcome): void;
 }
 
-/** A sub-agent made and ready to start: itself, its first message, what it was given by name, what nobody could give, and its model's room. */
+/** A sub-agent made and ready to start, its brief its runner's fixed context: itself, what it was given by name, what nobody could give, and its model's room. */
 interface Made {
   ref: AgentRef;
   runner: AgentRunner;
-  first: string;
   given: string[];
   missing: string[];
   limits: ModelLimits;
@@ -105,12 +107,10 @@ interface Origin {
   parent?: ParentCall;
 }
 
-/** The first agent of a run of its own, made and ready to start (`Team.first`). */
+/** The first agent of a run of its own, made and ready to start (`Team.first`), its brief its runner's fixed context. */
 export interface FirstAgent {
   ref: AgentRef;
   runner: AgentRunner;
-  /** Its brief, laid out as a sub-agent's is. */
-  first: string;
   /** What it was given by name, and what of it nobody could give. */
   given: string[];
   missing: string[];
@@ -231,7 +231,7 @@ export class Team implements TeamWork {
     d.progress?.("delegate", fields);
     const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
     if (working > 1) d.progress?.("agents", { count: working });
-    const work = this.#begin(member, { messages: [userMessage(made.first, d.trace.clock.now())] }, { parent: member.parent, given: made.given }, ctx);
+    const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx);
     return this.#end(member, work, ctx, made.missing, loaded);
   }
 
@@ -246,7 +246,7 @@ export class Team implements TeamWork {
     const made = await this.#make(call, { ...(by !== undefined ? { agent: by.id } : {}), ...(parent !== undefined ? { parent } : {}) }, await this.#load());
     if (!("runner" in made)) return made;
     this.#d.gauge?.(made.ref, made.limits);
-    return { ref: made.ref, runner: made.runner, first: made.first, given: made.given, missing: made.missing };
+    return { ref: made.ref, runner: made.runner, given: made.given, missing: made.missing };
   }
 
   /** An agent made from its definition and ready to start, or the answer that says why none can be. */
@@ -279,6 +279,7 @@ export class Team implements TeamWork {
     const brief = frame?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
     const rules = d.rules();
     const keep = d.keep?.(ref);
+    const point = d.point?.(ref);
     const questions = d.questions?.();
     const runner = new AgentRunner({
       agent: ref,
@@ -289,6 +290,8 @@ export class Team implements TeamWork {
       session: d.ids(),
       thinkingLevel: model.thinkingLevel,
       ...(instructions !== "" ? { instructions } : {}),
+      // Its brief and what it was given go with each of its requests from pi's request hook, after its opening block (§10.2).
+      context: [userMessage(joined([brief]), d.trace.clock.now())],
       tools: held.tools,
       texts: d.texts(),
       limits: definition.limits,
@@ -298,9 +301,10 @@ export class Team implements TeamWork {
       ...(questions !== undefined ? { questions } : {}),
       gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),
+      ...(point !== undefined ? { point } : {}),
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
-    return { ref, runner, first: joined([brief]), given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
+    return { ref, runner, given: wanted.map((item) => item.ref), missing: given.missing, limits: model.limits };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {

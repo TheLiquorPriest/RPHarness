@@ -1,5 +1,6 @@
 // What the agent runner takes and gives, beyond the contract's own types.
-import type { Message } from "@earendil-works/pi-ai";
+import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import type { AgentRef, AgentStatus, CallPermission, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
 import type { Fired } from "./rules";
 
@@ -97,8 +98,12 @@ export interface ToolGate {
   bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[]): Promise<Bounded>;
 }
 
-/** What one model call is sent with besides its messages, decided per request. */
+/** What one model call is sent with besides its messages, decided in pi's request hook before that request alone. */
 export interface CallSettings {
+  /** The model the call is made on; absent: the agent's own. */
+  model?: Model<Api>;
+  /** The effort the call is made with; absent: the agent's own. */
+  effort?: ThinkingLevel;
   sampling?: Sampling;
   /** The longest answer the call may give, in tokens. */
   maxTokens?: number;
@@ -109,6 +114,7 @@ export interface CallRequest {
   agent: AgentRef;
   /** The agent's call number, from 1. */
   call: number;
+  /** The agent's own model's id. */
   model: string;
 }
 
@@ -118,6 +124,55 @@ export interface CallRequest {
  * `call_started` names; undefined when this call's are not kept.
  */
 export type KeepRequest = (call: number, messages: readonly Message[]) => string | undefined;
+
+/**
+ * The run's point before each of an agent's requests (§11): it is shown the request as it would go,
+ * and what it weighs against the model's window, and may put something in place of part of it. It
+ * may await model calls of its own before it answers, which the run makes on its own trace and
+ * limits and ends at `PendingRequest.signal`. It is asked again when the provider refuses a call as
+ * too long, and the call goes out again on what it put in place.
+ */
+export interface RequestPoint {
+  /** The model's window, in tokens; absent where nobody knows it. */
+  window?: number;
+  /** The tokens kept free for the answer: the reserve's setting. */
+  reserve: number;
+  /** How many times in a row a call the provider refused as too long goes out again on what `check` put in place: the run's setting. */
+  resend: number;
+  /** What to put in place before the request goes out: nothing, or spans of `request.messages` with what stands in their place. */
+  check(request: PendingRequest): Promise<readonly RequestSpan[] | undefined> | readonly RequestSpan[] | undefined;
+}
+
+/** A request about to go out, as the run's point is shown it. */
+export interface PendingRequest {
+  agent: AgentRef;
+  /** The agent's call it would be, from 1. */
+  call: number;
+  /** Its messages as they would go: the opening block, the run's fixed context, then the agent's own work. */
+  messages: readonly AgentMessage[];
+  /** Where the run's fixed context lies in `messages`, from `from` up to `to`: after the opening block (when there is one), before the agent's own work. */
+  context: { from: number; to: number };
+  window: number | undefined;
+  reserve: number;
+  /** What the request weighs, in tokens, by the model layer's own estimate. */
+  tokens: number;
+  /** The provider's words, when it refused this request as too long. */
+  refused?: string;
+  /** Aborts when the work stops or reaches a limit: a call of the point's own ends with it. */
+  signal: AbortSignal;
+}
+
+/**
+ * Messages that stand in place of a span of the request the run's point was shown, from `from` up to
+ * but not including `to`. It lies in the run's fixed context or in the agent's own work, never
+ * across the two, never over the opening block, and in the agent's own work it never parts a tool
+ * call from its result. What is put in place holds for the run's later requests.
+ */
+export interface RequestSpan {
+  from: number;
+  to: number;
+  messages: readonly AgentMessage[];
+}
 
 /** The limits a user sets for one agent's work (§10.11). Each absent is no limit. */
 export interface AgentLimits {

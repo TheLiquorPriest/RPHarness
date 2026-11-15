@@ -1,6 +1,12 @@
 // The agent runner: one agent on pi's `Agent` (§13.2, §13.3), with what RPH adds around pi's loop.
-// Per request: the call's sampling and longest answer, the user's limits, and the agent's session,
-// which pi hands every request so the provider's cache knows it. Per tool call, at the moments pi
+// Per request, in pi's request hook (`prepareRequest`): the run's point before it, which may put
+// something in place of part of what the request carries, and is asked again when the provider
+// refuses the call as too long (§11); the request's context, the same for every request of the work
+// (§10.2): the opening block with the agent's tools, the run's fixed context (a lead's prompt, what
+// its session carries and its briefing; a sub-agent's or a job's brief), then the agent's own work,
+// which alone is pi's transcript; and the call's model, effort, sampling and longest answer, decided
+// for that request alone. Also per request: the user's limits, and the agent's session, which pi
+// hands every request so the provider's cache knows it. Per tool call, at the moments pi
 // offers for them (§13.3): in `beforeToolCall`, the run's limits (no tool starts once one is
 // reached, and the work ends at it) and the gate (the host's switches, the user's permission and
 // word, the rules on the arguments), whose refusal or hold pi gives as the call's answer in the
@@ -19,16 +25,16 @@
 // arguments cut short by the length limit, a call its hook blocked, a tool or the gate that threw),
 // the call is answered with the runner's texts or the gate's instead, which the harness reads from
 // files. A text the file does not have leaves the answer empty.
-import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, getCurrentTools, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
+import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, CallPermission, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
-import { DEFAULT_CHARS_PER_TOKEN, tokensOf } from "../model/tokens";
+import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, emptyUsage } from "./budget";
 import type { TextChannel } from "./channel";
 import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
 import { fit, type Misfit } from "./fit";
 import type { ParentCall, RunTrace } from "./trace";
-import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
+import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, PendingRequest, RequestPoint, RequestSpan, ToolGate } from "./types";
 
 /** The argument RPH adds to every tool (§10.7, Appendix A): the agent marks a call that needs no answer. */
 export const CLOSING = "closing";
@@ -74,15 +80,23 @@ export interface RunnerOptions {
    * turns them on, let go when the model layer is told the session ended, `ModelLayer.ended`).
    */
   session: string;
+  /** The effort each request is made with, where its settings give none. */
   thinkingLevel?: ThinkingLevel;
-  /** Its instructions, as its definition and the files it reads give them. */
+  /** Its instructions, as its definition and the files it reads give them: with its tools, the opening block every request carries first. */
   instructions?: string;
-  /** What its session carries into its first work. */
-  messages?: AgentMessage[];
+  /**
+   * The run's fixed context (§10.2), which every request carries right after the opening block and
+   * ahead of the agent's own work: a lead's prompt, what its session carries and its briefing; a
+   * sub-agent's or a job's brief. The same for every request of its work, but where the run's point
+   * puts something in place of part of it.
+   */
+  context?: AgentMessage[];
   tools?: LoopTool[];
   texts: RunnerTexts;
-  /** Sampling and longest answer for each model call, decided per request. */
+  /** The model, effort, sampling and longest answer of each model call, decided before that request alone. */
   settings?(request: CallRequest): CallSettings | undefined;
+  /** The run's point before each request (§11). None: each request goes out as set, and nothing waits. */
+  point?: RequestPoint;
   /** Its own limits, over all its work in the run. `time` holds for each stretch of work. */
   limits?: AgentLimits;
   /** Limits shared with the other agents of its turn. */
@@ -106,7 +120,7 @@ export interface RunnerOptions {
 }
 
 export type WorkInput =
-  /** Messages to start from: the first work of a run (the prompt, a brief). */
+  /** Messages a run's first work starts from, as its own: each request carries them after the run's fixed context. None where that context is all the agent is given. */
   | { messages: AgentMessage[] }
   /** A message for an agent that stopped: the answer to its question when it asked one, else a message of its own. */
   | { message: string };
@@ -129,8 +143,8 @@ type Halt = { status: "stopped" } | { status: "limit"; hit: LimitHit };
 /** One stretch of an agent's work: from `start` until it stops, asks, or is done. */
 interface Stint {
   readonly parent: ParentCall | undefined;
-  /** The transcript's length when it began: its own messages come after. */
-  readonly from: number;
+  /** The transcript's length when it began: its own messages come after. What the run's point puts in place before them moves it. */
+  from: number;
   readonly startedAt: number;
   readonly usage: Usage;
   readonly resolve: (outcome: AgentOutcome) => void;
@@ -182,6 +196,15 @@ interface Stint {
   readonly judged: Judged[];
   /** Settles when the work stops or reaches a limit, so nothing it waits for outlasts it. */
   readonly halted: PromiseWithResolvers<void>;
+  /** Aborts when the work stops or reaches a limit, so what the run's point awaits ends with it. */
+  readonly stopped: AbortController;
+  /** How many calls in a row the provider refused as too long and went out again. */
+  resent: number;
+  /**
+   * What failed in the harness inside pi's loop before a request went out (the run's point, the
+   * call's settings). pi ends its loop on the throw with an answer of its own, which is no call's.
+   */
+  failure?: string;
   asked?: { call: string; question: JsonValue };
   last?: AssistantMessage;
   timer?: unknown;
@@ -202,6 +225,12 @@ export class AgentRunner {
   readonly leftOut: string[] = [];
   /** Its tools that carry a call of another tool (`LoopTool.carrier`). */
   readonly #carriers = new Set<string>();
+  /** The opening block every request carries first: its instructions, and its tools as the model is told them (none when it has neither). The run's point never touches it (R-119). */
+  readonly #opening: SystemMessage | undefined;
+  /** The run's fixed context (`RunnerOptions.context`), as the run's point last left it. */
+  readonly #context: AgentMessage[];
+  /** The settings decided for the request being prepared, which its call goes out with. */
+  #settings: CallSettings = {};
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -219,14 +248,17 @@ export class AgentRunner {
         if (tool.carrier === true) this.#carriers.add(tool.name);
       }
     }
+    this.#opening = createInitialSystemMessage(options.instructions, [...this.#tools.values()].map(toToolDeclaration));
+    this.#context = [...(options.context ?? [])];
+    // Its opening block, its tools and the run's fixed context go with each request from pi's request
+    // hook (`#prepare`), never through pi's state: pi's transcript holds only the agent's own work, and
+    // pi declares no tool into it.
     this.#pi = new Agent({
       initialState: {
-        ...(options.instructions !== undefined ? { systemPrompt: options.instructions } : {}),
         model: options.model,
         ...(options.thinkingLevel !== undefined ? { thinkingLevel: options.thinkingLevel } : {}),
-        tools: [...this.#tools.values()],
-        messages: options.messages ?? [],
       },
+      prepareRequest: () => this.#prepare(),
       streamFn: (model, context, streamOptions) => this.#call(model, context, streamOptions),
       // The session goes with every request, so the provider's cache knows it (§13.3).
       sessionId: options.session,
@@ -252,7 +284,7 @@ export class AgentRunner {
     return this.#asked !== undefined;
   }
 
-  /** Its transcript as it stands. */
+  /** Its own work as it stands: pi's transcript, which holds neither the opening block nor the run's fixed context. */
   get transcript(): readonly AgentMessage[] {
     return this.#pi.state.messages;
   }
@@ -307,6 +339,8 @@ export class AgentRunner {
       judging: new Set(),
       judged: [],
       halted: Promise.withResolvers<void>(),
+      stopped: new AbortController(),
+      resent: 0,
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
@@ -336,9 +370,17 @@ export class AgentRunner {
       } catch (error) {
         failure = error instanceof Error ? error.message : String(error);
       }
+      failure ??= stint.failure;
       next = undefined;
       const cut = stint.cut;
-      if (cut === undefined) continue;
+      if (cut === undefined) {
+        try {
+          if (failure === undefined && stint.halt === undefined) next = await this.#resend(stint);
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+        }
+        continue;
+      }
       // The call a rule stopped leaves no trace in the transcript, whatever the provider had sent
       // before pi's loop read the match: its words, its calls, and pi's answers to them.
       stint.cut = undefined;
@@ -378,12 +420,115 @@ export class AgentRunner {
     if (this.#stint !== stint || stint.halt !== undefined) return;
     stint.halt = halt;
     stint.halted.resolve();
+    stint.stopped.abort();
     if (halt.status === "limit") this.#emit(stint, { kind: "limit", hit: halt.hit });
     this.#o.channel?.cut();
     this.#pi.abort();
   }
 
-  /** The model call pi's loop makes, wrapped: limits first, then the call's own settings, then a stream that ends the moment the work stops. */
+  /**
+   * pi's request hook, before every request (§13.3): the run's point first, where it has one; then
+   * the request's context, the same for every request of the work (the opening block, the run's fixed
+   * context, the agent's own work), and the call's model, effort, sampling and longest answer,
+   * decided for this request alone.
+   */
+  async #prepare(): Promise<AgentRequestUpdate> {
+    const stint = this.#stint;
+    try {
+      const point = this.#o.point;
+      if (stint !== undefined && point !== undefined && stint.halt === undefined) await this.#atPoint(stint, point, undefined);
+      const settings = this.#o.settings?.({ agent: this.agent, call: this.#calls + 1, model: this.#o.model.id }) ?? {};
+      this.#settings = settings;
+      return { context: { messages: this.#request(), tools: [...this.#tools.values()] }, model: settings.model ?? this.#o.model, thinkingLevel: settings.effort ?? this.#o.thinkingLevel ?? "off" };
+    } catch (error) {
+      if (stint !== undefined) stint.failure = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
+  }
+
+  /** The request as it would go now: the opening block, the run's fixed context, then the agent's own work. */
+  #request(): AgentMessage[] {
+    return [...(this.#opening !== undefined ? [this.#opening] : []), ...this.#context, ...this.#pi.state.messages];
+  }
+
+  /**
+   * Asks the run's point about the request as it would go now (§11), with the provider's words when
+   * it refused the call as too long, and puts in place what the point gives. A stop does not wait on
+   * it. Whether anything was put in place.
+   */
+  async #atPoint(stint: Stint, point: RequestPoint, refused: string | undefined): Promise<boolean> {
+    const messages = this.#request();
+    const from = this.#opening !== undefined ? 1 : 0;
+    const to = from + this.#context.length;
+    const request: PendingRequest = {
+      agent: this.agent,
+      call: this.#calls + 1,
+      messages,
+      context: { from, to },
+      window: point.window,
+      reserve: point.reserve,
+      // The model layer's own estimate of a whole request, the tools its opening block declares included.
+      tokens: promptTokens(messages, DEFAULT_CHARS_PER_TOKEN),
+      ...(refused !== undefined ? { refused } : {}),
+      signal: stint.stopped.signal,
+    };
+    const spans = await untilAborted(Promise.resolve(point.check(request)), stint.stopped.signal);
+    if (spans === undefined || spans.length === 0 || stint.halt !== undefined) return false;
+    this.#apply(stint, spans, messages, from, to);
+    return true;
+  }
+
+  /**
+   * Puts in place the spans the run's point gave, each over the request it was shown (`messages`,
+   * whose fixed context runs from `from` up to `to`): one in the fixed context replaces messages of
+   * it; one in the agent's own work replaces messages of pi's transcript. What is put in place holds
+   * for every later request. A span that reaches the opening block (R-119) or past the request,
+   * crosses from the fixed context into the agent's own work, overlaps another, or parts a tool call
+   * from its result puts nothing in place: the work fails on it.
+   */
+  #apply(stint: Stint, spans: readonly RequestSpan[], messages: readonly AgentMessage[], from: number, to: number): void {
+    const ordered = [...spans].sort((a, b) => b.from - a.from);
+    let end = messages.length;
+    for (const span of ordered) {
+      const where = `${span.from} to ${span.to}`;
+      if (!Number.isInteger(span.from) || !Number.isInteger(span.to) || span.from < from || span.from > span.to || span.to > end) throw new Error(`The run's point gave a span outside the request, over its opening block, or over another span: ${where}.`);
+      if (span.from < to && span.to > to) throw new Error(`The run's point gave a span that crosses from the fixed context into the agent's own work: ${where}.`);
+      if (span.to > to && partsCall(messages, span.from, span.to)) throw new Error(`The run's point gave a span that parts a tool call from its result: ${where}.`);
+      end = span.from;
+    }
+    const work = this.#pi.state.messages.slice();
+    for (const span of ordered) {
+      if (span.to <= to) {
+        this.#context.splice(span.from - from, span.to - span.from, ...span.messages);
+        continue;
+      }
+      const at = span.from - to;
+      const gone = span.to - span.from;
+      work.splice(at, gone, ...span.messages);
+      if (stint.from >= at + gone) stint.from += span.messages.length - gone;
+      else if (stint.from > at) stint.from = at + span.messages.length;
+    }
+    this.#pi.state.messages = work;
+  }
+
+  /**
+   * After the provider refused a call as too long (§11): the refused answer leaves the transcript,
+   * and the run's point is asked about the request again, with the provider's words. Where it puts
+   * something in place, the call goes out again on it, as many times in a row as the run's setting
+   * says; else the work ends on the provider's refusal. Gives the work that sends it again.
+   */
+  async #resend(stint: Stint): Promise<(() => Promise<void>) | undefined> {
+    const point = this.#o.point;
+    const last = stint.last;
+    if (point === undefined || last === undefined || stint.resent >= point.resend || !isContextOverflow(last)) return undefined;
+    stint.resent += 1;
+    this.#pi.state.messages = this.#pi.state.messages.slice(0, stint.callFrom);
+    if (!(await this.#atPoint(stint, point, last.errorMessage ?? ""))) return undefined;
+    // A first call has nothing of the agent's own to go on from.
+    return this.#pi.state.messages.length === 0 ? () => this.#pi.prompt([]) : () => this.#pi.continue();
+  }
+
+  /** The model call pi's loop makes, wrapped: limits first, then the settings decided for its request, then a stream that ends the moment the work stops. */
   #call(model: Model<Api>, context: TranscriptContext, options: SimpleStreamOptions | undefined): AssistantMessageEventStream {
     const out = createAssistantMessageEventStream();
     const stint = this.#stint;
@@ -402,7 +547,7 @@ export class AgentRunner {
     addUsage(stint.usage, counted);
     this.#budget.count(counted);
     this.#o.turn?.count(counted);
-    const settings = this.#o.settings?.({ agent: this.agent, call: this.#calls, model: model.id }) ?? {};
+    const settings = this.#settings;
     stint.callText = "";
     stint.callThinking = "";
     stint.callStartedAt = now();
@@ -419,7 +564,7 @@ export class AgentRunner {
       ...(settings.sampling !== undefined ? { sampling: settings.sampling } : {}),
       ...(settings.maxTokens !== undefined ? { maxTokens: settings.maxTokens } : {}),
       messages: context.messages.length,
-      tools: this.#pi.state.tools.length,
+      tools: this.#tools.size,
       ...(request !== undefined ? { request } : {}),
       // The model layer's own estimate, so these weigh as its counts of a whole request do.
       toolTokens: tokensOf(JSON.stringify(getCurrentTools(context.messages)), DEFAULT_CHARS_PER_TOKEN),
@@ -459,6 +604,8 @@ export class AgentRunner {
         if (stint.halt !== undefined) return;
         if (stint.cut === undefined) {
           stint.last = message;
+          // Only refusals one after another are counted against the run's setting: an answer ends the row.
+          if (message.stopReason !== "error") stint.resent = 0;
           // A message the provider failed in the middle of did not end whole: what of it was held back
           // is dropped, as at a cut, and no reply is released on it (§10.7).
           if (message.stopReason === "error" || message.stopReason === "aborted") this.#o.channel?.cut();
@@ -905,7 +1052,7 @@ export class AgentRunner {
       {
         tools: [this.#piTool(tool, false)],
         assistantMessage: message,
-        context: { messages: this.#pi.state.messages, tools: this.#pi.state.tools },
+        context: { messages: this.#request(), tools: [...this.#tools.values()] },
         signal: ctx.signal,
         beforeToolCall: (context, signal) => this.#beforeTool(context, signal),
         afterToolCall: (context, signal) => this.#afterTool(context, signal),
@@ -1105,4 +1252,13 @@ function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Pro
     },
   );
   return promise;
+}
+
+/** Whether putting something in place of `messages` from `from` up to `to` would part a tool call from its result. */
+function partsCall(messages: readonly AgentMessage[], from: number, to: number): boolean {
+  const calls = new Set<string>();
+  for (const message of messages.slice(from, to)) {
+    if (message.role === "assistant") for (const part of message.content) if (part.type === "toolCall") calls.add(part.id);
+  }
+  return messages.some((message, at) => message.role === "toolResult" && calls.has(message.toolCallId) !== (at >= from && at < to));
 }

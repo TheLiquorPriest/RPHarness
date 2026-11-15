@@ -470,6 +470,7 @@ export class Turn {
         session: scope.session,
         thinkingLevel: model.thinkingLevel,
         instructions: opening.text,
+        context: messages,
         tools: declared,
         texts: this.#texts,
         settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
@@ -486,7 +487,7 @@ export class Turn {
       });
     const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {
       if (this.#ended()) return undefined;
-      const work = runner.start({ messages }, { given: opening.given });
+      const work = runner.start({ messages: [] }, { given: opening.given });
       const entry = { runner, work };
       this.#working.add(entry);
       const done = await work.done;
@@ -560,6 +561,7 @@ export class Turn {
         session: this.scope.session,
         thinkingLevel: model.thinkingLevel,
         instructions: opening.text,
+        context: messages,
         tools: declared,
         texts: this.#texts,
         settings: () => (settings.leadSampling === "preset" && this.#req.presetSampling !== undefined ? { sampling: this.#req.presetSampling } : undefined),
@@ -572,7 +574,7 @@ export class Turn {
       if (this.#ended()) return false;
       this.#saving = true;
       try {
-        const work = saver.start({ messages: [...messages, userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
+        const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: opening.given });
         const entry = { runner: saver, work };
         this.#working.add(entry);
         await work.done;

@@ -2,7 +2,9 @@
 // `trace.requests`): for the calls the setting names, every message of the request in the order
 // sent, as role and text, in a file of the turn's folder that the call's `call_started` names. The
 // trace itself holds no request text. Every call's `call_started` carries the tokens of its tool
-// list as sent and of its opening block, by RPH's own estimate. Everything here is invented.
+// list as sent and of its opening block, by RPH's own estimate. The lead's blocks are each request's
+// fixed context (§10.2): a later call of the turn begins with the whole of the first one's request,
+// so the front a provider caches never moves. Everything here is invented.
 import { afterEach, expect, test } from "bun:test";
 import type { TraceRecord } from "../../src/contract";
 import { DEFAULT_CHARS_PER_TOKEN, tokensOf } from "../../src/model/tokens";
@@ -78,4 +80,17 @@ test("every call carries the tokens of its tool list as sent and of its opening 
   expect(none.started.map((record) => record.event.request)).toEqual([undefined, undefined]);
   expect(none.started.map((record) => record.event.toolTokens)).toEqual([tools, tools]);
   expect((await none.s.files()).some((text) => text.includes('"messages":['))).toBe(false);
+});
+
+test("the lead's second call begins with the whole of his first call's request, the prompt in it once, whole and in order, after the opening block and its frame; then his own work", async () => {
+  const { s } = await played("trace:\n  requests: all\n");
+  const [first, second] = s.model.requests.map(asSent);
+
+  expect(second!.slice(0, first!.length)).toEqual(first!);
+  expect(second!.slice(first!.length).map((message) => message.role)).toEqual(["assistant", "toolResult"]);
+  const prompt = PROMPT.map((message) => ({ role: message.role, text: String(message.content) }));
+  const at = first!.findIndex((message) => message.text === prompt[0]!.text);
+  expect(first!.slice(0, at).map((message) => message.role)).toEqual(["system", "system"]);
+  expect(first!.slice(at, at + prompt.length)).toEqual(prompt);
+  expect(first!.filter((message) => message.text === prompt[0]!.text)).toHaveLength(1);
 });

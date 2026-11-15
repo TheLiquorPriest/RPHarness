@@ -128,6 +128,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     scope,
     trace,
     places,
+    guidance,
     settings: () => settings,
     rules: () => rules,
     words,
@@ -158,6 +159,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       working.add(entry);
       return () => working.delete(entry);
     },
+    keep: (agent) => runs.keep(agent),
     // A job has no briefing to hold a rule's text for.
     late: (agent, judged) => env.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent.id, rule: judged.fired.firing.rule }),
   });

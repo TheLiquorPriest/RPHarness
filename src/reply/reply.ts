@@ -34,6 +34,8 @@ export interface TagReplyOptions {
   second?: string;
   /** The reply begins to show: its first text is about to go out, never sooner (a tag opened for a reply another form holds says nothing). */
   onBegin?(): void;
+  /** An intent record begins: its opening tag was read. */
+  onIntentBegan?(): void;
   /** An intent record, whole, each time one ends: for the live view and the turn's record, never for the chat. */
   onIntent?(text: string): void;
   /** The reply is complete and was sent on whole: once per generation. */
@@ -131,6 +133,7 @@ export class TagReply implements TextChannel {
 
   #take(part: TagPart): void {
     if (part.kind === "open") {
+      if (part.role === "intent") this.#o.onIntentBegan?.();
       if (part.role !== "reply") return;
       if (this.#state === "released" || this.#state === "closing") {
         this.#extra = true;

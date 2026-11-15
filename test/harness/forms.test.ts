@@ -55,6 +55,11 @@ describe("the two-step form", () => {
     expect(briefing).toBe((await briefingAround("reply:\n  form: two-step\n")).replace(CONTRACT_MARK, contract));
     expect(s.told.map((told) => told.kind)).toEqual(["intent", "released", "ended"]);
     expect(s.told[0]!.payload).toBe(intent);
+    // The record began as the lead's write of its file began, inside that call; its end is the intent.
+    const kinds = s.trace.records.map((record) => record.event.kind);
+    expect(kinds.filter((kind) => kind === "intent_began" || kind === "intent")).toEqual(["intent_began", "intent"]);
+    expect(kinds.indexOf("intent_began")).toBeGreaterThan(kinds.indexOf("tool_started"));
+    expect(kinds.indexOf("intent_began")).toBeLessThan(kinds.indexOf("tool_ended"));
   });
 
   test("reply.forms and reply.streamAnyway from the chat's config reach the turn: whole at the end by default, streamed when named", async () => {

@@ -18,7 +18,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, attach, delegate, fieldsOf, Team, type TeamWork } from "../agents";
-import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest } from "../contract";
+import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Writer } from "../contract";
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
@@ -113,6 +113,16 @@ function joined(texts: readonly string[]): string {
     .join("\n\n");
 }
 
+/** A path of the agents' tree by its parts, as a host finds it: empty parts and `.` left out, `..` taking the part before. */
+function plainPath(path: string): string {
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (part === "..") parts.pop();
+    else if (part !== "" && part !== ".") parts.push(part);
+  }
+  return parts.join("/");
+}
+
 /** The tag names a reply contract's header gives, when it gives both. */
 function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefined {
   const tags = header["tags"];
@@ -205,7 +215,10 @@ export class Turn {
         layers: (scope) => files.layers(scope),
         places: (scope) => files.places(scope),
         find: (scope, query) => files.find(scope, query),
-        write: (scope, path, op, by) => files.write(scope, path, op, by),
+        write: (scope, path, op, by) => {
+          this.#writing(path, by);
+          return files.write(scope, path, op, by);
+        },
         read: async (scope, path, range) => {
           await this.#views?.written(path);
           return files.read(scope, path, range);
@@ -467,6 +480,7 @@ export class Turn {
             claim: () => this.#desk.claim("tags"),
             ...(second !== undefined ? { second } : {}),
             onBegin: () => this.#say("writing"),
+            onIntentBegan: () => this.#trace.event(this.#lead, undefined, { kind: "intent_began" }),
             onIntent: (text) => this.#intent(text),
             onReleased: (text) => this.#release(text, "tags", this.#lead),
           })
@@ -927,6 +941,14 @@ export class Turn {
     const op = this.#intentWritten ? { op: "append" as const, text: `\n\n${text}` } : { op: "write" as const, text };
     this.#intentWritten = true;
     this.#tell(env.files.write(this.scope, `${turn}${file}`, op, "harness"));
+  }
+
+  /** A write begins: where the lead writes its intent record into the turn's folder itself (§10.7), the record begins with it, as it does at its opening tag. */
+  #writing(path: string, by: Writer): void {
+    const file = this.#opening?.intentFile;
+    const turn = this.#places?.turn;
+    if (by === "harness" || by.id !== this.#lead.id || file === undefined || turn === undefined || plainPath(path) !== plainPath(`${turn}${file}`)) return;
+    this.#trace.event(this.#lead, undefined, { kind: "intent_began" });
   }
 
   /** A write went through: on a connection without tags, the lead writes its intent record into the turn's folder itself (§10.7), and the host is told it as it would be from the tag. */

@@ -66,6 +66,22 @@ describe("a simple turn", () => {
     expect(s.trace.of("intent").map((record) => record.event.text)).toEqual([INTENT]);
   });
 
+  test("the trace marks the intent record's beginning as its opening tag is read, and its end, the intent, as it closes", async () => {
+    const more = gate();
+    const s = (open = await stage({ drafted: true, answers: [{ pieces: [{ text: "<intent>Wants: news" }, { hold: more }, { text: " of the boat.</intent><reply>No boat tonight.</reply>" }] }] }));
+
+    const turn = s.turn(request("t1"));
+    await s.trace.seen((record) => record.event.kind === "intent_began");
+    await s.clock.idle();
+    expect(s.trace.of("intent")).toEqual([]);
+    more.open();
+    expect((await turn).outcome.status).toBe("released");
+
+    const marks = s.trace.records.filter((record) => record.event.kind === "intent_began" || record.event.kind === "intent");
+    expect(marks.map((record) => record.event)).toEqual([{ kind: "intent_began" }, { kind: "intent", text: "Wants: news of the boat." }]);
+    expect(marks.every((record) => record.agent.definition === "author" && record.run === marks[0]!.run)).toBe(true);
+  });
+
   test("the reply reaches the sink as it is written, while the model is still writing it", async () => {
     const more = gate();
     const s = (open = await stage({ drafted: true, answers: [{ pieces: [{ text: "<intent>Short.</intent><reply>The lamp gutters." }, { hold: more }, { text: " Wren swears softly.</reply>" }] }] }));

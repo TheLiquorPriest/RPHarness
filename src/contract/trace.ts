@@ -70,7 +70,12 @@ export type TraceEvent =
   | { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string }
   /** An agent began work, on its model, in its own session, with what it was given by name. */
   | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] }
-  /** The lead's intent record (§10.3), as it was written. */
+  /**
+   * The lead's intent record began (§10.3): in the tag form, its opening tag was read; where the lead
+   * writes it into the turn's folder itself, that write began. Its end is the `intent` that follows.
+   */
+  | { kind: "intent_began" }
+  /** The lead's intent record (§10.3), as it was written: its end. */
   | { kind: "intent"; text: string }
   /**
    * A model call was sent: the agent's call number, from 1, and what it carried. `request`: the file

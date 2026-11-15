@@ -141,6 +141,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
   return {
     run_started: { kind: "run_started", run: "turn", turn: "new", lead: "author" },
     agent_started: { kind: "agent_started", definition: agent.definition, connection: "kit-connection", model: "kit-model", effort: "low", session: "kit-session", given: ["prompt:persona"] },
+    intent_began: { kind: "intent_began" },
     intent: { kind: "intent", text: "Wants: a quiet answer." },
     call_started: { kind: "call_started", call: 1, connection: "kit-connection", model: "kit-model", sampling: { temperature: 0.7 }, maxTokens: 512, messages: 6, tools: 3 },
     call_ended: { kind: "call_ended", call: 1, model: "kit-model", text: "Wren nods.", toolCalls: [{ id: "kit-call-1", name: "kit_tally", args: { numbers: [1, 2] } }], stop: "tool_calls", usage: { ...NO_USAGE, calls: 1, input: 900, output: 40 }, ms: 812 },

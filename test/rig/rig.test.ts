@@ -9,7 +9,6 @@ import type { AgentEvent, AgentTool } from "@earendil-works/pi-agent-core";
 import { Agent } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import { contentText } from "@earendil-works/pi-ai";
-import type { Clock } from "../../src/contract";
 import type { Reply } from "../../src/testing/rig";
 import { FakeClock, scriptedModel, scriptedSource } from "../../src/testing/rig";
 
@@ -199,15 +198,5 @@ describe("the script", () => {
     const agent = new Agent({ initialState: { model: model.model }, streamFn: model.streamFn });
     await expect(model.clock.settle(agent.prompt("Well?"))).rejects.toThrow("The work waits on something no timer will bring");
     agent.abort();
-  });
-});
-
-describe("the rig's clock", () => {
-  test("is a contract clock whose day is the user's, in the zone it was given", () => {
-    const late: Clock = new FakeClock(Date.UTC(2026, 0, 1, 23, 30));
-    expect(late.day()).toBe("2026-01-01");
-    // An hour ahead of UTC, half past eleven at night is already the next day.
-    const ahead: Clock = new FakeClock(Date.UTC(2026, 0, 1, 23, 30), 60);
-    expect([ahead.day(), ahead.day(Date.UTC(2026, 0, 1, 22, 0))]).toEqual(["2026-01-02", "2026-01-01"]);
   });
 });

@@ -7,7 +7,8 @@
 // memory and in the store, in a document per UTC hour with its time, so a cap counts exactly the last
 // 24 hours and a crash loses at most the call in flight. What an agent's work spent beyond the calls
 // that ended whole (a call a stop or a limit cut off) counts as its work ends. A job's calls are
-// marked as a job's, so the jobs' own day cap reads the same record.
+// marked as a job's, so the jobs' own day cap reads the same record. Each job started is counted in
+// the same documents, with its time and its connection's own counts, for the jobs' counts a day.
 //
 // A run's usage is counted from the trace as each agent's work ends; once the run is over it is kept
 // in the store for as many of the user's runs as his setting says, the oldest going past it, so it
@@ -15,9 +16,9 @@
 //
 // Older day records (one per calendar day, kept before the hours were) count toward the 24 hours
 // they fall in, read once, the first time this process reads the user's spend: the day's usage of
-// every agent, and the day's job tokens, in each of their older forms. Read, they leave the store;
-// a job record keeps its counts of jobs.
-import type { AgentRef, Clock, FilesPort, JsonObject, JsonValue, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
+// every agent, and the day's job tokens and counts of jobs, in each of their older forms. Read, they
+// leave the store.
+import type { AgentRef, Clock, FilesPort, JsonObject, JsonValue, LimitHit, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
 import { addUsage, emptyUsage } from "../loop/budget";
 import { readSettingsOf } from "./settings";
 import { USAGE } from "./settings/usage";
@@ -60,9 +61,23 @@ interface RunBook {
   agents: Map<string, { agent: AgentRef; usage: Usage }>;
 }
 
-/** A user's spend as this process holds it: every spend of the last 24 hours, and the hour last written, so older hours are let go once an hour. */
+/** Jobs started, as the counts of jobs a day keep them: when, how many (one, or an older day record's count at its day's end), and how many of them on each connection's own count, by its settings key. */
+interface Started {
+  at: number;
+  all: number;
+  connections: Record<string, number>;
+}
+
+/** What would pass a count of jobs a day: the user's count of every job, or of those on a connection's own count (its settings key). */
+export interface JobCount {
+  max: number;
+  connection?: string;
+}
+
+/** A user's day as this process holds it: every spend and job started of the last 24 hours, and the hour last written, so older hours are let go once an hour. */
 interface Day {
   spends: Spent[];
+  starts: Started[];
   hour?: number;
 }
 
@@ -114,12 +129,35 @@ function hourSpends(value: JsonValue | undefined): Spent[] {
   return Array.isArray(kept) ? kept.flatMap((item) => spentOf(item) ?? []) : [];
 }
 
+/** Counts of jobs as a start or an older day record keeps them: all of them, and those on each connection's own count; none where it holds neither. */
+function countsOf(value: JsonValue | undefined): Omit<Started, "at"> | undefined {
+  if (!isObject(value) || (!("all" in value) && !("connections" in value))) return undefined;
+  const connections: Record<string, number> = {};
+  const kept = value["connections"];
+  if (isObject(kept)) for (const [key, count] of Object.entries(kept)) if (typeof count === "number") connections[key] = count;
+  return { all: typeof value["all"] === "number" ? value["all"] : 0, connections };
+}
+
+/** The jobs started an hour's document holds. */
+function hourStarts(value: JsonValue | undefined): Started[] {
+  const kept = isObject(value) ? value["starts"] : undefined;
+  if (!Array.isArray(kept)) return [];
+  return kept.flatMap((item) => {
+    const counts = countsOf(item);
+    return isObject(item) && typeof item["at"] === "number" && counts !== undefined ? [{ at: item["at"], ...counts }] : [];
+  });
+}
+
+function startedValue(started: Started): JsonObject {
+  return { at: started.at, all: started.all, connections: started.connections };
+}
+
 /** The start of the UTC hour `at` falls in. */
 function hourOf(at: number): number {
   return Math.floor(at / HOUR_MS) * HOUR_MS;
 }
 
-/** Where the spends of the UTC hour starting at `hour` are kept: `usage/hours/2026-05-01T13`. */
+/** Where the spends and job starts of the UTC hour starting at `hour` are kept: `usage/hours/2026-05-01T13`. */
 function hourKey(hour: number): string {
   return `${HOURS}${new Date(hour).toISOString().slice(0, 13)}`;
 }
@@ -290,18 +328,44 @@ export class UsageBook implements UsageApi {
     return gauge === undefined ? undefined : { ...gauge };
   }
 
+  /**
+   * Counts a job started in the user's day, unless one of `counts` is reached already (his count of
+   * every job, or of those on a connection's own count): then the limit it would pass, and it is not
+   * counted. Checked and counted with nothing awaited between, so jobs started side by side are
+   * counted one after another; kept in its hour's document, so the count holds across a restart.
+   */
+  async countJob(user: string, counts: readonly JobCount[], connections: readonly string[]): Promise<LimitHit | undefined> {
+    const day = await this.#day(user);
+    const now = this.#d.clock.now();
+    const since = now - DAY_MS;
+    if (day.starts.some((started) => started.at <= since)) day.starts = day.starts.filter((started) => started.at > since);
+    for (const { max, connection } of counts) {
+      const value = day.starts.reduce((n, started) => n + (connection === undefined ? started.all : (started.connections[connection] ?? 0)), 0);
+      if (value >= max) return { limit: "jobs", per: "day", max, value, ...(connection !== undefined ? { connection } : {}) };
+    }
+    const started: Started = { at: now, all: 1, connections: Object.fromEntries(connections.map((key) => [key, 1])) };
+    day.starts.push(started);
+    this.#pend(this.#keepIn(user, day, now, (doc) => ({ ...doc, starts: [...hourStarts(doc).map(startedValue), startedValue(started)] })), "A job's start could not be kept in the day's count of jobs.", { at: now });
+    return undefined;
+  }
+
   /** Counts a spend in the user's day at once and keeps it in its hour's document. */
   #spend(user: string, spent: Spent): void {
     const kept = this.#day(user).then(async (day) => {
       day.spends.push(spent);
-      await this.#d.store.update({ user }, hourKey(hourOf(spent.at)), (current) => ({ spends: [...hourSpends(current).map(spentValue), spentValue(spent)] }));
-      const hour = hourOf(this.#d.clock.now());
-      if (day.hour !== hour) {
-        day.hour = hour;
-        await this.#letGo(user);
-      }
+      await this.#keepIn(user, day, spent.at, (doc) => ({ ...doc, spends: [...hourSpends(doc).map(spentValue), spentValue(spent)] }));
     });
     this.#pend(kept, "A call's usage could not be kept in the day's record.", { at: spent.at });
+  }
+
+  /** Changes the user's document of the hour `at` falls in, the rest of it kept; once an hour, lets go of the hours that hold nothing of the last 24. */
+  async #keepIn(user: string, day: Day, at: number, change: (doc: JsonObject) => JsonObject): Promise<void> {
+    await this.#d.store.update({ user }, hourKey(hourOf(at)), (current) => change(isObject(current) ? current : {}));
+    const hour = hourOf(this.#d.clock.now());
+    if (day.hour !== hour) {
+      day.hour = hour;
+      await this.#letGo(user);
+    }
   }
 
   #day(user: string): Promise<Day> {
@@ -316,7 +380,7 @@ export class UsageBook implements UsageApi {
     return read;
   }
 
-  /** The user's spend of the last 24 hours from the store, with his older day records read in once. */
+  /** The user's spends and jobs started of the last 24 hours from the store, with his older day records read in once. */
   async #readDay(user: string): Promise<Day> {
     const { store } = this.#d;
     const now = this.#d.clock.now();
@@ -326,14 +390,15 @@ export class UsageBook implements UsageApi {
     for (let hour = hourOf(since); hour <= now; hour += HOUR_MS) hours.push(hour);
     const docs = await Promise.all(hours.map((hour) => store.get({ user }, hourKey(hour))));
     const spends = docs.flatMap((doc) => hourSpends(doc)).filter((spent) => spent.at > since);
+    const starts = docs.flatMap((doc) => hourStarts(doc)).filter((started) => started.at > since);
     await this.#letGo(user);
-    return { spends, hour: hourOf(now) };
+    return { spends, starts, hour: hourOf(now) };
   }
 
   /**
    * The user's older day records: each counts toward the 24 hours it falls in, at the last moment of
-   * its day (now, for today's), kept in that hour's document; then it leaves the store, but for a
-   * job record's counts of jobs, which stay.
+   * its day (now, for today's), kept in that hour's document, its usage as a spend and a job
+   * record's counts of jobs as jobs started; then it leaves the store.
    */
   async #readOlder(user: string, since: number): Promise<void> {
     const { store } = this.#d;
@@ -342,15 +407,20 @@ export class UsageBook implements UsageApi {
     for (const [key, kind] of older) {
       const value = await store.get({ user }, key);
       const end = dayEnd(key.slice(kind === "day" ? OLD_DAYS.length : OLD_JOB_DAYS.length));
-      const usage = olderTokens(value, user);
-      if (end !== undefined && end > since && usage !== undefined) {
-        const spent: Spent = { at: Math.min(end, now), in: kind, usage };
-        await store.update({ user }, hourKey(hourOf(spent.at)), (current) => ({ spends: [...hourSpends(current).map(spentValue), spentValue(spent)] }));
+      if (end !== undefined && end > since) {
+        const at = Math.min(end, now);
+        const usage = olderTokens(value, user);
+        const counts = kind === "jobs" ? countsOf(value) : undefined;
+        const spent: Spent | undefined = usage === undefined ? undefined : { at, in: kind, usage };
+        const started: Started | undefined = counts === undefined || counts.all === 0 ? undefined : { at, ...counts };
+        if (spent !== undefined || started !== undefined) {
+          await store.update({ user }, hourKey(hourOf(at)), (current) => {
+            const doc = isObject(current) ? current : {};
+            return { ...doc, ...(spent !== undefined ? { spends: [...hourSpends(doc).map(spentValue), spentValue(spent)] } : {}), ...(started !== undefined ? { starts: [...hourStarts(doc).map(startedValue), startedValue(started)] } : {}) };
+          });
+        }
       }
-      if (kind === "jobs" && isObject(value) && ("all" in value || "connections" in value)) {
-        const { tokens: _tokens, ...counts } = value;
-        await store.set({ user }, key, counts);
-      } else await store.delete({ user }, key);
+      await store.delete({ user }, key);
     }
   }
 

@@ -21,23 +21,18 @@ function turn(): Promise<void> {
   return promise;
 }
 
-/** A contract `Clock` for tests; its day is the one at the zone offset it was given (UTC when none). */
+/** A contract `Clock` for tests. */
 export class FakeClock implements Clock {
   private time: number;
   private made = 0;
   private readonly timers = new Map<number, Timer>();
-  private readonly offsetMs: number;
 
-  /** `start`: the time it starts at; `zoneMinutes`: the user's zone, in minutes ahead of UTC, that its day is counted in. */
-  constructor(start = 0, zoneMinutes = 0) {
+  /** `start`: the time it starts at. */
+  constructor(start = 0) {
     this.time = start;
-    this.offsetMs = zoneMinutes * 60_000;
   }
 
   readonly now = (): number => this.time;
-
-  /** The user's calendar day at `at` (now when not given), as `YYYY-MM-DD`. */
-  readonly day = (at?: number): string => new Date((at ?? this.time) + this.offsetMs).toISOString().slice(0, 10);
 
   readonly setTimeout = (run: () => void, ms: number): number => {
     this.made += 1;

@@ -1,5 +1,4 @@
-// The folder host's clock (the machine's own, the user's day by the machine's time zone) and its
-// log (lines of `host/log.jsonl`).
+// The folder host's clock (the machine's own) and its log (lines of `host/log.jsonl`).
 
 import type { Clock, JsonValue, Log, LogLevel } from "../../contract/index";
 import type { Appender } from "./disk";
@@ -9,10 +8,6 @@ export const machineClock: Clock = {
   now: () => Date.now(),
   setTimeout: (run, ms) => setTimeout(run, ms),
   clearTimeout: (handle) => clearTimeout(handle as Timer),
-  day(at) {
-    const d = new Date(at ?? Date.now());
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  },
 };
 
 /** A log whose lines go to a file, in order, without the caller waiting. */

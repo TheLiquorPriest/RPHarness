@@ -183,9 +183,9 @@ describe("the day", () => {
     // Today's usage record counts for every agent; yesterday's job tokens (its day ends inside the 24 hours) and today's for the jobs; days gone by count nothing.
     expect(spend.all()).toEqual({ calls: 3, input: 2_000, cacheRead: 0, cacheWrite: 0, output: 300 });
     expect(spend.jobs()).toEqual({ calls: 0, input: 1_200, cacheRead: 100, cacheWrite: 0, output: 50 });
-    // Read once: they leave the store, but for the job record's counts of jobs.
-    expect([...store.values.keys()].filter((key) => key.includes("/days/"))).toEqual([`${USER}\njobs/days/2026-05-01`]);
-    expect(await store.get({ user: USER }, "jobs/days/2026-05-01")).toEqual({ all: 2, connections: { quay: 1 } });
+    // Read once: they leave the store, the job record's counts of jobs going into its hour's document as jobs started.
+    expect([...store.values.keys()].filter((key) => key.includes("/days/"))).toEqual([]);
+    expect(await book(store, clock).countJob(USER, [{ max: 2 }], [])).toMatchObject({ limit: "jobs", per: "day", max: 2, value: 2 });
     expect((await book(store, clock).spend(USER)).jobs()).toEqual(spend.jobs());
     // A map by user written before each user's values were kept apart counts his entry alone.
     const other = memoryStore();

@@ -10,18 +10,20 @@
 // of a job's state, and what it spent, wrote and wrote down as it goes, is kept in the host's store
 // (its typed part for job records) under its user, told to the host and traced, so a restart finds a
 // job that was running and lists it as interrupted, with what it had done and spent, and a job that was
-// only waiting waits again from its kept start; the day's counts of jobs and of their tokens are kept
-// there too, under the user alone. RPH cannot list the users a store holds, so what a restart cut off
-// is found for each user at his first call. The owner's controls are here too, each his own press and
-// nothing a rule or an agent reaches: the two switches over all of his jobs (kept in the store, so a
-// restart keeps them), one waiting job held, a job started again, and the answer to a job that asks. A
-// job whose start named an ask point is held, not ended, once its tokens reach it: its agents wait at
-// their next call, in the session they have, until he answers.
+// only waiting waits again from its kept start; the jobs started and their tokens are counted over
+// the last 24 hours in the usage book's documents, under the user alone. RPH cannot list the users a
+// store holds, so what a restart cut off is found for each user at his first call. The owner's
+// controls are here too, each his own press and nothing a rule or an agent reaches: the two switches
+// over all of his jobs (kept in the store, so a restart keeps them), one waiting job held, a job
+// started again, and the answer to a job that asks. A job whose start named an ask point is held,
+// not ended, once its tokens reach it: its agents wait at their next call, in the session they have,
+// until he answers.
 import type { DelegateCall } from "../agents/tools";
 import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
 import { loadGuidance } from "../files";
 import { lines } from "../harness/means";
 import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
+import type { JobCount } from "../harness/usage";
 import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
 import { type JobAsk, type JobCore, type PreparedJob, prepareJob } from "./run";
@@ -29,9 +31,6 @@ import type { JobCall, JobsWork, RunJobs } from "./tool";
 
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
 const LINES_PART = "jobs";
-
-/** Where the count of each day's jobs is kept, by the user's day. */
-const DAYS = "jobs/days/";
 
 /** Where the owner's two switches over all of a user's jobs are kept, under the user. */
 const SWITCHES = "jobs/switches";
@@ -60,28 +59,11 @@ interface Live {
   settle(view: JobView): void;
 }
 
-/**
- * A day's count of the jobs a user started: all of them, and those on each connection a setting
- * names. What they spent is the usage book's, which counts every call as it ends.
- */
-interface DayCount {
-  all: number;
-  connections: Record<string, number>;
-}
-
 /** What came of making a job: the job, as it stands once it had its chance at a place; the user's limit it would pass; why none may be made; or the answer that says why none could be made. */
 type Begun = { view: JobView } | { hit: LimitHit } | { refusal: JobRefusal } | LoopToolResult;
 
 function isObject(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function dayCount(value: JsonValue | undefined): DayCount {
-  const all = isObject(value) && typeof value["all"] === "number" ? value["all"] : 0;
-  const connections: Record<string, number> = {};
-  const kept = isObject(value) ? value["connections"] : undefined;
-  if (isObject(kept)) for (const [key, count] of Object.entries(kept)) if (typeof count === "number") connections[key] = count;
-  return { all, connections };
 }
 
 function errorWords(error: unknown): string {
@@ -463,27 +445,13 @@ export class Jobs implements JobsApi, JobsWork {
   }
 
   /**
-   * Counts a job in the user's day, unless that passes the user's count for the day, of every job or
-   * of those on its connection: then the limit it would pass. Counted in the host's store, so the
-   * count holds across a restart and across jobs started at once.
+   * Counts a job in the user's day, the last 24 hours, unless that passes his count of every job or
+   * of those on its connection: then the limit it would pass. The usage book keeps the count, so it
+   * holds across a restart and across jobs started at once.
    */
-  async #count(user: string, settings: Settings, own: readonly ConnectionCounts[]): Promise<LimitHit | undefined> {
-    const limits: { max: number; connection?: string }[] = [...(settings.jobs.perDay !== undefined ? [{ max: settings.jobs.perDay }] : []), ...own.flatMap(({ key, counts }) => (counts.perDay !== undefined ? [{ max: counts.perDay, connection: key }] : []))];
-    let hit: LimitHit | undefined;
-    await this.#core.env.store.update({ user }, `${DAYS}${this.#core.env.clock.day()}`, (current) => {
-      const count = dayCount(current);
-      for (const { max, connection } of limits) {
-        const value = connection === undefined ? count.all : (count.connections[connection] ?? 0);
-        if (value >= max) {
-          hit = { limit: "jobs", per: "day", max, value, ...(connection !== undefined ? { connection } : {}) };
-          return current;
-        }
-      }
-      count.all += 1;
-      for (const { key } of own) count.connections[key] = (count.connections[key] ?? 0) + 1;
-      return { all: count.all, connections: count.connections };
-    });
-    return hit;
+  #count(user: string, settings: Settings, own: readonly ConnectionCounts[]): Promise<LimitHit | undefined> {
+    const counts: JobCount[] = [...(settings.jobs.perDay !== undefined ? [{ max: settings.jobs.perDay }] : []), ...own.flatMap(({ key, counts }) => (counts.perDay !== undefined ? [{ max: counts.perDay, connection: key }] : []))];
+    return this.#core.usage.countJob(user, counts, own.map(({ key }) => key));
   }
 
   /** Starts the waiting jobs that have a place: within the user's count at once, of every job of theirs and of those on each job's connection. */

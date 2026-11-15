@@ -2,6 +2,7 @@
 name: lead
 description: The lead of a roleplay. It reads each request with everything it was given, and gives the one reply the player sees.
 model: default
+effort: high
 tools: [file_read, file_find, file_write, chat_read, chat_search, lore_read, lore_search, gap_check, skill_load, suggest, archive_search, web_search, tool_search, tool_use, todo, write_reply, reply_release]
 reads: [rules]
 given:

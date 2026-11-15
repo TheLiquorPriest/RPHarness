@@ -21,11 +21,10 @@ afterEach(async () => {
 const KEEP_TWO = "compaction:\n  keepTurns: 2\n";
 const READ_TIDE = { pieces: [{ call: "file_read", args: { path: "persistent-workspace/tide.md" } }] };
 
-/** RPH's own tool notices with the line for a reply tool called before the turn's own work in fixture words. */
+/** RPH's own tool notices with the line a reply tool called before the turn's own work was once answered with, in fixture words: the code no longer asks for it, so no answer may carry it. */
 async function notices(): Promise<string> {
   const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".prompts", "tool-notices.md")).text();
-  if (!/^not_now: /m.test(shipped)) throw new Error("RPH's own tool notices have no not_now line.");
-  return shipped.replace(/^not_now: .*$/m, "not_now: Fixture: {{tool}} waits for the turn's own work.");
+  return `${shipped.trimEnd()}\nnot_now: Fixture: {{tool}} waits for the turn's own work.\n`;
 }
 
 /** What the reply tools answered in a turn, in order: the tool, its text, whether it failed. */

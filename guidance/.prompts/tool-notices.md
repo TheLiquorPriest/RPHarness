@@ -15,12 +15,12 @@ missing: There is no file at {{path}}.
 folder: {{path}} is a folder. List what is in it with file_find.
 empty: {{path}} is empty.
 past_end: {{path}} has {{lines}} lines.
-refused_yours: Agents do not write at {{path}}. Outside {{writable}}, the files are the player's own: agents read them and never write them. You may write in {{writable}}.
-refused_generated: {{path}} is kept by the system for agents to read. You may write in {{writable}}.
-refused_mounted: {{path}} is in a shared level of files, which agents read and never write. You may write in {{writable}}.
-refused_outside: {{path}} is outside the files you can see.
-refused_link: {{path}} passes through a link, and links are never followed.
-refused_invalid: {{path}} is not a path.
+refused_yours: Agents do not write at {{path}}. Notes go in {{writable}}; the rest of the files are read, never written.
+refused_generated: {{path}} is kept by the system for agents to read, not to write. Notes go in {{writable}}.
+refused_mounted: {{path}} is in a shared level of files, which agents read and never write. Notes go in {{writable}}.
+refused_outside: {{path}} is outside the files you can see. Notes go in {{writable}}.
+refused_link: {{path}} passes through a link, and links are never followed. Notes go in {{writable}}.
+refused_invalid: {{path}} is not a path. Notes go in {{writable}}.
 no_file: There is no file at {{path}} to change.
 not_file: {{path}} is a folder, not a file.
 no_match: The text to replace is not in {{path}}.
@@ -36,9 +36,8 @@ hit_folder: {{path}}/
 hit_line: {{path}}:{{line}}: {{text}}
 bad_pattern: {{pattern}} is not a pattern that can be searched for.
 todo: {{open}} open, {{done}} done.
-no_writer: There is no agent definition named {{writer}} to write the reply.
+no_writer: No reply was written: {{^writer}}your definition names no agent to write it{{/writer}}{{#writer}}{{writer}}, the agent your definition names to write it, {{#missing}}has no definition{{/missing}}{{#off}}is switched off{{/off}}{{#broken}}has a definition that does not load{{/broken}}{{^missing}}{{^off}}{{^broken}}cannot be used{{/broken}}{{/off}}{{/missing}}{{/writer}}.
 no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
-not_now: {{tool}} was not run: this call comes before the turn's own work, and the reply goes out from that work.
 released: The reply went out.
 not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached one of its limits{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.

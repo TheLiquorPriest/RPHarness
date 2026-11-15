@@ -91,7 +91,8 @@ describe("suggest", () => {
 
     expect(tidied.error).toBeUndefined();
     expect(outside.error).toBe(true);
-    expect(textOf(outside)).toBe(notices?.format === "lines" ? (notices.line("refused_outside", { path: "../other-chat/WORLD.md" }) ?? "") : "no tool answers' file");
+    const writable = (await b.host.files.places(SCOPE)).writable;
+    expect(textOf(outside)).toBe(notices?.format === "lines" ? (notices.line("refused_outside", { path: "../other-chat/WORLD.md", writable }) ?? "") : "no tool answers' file");
     expect(handed.map((h) => h.suggestion.target)).toEqual([{ file: "WORLD.md" }]);
   });
 });

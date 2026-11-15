@@ -20,7 +20,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
-    "test": "bun test"
+    "test": "\"$npm_execpath\" scripts/test-all.ts",
+    "test:timings": "\"$npm_execpath\" scripts/test-all.ts --record"
   },
   "dependencies": {
     "@earendil-works/pi-agent-core": "1.5.2",

@@ -12,6 +12,7 @@
 // word an agent is told comes from a file: the brief's frame, the question's, and the lines of
 // `.prompts/delegation.md`.
 import type { AgentRef, BodyFields, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
+import { loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
 import { placed } from "../harness/requests";
@@ -20,7 +21,7 @@ import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepR
 import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
-import { openingOf, pinsOf } from "../harness/opening";
+import { changedText, openingOf, pinsOf } from "../harness/opening";
 import { attach, joined, type Wanted } from "./attachments";
 import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
 
@@ -280,6 +281,13 @@ export class Team implements TeamWork {
       gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),
       ...(point !== undefined ? { point } : {}),
+      // A run that goes on past an edit (a job's agent; one continued) is told what of its block no
+      // longer stands, against its block made again from the files as they stand (R-128).
+      changed: async () => {
+        const now = loadGuidance(d.env.files, d.trace.scope);
+        const [current, notices] = await Promise.all([now.definition(definition.name), now.part("notices")]);
+        return changedText(block, await openingOf({ guidance: now, agent: definition.name, definition: current, tools: held.tools, isTool: (name) => d.hold([name]).tools.length > 0, fields }), notices);
+      },
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     // Its start record names only what it was handed.

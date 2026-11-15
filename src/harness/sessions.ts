@@ -19,7 +19,7 @@ import type { ReplyFormSetting } from "./settings";
 export interface Opening {
   /** Its text: the definition, the instruction stack, the reply contract, the tool guide and the list of skills. */
   text: string;
-  /** What the stack held, for the briefing's "files changed since this session opened". */
+  /** What each of its parts held (the stack's files, the reply contract as rendered, each tool guide and description), for the briefing's "changed since this block was made". */
   snapshot: StackSnapshot;
   /** The list of skills it holds, as the skills part laid it out (§5.4); absent when it holds none. The briefing says when the list as it stands is another. */
   skills?: string;

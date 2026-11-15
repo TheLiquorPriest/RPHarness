@@ -408,6 +408,14 @@ export interface DefinitionsApi {
   list(scope: Scope): Promise<ListedDefinition[]>;
   /** The exact stack an agent will get, and where each part came from (§5.2). */
   stack(scope: Scope, agent: string): Promise<StackPart[]>;
+  /**
+   * "Apply now" (R-119), the owner's own press (C-24): every opening block of the scope's session is
+   * made afresh from the files as they stand, the definition's tool list and `given:` included, by
+   * the first run of each agent that starts after it; a run already going keeps the block it started
+   * with to its end. Kept in the session file, so it holds over a restart. A session with no block yet
+   * is left as it is.
+   */
+  apply(scope: Scope): Promise<void>;
 }
 
 // ---------------------------------------------------------------- the harness

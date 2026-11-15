@@ -4,10 +4,10 @@
 //
 // Who calls what:
 // - The harness, when a session opens: `definition(name)` and `stack(name)` for the opening block,
-//   and `snapshot(stack)`, which it keeps with the session.
-// - The harness, for each briefing: `stack(name, { situations })` for the files added for the turn,
-//   and `changes(snapshot, stack)` with `changesText` for the files changed since the session opened.
-//   "Apply now" is a new `stack(name)` and a new snapshot.
+//   whose builder (`openingOf`) takes `snapshot(agent, front)` of every part, kept with the session.
+// - The harness, for each briefing (and before each later request of an agent that runs on): the
+//   block made again from the files as they stand, and `changes(snapshot, front)` with `changesText`
+//   for each part changed since the block was made. "Apply now" makes the block afresh.
 // - The tools: `skills()` for the prompt's index, `skill(name)` for a body, `tool(name)` for a tool's
 //   description.
 // - The harness, wherever it sends a model text of its own: `part(name)`.
@@ -257,10 +257,28 @@ export interface Stack {
   problems: Problem[];
 }
 
-/** What the opening block held when a session opened, kept with the session (JSON). */
+/**
+ * What an opening block held when it was made, kept with the session (JSON): each part that stood,
+ * by its name, its file, and the SHA-256 of its text as the agent got it (a definition filled in, the
+ * reply contract rendered for the session's form, a tool's description as declared).
+ */
 export interface StackSnapshot {
   agent: string;
   parts: { part: string; path: string; level: LayerLevel; hash: string; layered?: true }[];
+}
+
+/**
+ * A part of an opening block as it is compared across a session (§5.2, §10.2): every part but the
+ * skills' index (`Opening.skills`) and what `opening:` names (resolved once). `layered`: one level's
+ * file of a layered name. A part that stands has its `text`; one left out, why.
+ */
+export interface FrontPart {
+  part: string;
+  path: string;
+  level: LayerLevel;
+  layered?: true;
+  text?: string;
+  left?: StackLeft;
 }
 
 /**
@@ -501,11 +519,11 @@ export type LoadGuidance = (files: FilesPort, scope: Scope | UserScope) => Guida
 /** `createFacts`: RPH's own facts, read by `own` at each moment, and the host's through its port. */
 export type CreateFacts = (host: FactsPort, own: OwnFactsReader) => Facts;
 
-/** `snapshot`: what an opening block built from `stack` holds, to keep with the session. */
-export type TakeSnapshot = (stack: Stack) => StackSnapshot;
+/** `snapshot`: what an opening block holds, from its parts, to keep with the session. */
+export type TakeSnapshot = (agent: string, front: readonly FrontPart[]) => StackSnapshot;
 
-/** `changes`: what of the opening block no longer stands, given the same agent's stack now; in the stack's order, then what went. */
-export type FindChanges = (opened: StackSnapshot, now: Stack) => FileChange[];
+/** `changes`: what of the opening block no longer stands, given the same agent's block made now; in the block's order, then what went. */
+export type FindChanges = (opened: StackSnapshot, now: readonly FrontPart[]) => FileChange[];
 
 /**
  * `changesText`: the briefing's text for the files changed since the session opened, from the

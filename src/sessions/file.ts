@@ -126,6 +126,16 @@ export interface CompactEntry extends EntryBase {
 }
 
 /**
+ * The owner pressed "Apply now" (R-119): every lead's opening block written before it no longer
+ * stands, so the first run of each lead that starts after it makes its block afresh from the files as
+ * they stand, and writes it. A mark of the host's word: it belongs to no turn, and is never the leaf.
+ */
+export interface AppliedEntry extends EntryBase {
+  type: "applied";
+  turn?: undefined;
+}
+
+/**
  * A lead's opening block (§10.2 block 1), as it was made: at the session's first turn for that lead,
  * or afresh by "Apply now". The newest for a lead, in the order of the file, is the one its turns go
  * on with, wherever the turn that made it stands. Kept as plain JSON, so what the block comes to hold
@@ -151,7 +161,7 @@ export interface SpentEntry extends EntryBase {
   ms: number;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | SpentEntry;
+export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -196,6 +206,7 @@ function isEntry(v: Record<string, unknown>): boolean {
     case "compacted":
       return str(v["turn"]) && str(v["summary"]) && str(v["kept"]);
     case "compact":
+    case "applied":
       return v["turn"] === undefined;
     case "opening":
       return v["turn"] === undefined && str(v["lead"]) && isMapping(v["opening"]);
@@ -256,8 +267,9 @@ export function parseSession(text: string): ParsedSession {
  * - a compaction the host asked for is waiting from its mark until a compaction is written after it,
  *   in the order of the file, wherever either stands; the mark is never the leaf, so a turn at work
  *   when it was given goes on where the session stands;
- * - a lead's opening block stands from its mark until a newer one for that lead is written, in the
- *   order of the file, wherever either stands; the mark is never the leaf either;
+ * - a lead's opening block stands from its mark until a newer one for that lead is written, or the
+ *   owner's "Apply now" mark, in the order of the file, wherever either stands; neither mark is ever
+ *   the leaf;
  * - what a turn's runs spent stands from its mark until a newer one for that turn is written; the
  *   mark is never the leaf, nor its turn's tip.
  *
@@ -337,6 +349,9 @@ export class SessionLog {
         return;
       case "opening":
         this.#openings.set(entry.lead, entry);
+        return;
+      case "applied":
+        this.#openings.clear();
         return;
       case "spent":
         this.#spent.set(entry.turn, entry);

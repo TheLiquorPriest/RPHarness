@@ -20,7 +20,7 @@ import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
-import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
+import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
@@ -31,8 +31,7 @@ import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
 import { answer, type OwnTool, Registry, REPLY_FAMILY, TodoLists, type ToolText, type Words } from "../tools";
-import { skillsIndex } from "../tools/base";
-import { canLoadSkills, openingOf, pinsOf } from "./opening";
+import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { JobsWork } from "../jobs/tool";
@@ -476,7 +475,7 @@ export class Turn {
       }
     }
     if (opening.given.includes("briefing")) {
-      const text = await this.#briefing(guidance, template(briefing), notices, opening, due.map((fired) => fired.text), places);
+      const text = await this.#briefing(guidance, definition, template(contract), template(briefing), notices, opening, due.map((fired) => fired.text), places);
       if (text !== undefined) {
         messages.push(placed(systemMessage(joined([text]), at), "briefing"));
         handed.push("briefing");
@@ -733,7 +732,7 @@ export class Turn {
     const closingText = joined([closing?.render().text ?? ""]);
     return {
       text: block.text,
-      snapshot: snapshot(block.stack),
+      snapshot: block.snapshot,
       ...(block.skills !== "" ? { skills: block.skills } : {}),
       tools: [...definition.tools],
       given: [...definition.given],
@@ -748,22 +747,28 @@ export class Turn {
     };
   }
 
-  /** The list of skills as it stands, when it is no longer what the opening block holds: the notices' line for that, then the list. */
-  async #skillsChanged(guidance: Guidance, notices: PromptPart | undefined, opening: Opening): Promise<string> {
-    const now = await skillsIndex(guidance, canLoadSkills(this.#registry?.hold(opening.tools).tools ?? [], opening.outOfReach));
-    if (now === (opening.skills ?? "")) return "";
-    const line = notices?.format === "lines" ? notices.line("skills_changed", now !== "" ? { listed: true } : {}) : undefined;
-    return joined([line ?? "", now]);
-  }
-
-  /** The briefing (§10.2 block 4), laid out by its template, or undefined when it holds nothing. */
-  async #briefing(guidance: Guidance, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], places: Places): Promise<string | undefined> {
+  /**
+   * The briefing (§10.2 block 4), laid out by its template, or undefined when it holds nothing. What
+   * of the opening block no longer stands is found against the block made now from the files as they
+   * stand, its tools the session's list with their descriptions as they now read (§6.8); its reply
+   * contract is the briefing's `reply_contract`, never the copy the block was made with.
+   */
+  async #briefing(guidance: Guidance, definition: AgentDefinition, contract: TemplatePart | undefined, layout: TemplatePart | undefined, notices: PromptPart | undefined, opening: Opening, due: string[], places: Places): Promise<string | undefined> {
     if (layout === undefined) return undefined;
     const req = this.#req;
     const situations = [...new Set([req.kind, ...req.since.map((item) => item.kind)])];
-    const now = await guidance.stack(req.lead, { situations });
-    const added = joined(now.entries.flatMap((entry) => (entry.where === "briefing" && entry.left === undefined && entry.text !== undefined ? [entry.text] : [])));
-    const changed = joined([changesText(changes(opening.snapshot, now), notices), await this.#skillsChanged(guidance, notices, opening)]);
+    const registry = this.#registry;
+    const block = await openingOf({
+      guidance,
+      agent: req.lead,
+      definition,
+      tools: registry?.hold(opening.tools).tools ?? [],
+      isTool: (name) => registry?.has(name) ?? false,
+      situations,
+      ...(contract !== undefined ? { contract: { part: contract, form: opening.form } } : {}),
+    });
+    const added = joined(block.stack.entries.flatMap((entry) => (entry.where === "briefing" && entry.left === undefined && entry.text !== undefined ? [entry.text] : [])));
+    const changed = changedText(opening, block, notices);
     const rulesDue = joined(due);
     const noticesText = this.#prompt === undefined ? [] : noticeLines(this.#prompt, await promptWords(guidance));
     // The host's parts by name, and by the same name with "-" as "_", as a template names a field.
@@ -786,8 +791,8 @@ export class Turn {
       ...(places.turn !== undefined ? { turn_files: places.turn } : {}),
       // Where the lead writes its intent record itself, whole: in the tag form the record goes in its tag, and this turn's file is the harness's to write.
       ...(opening.form === "two-step" && opening.intentFile !== undefined && places.turn !== undefined ? { intent_path: `${places.turn}${opening.intentFile}` } : {}),
-      // The reply contract again, exactly as the opening block holds it: the template decides whether and where.
-      ...(opening.contract !== undefined ? { reply_contract: opening.contract } : {}),
+      // The reply contract as it stands now, rendered for the session's form: the template decides whether and where.
+      ...(block.contract !== undefined && block.contract !== "" ? { reply_contract: block.contract } : {}),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;

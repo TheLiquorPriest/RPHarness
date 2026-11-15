@@ -141,6 +141,16 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const block = await openingOf({ guidance, agent, definition, tools: definition === undefined ? [] : registry.hold(definition.tools).tools, isTool: (name) => registry.has(name), ...(lead !== undefined && form !== undefined ? { contract: { part: lead, form } } : {}) });
         return block.parts;
       },
+      // "Apply now": the session file's mark puts every lead's block before it out of force, so the
+      // next run of each makes and writes its block afresh, over a restart too; memory lets go of them.
+      // A sub-agent's and a job's agent's blocks are made at each start already.
+      apply: async (scope) => {
+        await book.with(scope, async (file) => {
+          if (file.log.openings().length > 0) file.add({ type: "applied", parent: file.log.leaf });
+          await file.settled();
+        });
+        core.sessions.of(scope).openings.clear();
+      },
     },
 
     models: layer.api,

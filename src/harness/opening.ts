@@ -10,11 +10,12 @@ import { createHash } from "node:crypto";
 import type { Wanted } from "../agents/attachments";
 import { type Given, joined } from "../agents/attachments";
 import type { Log, StackPart } from "../contract";
-import type { AgentDefinition, Fields, Guidance, Stack, StackEntry, TemplatePart } from "../files/api";
+import type { AgentDefinition, Fields, FrontPart, Guidance, PromptPart, Stack, StackEntry, StackSnapshot, TemplatePart } from "../files/api";
+import { changes, changesText, snapshot } from "../files/stack";
 import { SKILL_LOAD, SKILLS_PART, skillsIndex } from "../tools/base/other";
 import type { HeldTool } from "../tools/registry";
 import { TOOL_USE } from "../tools/search";
-import { template } from "./means";
+import { template, toolTextOf } from "./means";
 import type { ReplyFormSetting } from "./settings";
 
 /** The family `skill_load` belongs to, which a definition's `out_of_reach:` may keep from a search. */
@@ -63,8 +64,12 @@ export interface OpeningBlock {
   text: string;
   /** Every part, given or left out: the opening's, then the briefing's (`definitions.stack`). */
   parts: StackPart[];
-  /** The stack as it was read, for the session's snapshot. */
+  /** The stack as it was read: its briefing's parts for the turn's situations. */
   stack: Stack;
+  /** The parts that are compared across a session, each with its text or why it is left out. */
+  front: FrontPart[];
+  /** What it holds, to keep with the session and compare a later block with. */
+  snapshot: StackSnapshot;
   /** The skills' index it holds; empty when it holds none. */
   skills: string;
   /** The reply contract as it holds it (a lead's). */
@@ -97,33 +102,39 @@ export async function openingOf(o: OpeningOf): Promise<OpeningBlock> {
   const stack = await guidance.stack(o.agent, o.situations !== undefined ? { situations: o.situations } : {});
   for (const problem of stack.problems) log?.warn("A file of an agent's stack cannot be used.", { agent: o.agent, path: problem.path, problem: problem.message });
   const parts: StackPart[] = [];
+  const front: FrontPart[] = [];
+  /** A part of the opening, which a later block is compared with. */
+  const fronted = (part: StackPart, layered?: true): void => {
+    parts.push(part);
+    front.push({ part: part.part, path: part.path, level: part.level, ...(layered !== undefined ? { layered } : {}), ...(part.text !== undefined ? { text: part.text } : {}), ...(part.left !== undefined ? { left: part.left } : {}) });
+  };
   for (const entry of stack.entries) {
     if (entry.where !== "opening") continue;
     if (entry.kind !== "definition" || entry.left !== undefined || definition === undefined) {
-      parts.push(partOf(entry, entry.text));
+      fronted(partOf(entry, entry.text), entry.layered);
       continue;
     }
     const rendered = definition.instructions.render(o.fields);
     if (rendered.missing.length > 0) log?.warn("An agent's definition names fields nothing fills.", { agent: definition.name, fields: rendered.missing });
-    parts.push(partOf(entry, rendered.text));
+    fronted(partOf(entry, rendered.text), entry.layered);
   }
   let contract: string | undefined;
   if (o.contract !== undefined) {
     const { part, form } = o.contract;
     contract = joined([part.render({ form: form === "tags" ? { tags: true } : { two_step: true } }).text]);
-    parts.push(filePart("contract", `prompts/${part.name}`, part.source, contract));
+    fronted(filePart("contract", `prompts/${part.name}`, part.source, contract));
   }
   // The guide of each family of the tools it holds, where its file is: how to call them (R-66).
   for (const family of new Set(o.tools.map((tool) => tool.family))) {
     if (o.isTool(family)) continue;
     const guide = template(await guidance.tool(family));
-    if (guide !== undefined) parts.push(filePart("guide", `tools/${family}`, guide.source, guide.render().text));
+    if (guide !== undefined) fronted(filePart("guide", `tools/${family}`, guide.source, guide.render().text));
   }
-  // Each held tool of RPH's own, described by its file: the description as its declaration carries it.
+  // Each held tool of RPH's own, described by its file: the description its declaration carries, as the file has it now.
   for (const tool of o.tools) {
     if (tool.from !== "rph") continue;
     const file = await guidance.tool(tool.name);
-    if (file !== undefined) parts.push(filePart("description", `tools/${tool.name}`, file.source, tool.description));
+    if (file !== undefined) fronted(filePart("description", `tools/${tool.name}`, file.source, toolTextOf(file)?.description ?? tool.description));
   }
   const skills = await skillsIndex(guidance, canLoadSkills(o.tools, definition?.outOfReach ?? []));
   const skillsPart = skills === "" ? undefined : await guidance.part(SKILLS_PART);
@@ -145,7 +156,20 @@ export async function openingOf(o: OpeningOf): Promise<OpeningBlock> {
   }
   for (const entry of stack.entries) if (entry.where === "briefing") parts.push(partOf(entry, entry.text));
   const text = joined(parts.flatMap((part) => (part.where === "opening" && part.kind !== "description" && part.left === undefined && part.text !== undefined ? [part.text] : [])));
-  return { text, parts, stack, skills, ...(contract !== undefined ? { contract } : {}) };
+  return { text, parts, stack, front, snapshot: snapshot(o.agent, front), skills, ...(contract !== undefined ? { contract } : {}) };
+}
+
+/**
+ * What of a block made earlier no longer stands, given the same agent's block made now from the files
+ * as they stand (§5.2, §10.2): each part changed, with its whole current text, or off, in the
+ * `notices` part's `file_changed` and `file_off` lines; then, when the skills' index is another, its
+ * `skills_changed` line and the index as it stands. Empty when all of it stands.
+ */
+export function changedText(made: { snapshot: StackSnapshot; skills?: string }, now: OpeningBlock, notices: PromptPart | undefined): string {
+  const files = changesText(changes(made.snapshot, now.front), notices);
+  if (now.skills === (made.skills ?? "")) return files;
+  const line = notices?.format === "lines" ? notices.line("skills_changed", now.skills !== "" ? { listed: true } : {}) : undefined;
+  return joined([files, line ?? "", now.skills]);
 }
 
 /**

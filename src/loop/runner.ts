@@ -116,6 +116,14 @@ export interface RunnerOptions {
   channel?: TextChannel;
   /** Keeps what its calls are sent, where the user's setting asks for it; none keeps nothing. */
   keep?: KeepRequest;
+  /**
+   * What of its opening block no longer stands, in the words it is told it (§5.2, R-128): asked
+   * before each request once it has made a call. When that is something other than it last said, it
+   * goes into the agent's work as a message, so an agent that goes on past an edit (a job's agent, a
+   * sub-agent continued) is told the file's new text in its next message, as the lead is in its next
+   * briefing.
+   */
+  changed?(): Promise<string>;
 }
 
 export type WorkInput =
@@ -234,6 +242,8 @@ export class AgentRunner {
   readonly #opening: SystemMessage | undefined;
   /** The run's fixed context (`RunnerOptions.context`), as the run's point last left it. */
   readonly #context: AgentMessage[];
+  /** What `changed` last said: the same is not told twice. */
+  #told = "";
   /** The settings decided for the request being prepared, which its call goes out with. */
   #settings: CallSettings = {};
   /** The provider's count of the last request it counted: an estimate of a later request starts from it. */
@@ -447,6 +457,8 @@ export class AgentRunner {
     try {
       const hold = this.#o.trace.hold;
       if (stint !== undefined && hold !== undefined && stint.halt === undefined) await this.#held(stint, hold);
+      const changed = this.#o.changed;
+      if (stint !== undefined && changed !== undefined && stint.halt === undefined && this.#calls > 0) await this.#tellChanged(changed);
       const point = this.#o.point;
       if (stint !== undefined && point !== undefined && stint.halt === undefined) await this.#atPoint(stint, point, undefined);
       const settings = this.#o.settings?.({ agent: this.agent, call: this.#calls + 1, model: this.#o.model.id }) ?? {};
@@ -476,6 +488,14 @@ export class AgentRunner {
       this.#emit(stint, { kind: "said", call, text: words });
       this.#pi.state.messages = [...this.#pi.state.messages, this.#message([this.#o.texts.said?.({ words }) ?? words])];
     }
+  }
+
+  /** What of its opening block no longer stands, when it is news: a message in its work. */
+  async #tellChanged(changed: () => Promise<string>): Promise<void> {
+    const text = await changed();
+    if (text === this.#told) return;
+    this.#told = text;
+    if (text !== "") this.#pi.state.messages = [...this.#pi.state.messages, this.#message([text])];
   }
 
   /** The request as it would go now: the opening block, the run's fixed context, then the agent's own work. */

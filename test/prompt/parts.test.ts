@@ -105,6 +105,12 @@ test("the sign-in line is the one line Anthropic requires at the head of a sign-
   expect(typeof part.header["description"]).toBe("string");
 });
 
+test("the mark of a system message sent in place and the text of a connection's test are there, each with a description beside it", async () => {
+  expect((await template("system-note")).render({ text: "The tide turns." }).text.trimEnd()).toBe("System note:\nThe tide turns.");
+  expect((await template("connection-test")).render().text.trim()).toBe("Reply with one word: ready.");
+  for (const name of ["system-note", "connection-test"]) expect({ name, described: typeof (await template(name)).header["description"] }).toEqual({ name, described: "string" });
+});
+
 test("tools offered as text: the way to call one, each tool with what it takes, a later change, one of its own calls and what its calls answered", async () => {
   const part = await template("tools-as-text");
   const lookup = { name: "lookup", description: "Looks a thing up.", parameters: '{"type":"object"}' };

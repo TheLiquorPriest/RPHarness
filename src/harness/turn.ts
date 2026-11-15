@@ -205,7 +205,7 @@ export class Turn {
     // Each run of the turn (its first, a continue, a "Settle now") has an id of its own, so its records are told apart by this id; the turn stays in their scope.
     this.run = core.ids();
     this.scope = req.scope;
-    this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock);
+    this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock, core.hub.hold(this.run));
     this.#trace.watch((record) => this.#watch(record));
     this.#lead = { id: core.ids(), definition: req.lead };
     const files = core.env.files;

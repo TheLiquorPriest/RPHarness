@@ -6,4 +6,4 @@ export { type Fit, fit, type Misfit } from "./fit";
 export type { Finished, Fired, Judged, Judgment, QuestionRules, RunEndMoment, RunEndRules, StreamFired, StreamRules, Written } from "./rules";
 export { AgentRunner, CLOSING, isClosing, type RunnerOptions, type RunnerTexts, type Work, type WorkInput, type WorkOptions } from "./runner";
 export { type ParentCall, RunTrace } from "./trace";
-export type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, ToolGate } from "./types";
+export type { AgentLimits, AgentOutcome, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, RunHold, ToolGate } from "./types";

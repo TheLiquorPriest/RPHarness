@@ -144,6 +144,20 @@ export interface RequestPoint {
   check(request: PendingRequest): Promise<readonly RequestSpan[] | undefined> | readonly RequestSpan[] | undefined;
 }
 
+/**
+ * The owner's hand on a run (§14 Live, C-19), the same for every agent of it. A run that is held
+ * makes no further request until it is let go; what the owner said goes to its main agent at its
+ * next request, as his words. The runner asks at the point before each request. None: nothing waits.
+ */
+export interface RunHold {
+  /** Whether the run is held now. */
+  readonly held: boolean;
+  /** Settles once the run is not held, at once where it is not; settles too when `signal` aborts. */
+  until(signal: AbortSignal): Promise<void>;
+  /** What the owner said to this agent since it last asked, in the order he said it, taken out: only the run's main agent is given any. */
+  said(agent: AgentRef): string[];
+}
+
 /** A request about to go out, as the run's point is shown it. */
 export interface PendingRequest {
   agent: AgentRef;

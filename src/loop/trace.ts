@@ -2,7 +2,7 @@
 // writer, so records are numbered from 1 with no gap across all of them, and each carries the agent
 // and the run it belongs to.
 import type { AgentRef, Scope, TraceEvent, TracePort, TraceRecord } from "../contract";
-import type { LoopClock } from "./types";
+import type { LoopClock, RunHold } from "./types";
 
 /** The agent, run and tool call that started or continued a sub-agent's work. */
 export type ParentCall = NonNullable<TraceRecord["parent"]>;
@@ -12,14 +12,17 @@ export class RunTrace {
   readonly scope: Scope;
   readonly run: string;
   readonly clock: LoopClock;
+  /** The owner's hand on the run, which every agent of it asks before each request. */
+  readonly hold: RunHold | undefined;
   readonly #watchers: ((record: TraceRecord) => void)[] = [];
   #seq = 0;
 
-  constructor(port: TracePort, scope: Scope, run: string, clock: LoopClock) {
+  constructor(port: TracePort, scope: Scope, run: string, clock: LoopClock, hold?: RunHold) {
     this.port = port;
     this.scope = scope;
     this.run = run;
     this.clock = clock;
+    this.hold = hold;
   }
 
   /** Also gives every record to `watcher`, after the port: the progress clock follows what agents do. */

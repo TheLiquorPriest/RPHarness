@@ -34,7 +34,7 @@ import type { TextChannel } from "./channel";
 import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
 import { fit, type Misfit } from "./fit";
 import type { ParentCall, RunTrace } from "./trace";
-import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, PendingRequest, RequestPoint, RequestSpan, ToolGate } from "./types";
+import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, PendingRequest, RequestPoint, RequestSpan, RunHold, ToolGate } from "./types";
 
 /** The argument RPH adds to every tool (§10.7, Appendix A): the agent marks a call that needs no answer. */
 export const CLOSING = "closing";
@@ -63,6 +63,8 @@ export interface RunnerTexts {
   failed?(fields: { tool: string }): string | undefined;
   /** The answer to a call the work stopped before it finished (a stop, or a limit), kept so the agent can be continued: it may have done its work, or not. */
   unfinished?(fields: { tool: string }): string | undefined;
+  /** What the owner said to the run's main agent, as the agent is given it: his words marked as his. Absent, the words go in bare. */
+  said?(fields: { words: string }): string | undefined;
 }
 
 export interface RunnerOptions {
@@ -429,6 +431,8 @@ export class AgentRunner {
   async #prepare(): Promise<AgentRequestUpdate> {
     const stint = this.#stint;
     try {
+      const hold = this.#o.trace.hold;
+      if (stint !== undefined && hold !== undefined && stint.halt === undefined) await this.#held(stint, hold);
       const point = this.#o.point;
       if (stint !== undefined && point !== undefined && stint.halt === undefined) await this.#atPoint(stint, point, undefined);
       const settings = this.#o.settings?.({ agent: this.agent, call: this.#calls + 1, model: this.#o.model.id }) ?? {};
@@ -437,6 +441,26 @@ export class AgentRunner {
     } catch (error) {
       if (stint !== undefined) stint.failure = error instanceof Error ? error.message : String(error);
       throw error;
+    }
+  }
+
+  /**
+   * The owner's hand on the run (§14, C-19), before each request: the agent waits here while the run
+   * is held, and takes in what the owner said to it as his words. A stop ends the wait and the work
+   * with it.
+   */
+  async #held(stint: Stint, hold: RunHold): Promise<void> {
+    const call = this.#calls + 1;
+    if (hold.held) {
+      const since = this.#clock.now();
+      this.#emit(stint, { kind: "paused", call });
+      await hold.until(stint.stopped.signal);
+      if (stint.halt !== undefined) return;
+      this.#emit(stint, { kind: "resumed", call, ms: this.#clock.now() - since });
+    }
+    for (const words of hold.said(this.agent)) {
+      this.#emit(stint, { kind: "said", call, text: words });
+      this.#pi.state.messages = [...this.#pi.state.messages, this.#message([this.#o.texts.said?.({ words }) ?? words])];
     }
   }
 

@@ -114,6 +114,12 @@ export type TraceEvent =
   | { kind: "todo"; items: TodoItem[] }
   /** A limit was reached (§10.11). */
   | { kind: "limit"; hit: LimitHit }
+  /** The owner held the run (§14, C-19): this agent waits, before its call number `call`'s request, until the run is let go. */
+  | { kind: "paused"; call: number }
+  /** The run was let go: this agent's call number `call` goes out, after `ms` of waiting. */
+  | { kind: "resumed"; call: number; ms: number }
+  /** The owner said something to the run's main agent (§14): it hears `text` at call number `call`, as his words. */
+  | { kind: "said"; call: number; text: string }
   /** The reply was released (§10.7). */
   | { kind: "released"; release: Release }
   /**

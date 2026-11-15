@@ -44,6 +44,7 @@ export function runnerTexts(words: Words, goOn: TemplatePart | undefined, closin
     cutShort: (fields) => words("cut_short", fields),
     failed: (fields) => words("failed", fields),
     unfinished: (fields) => words("unfinished", fields),
+    said: (fields) => words("said", fields),
   };
 }
 

@@ -7,8 +7,12 @@
 // that has not taken more of a run's items than that run's setting `live.backlog` allows is cut
 // off: logged, dropped, and told how far behind it was (C29). Each run hands `tee` the setting as it
 // read it, so a listener following a turn and a job at once is held to each run's own for that
-// run's items, and a change to the setting is taken by the next run.
+// run's items, and a change to the setting is taken by the next run. The owner's hand on each run
+// going on is here too (C-19): he pauses a run of his, lets it go, or says something to its main
+// agent, and every runner of the run asks the run's hold before each request.
 import type { AgentRef, JsonValue, LiveApi, LiveFilter, LiveItem, Log, RunView, Scope, TracePort } from "../contract";
+import { Holds } from "../jobs/hold";
+import type { RunHold } from "../loop";
 import { TRACE } from "./settings/trace";
 
 export interface LiveHubOptions {
@@ -38,7 +42,9 @@ interface Subscriber {
 }
 
 export class LiveHub implements LiveApi {
-  readonly #runs = new Map<string, RunView>();
+  readonly #runs = new Map<string, Omit<RunView, "held">>();
+  /** The owner's hand on each run going on (C-19). */
+  readonly holds = new Holds();
   readonly #subscribers = new Set<Subscriber>();
   readonly #log: Log | undefined;
 
@@ -67,17 +73,39 @@ export class LiveHub implements LiveApi {
   }
 
   /** A run began. */
-  started(view: RunView): void {
+  started(view: Omit<RunView, "held">): void {
     this.#runs.set(view.run, { ...view, agents: [...view.agents] });
   }
 
   /** A run ended. */
   ended(run: string): void {
     this.#runs.delete(run);
+    this.holds.close(run);
   }
 
   running(user: string): RunView[] {
-    return [...this.#runs.values()].filter((view) => view.scope.user === user).map((view) => ({ ...view, agents: [...view.agents] }));
+    return [...this.#runs.values()].filter((view) => view.scope.user === user).map((view) => ({ ...view, agents: [...view.agents], held: this.holds.held(view.run) }));
+  }
+
+  /** The owner's hand on a run, for the runners that work in it. */
+  hold(run: string): RunHold {
+    return this.holds.of(run);
+  }
+
+  pause(user: string, run: string): boolean {
+    return this.#owns(user, run) && this.holds.add(run, "paused");
+  }
+
+  letGo(user: string, run: string): boolean {
+    return this.#owns(user, run) && this.holds.drop(run, "paused");
+  }
+
+  say(user: string, run: string, words: string): boolean {
+    return this.#owns(user, run) && this.holds.say(run, words);
+  }
+
+  #owns(user: string, run: string): boolean {
+    return this.#runs.get(run)?.scope.user === user;
   }
 
   subscribe(filter: LiveFilter, listener: (item: LiveItem) => unknown): () => void {
@@ -92,6 +120,7 @@ export class LiveHub implements LiveApi {
   }
 
   #joined(run: string, agent: AgentRef): void {
+    this.holds.joined(run, agent);
     const view = this.#runs.get(run);
     if (view !== undefined && !view.agents.some((known) => known.id === agent.id)) view.agents.push(agent);
   }

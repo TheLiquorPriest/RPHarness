@@ -19,9 +19,10 @@ import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists,
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import { SEARCH_TOOLS, searchTools, TOOL_USE } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "./tool";
+import { JOB_SEARCHED, jobTools } from "./tools";
 
 /** RPH's own tools a job's agents may hold, each described by its file in `.tools/`. */
-const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START] as const;
+const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED] as const;
 
 /** A gate that tells `ran` of each call it answered after the tool ran: the call, and its answer. */
 function noting(inner: ToolGate, ran: (call: GateCall, result: LoopToolResult) => void): ToolGate {
@@ -232,6 +233,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     agentMessage(team, own.get("agent_message")),
     agentDrop(team, own.get("agent_drop")),
     jobStart(core.jobs, own.get(JOB_START), settings.jobs.perRun),
+    ...jobTools(core.jobs, own, settings.perCall),
     ...baseTools({ env, guidance, texts: own, ids: () => core.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
     ...searchTools({
       reach: {

@@ -25,7 +25,7 @@ import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/s
 import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
 import { type JobAsk, type JobCore, type PreparedJob, prepareJob } from "./run";
-import type { JobsWork, RunJobs } from "./tool";
+import type { JobCall, JobsWork, RunJobs } from "./tool";
 
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
 const LINES_PART = "jobs";
@@ -41,6 +41,9 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The states a job is still under way in: a restart finds a running or asking one interrupted, and one that only waited (held or not) waiting again. */
 const UNDER_WAY: readonly JobState[] = ["queued", "held", "running", "asking"];
+
+/** The states a job may be started again from, by the owner or by an agent: it did not end by itself. */
+const AGAIN: readonly JobState[] = ["interrupted", "failed", "cancelled"];
 
 /** A job of this process, waiting for its place or running. */
 interface Live {
@@ -134,9 +137,12 @@ export class Jobs implements JobsApi, JobsWork {
   /**
    * `job_start`: a job tied to the caller's turn, in a session of its own, counted among the jobs of
    * the caller's run (`run`), and for a caller that is a job's agent, against that job's run too; the
-   * answer says what became of it, and names what its agent was not given.
+   * answer says what became of it, and names what its agent was not given. A call that names an
+   * earlier job of the chat that was interrupted, failed or cancelled starts it again, with its
+   * agent, brief, attachments and limits where the call gives none of its own: through this same
+   * path, so an agent's limits hold, and never the owner's start again, which only his presses call.
    */
-  async startFor(call: DelegateCall, ctx: ToolCtx, run: RunJobs): Promise<LoopToolResult> {
+  async startFor(call: JobCall, ctx: ToolCtx, run: RunJobs): Promise<LoopToolResult> {
     const { scope } = ctx;
     // Its place among the run's jobs is taken before anything is awaited, so the calls of one step
     // cannot pass the limit together; a call that starts nothing gives it back.
@@ -147,7 +153,34 @@ export class Jobs implements JobsApi, JobsWork {
     const starter = ctx.agent.job === undefined ? undefined : this.#live.get(ctx.agent.job);
     let begun: Begun;
     try {
-      begun = await this.#begin({ scope: { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, call, by: ctx.agent, parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId }, ...(starter !== undefined ? { over: starter.prepared.budget } : {}) });
+      const { repeats, ...delegate } = call;
+      let asked: DelegateCall = delegate;
+      let limits: JobLimits | undefined;
+      if (repeats !== undefined) {
+        const earlier = await this.get(scope.user, repeats);
+        if (earlier === undefined || earlier.scope.chat !== scope.chat) {
+          run.started -= 1;
+          return answer(part?.line("no_job", { id: repeats }), true);
+        }
+        if (!AGAIN.includes(earlier.state)) {
+          run.started -= 1;
+          return answer(part?.line("not_again", { id: earlier.id, state: earlier.state }), true);
+        }
+        asked = { ...delegate, agent: delegate.agent !== "" ? delegate.agent : earlier.agent, brief: delegate.brief !== "" ? delegate.brief : earlier.brief, attach: delegate.attach.length > 0 ? delegate.attach : (earlier.attach ?? []) };
+        limits = earlier.limits;
+      } else if (call.agent === "" || call.brief === "") {
+        run.started -= 1;
+        return answer(part?.line("no_task"), true);
+      }
+      begun = await this.#begin({
+        scope: { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) },
+        call: asked,
+        by: ctx.agent,
+        parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId },
+        ...(limits !== undefined ? { limits } : {}),
+        ...(repeats !== undefined ? { repeats } : {}),
+        ...(starter !== undefined ? { over: starter.prepared.budget } : {}),
+      });
     } catch (error) {
       run.started -= 1;
       throw error;
@@ -169,6 +202,53 @@ export class Jobs implements JobsApi, JobsWork {
       return line === undefined ? [] : [line];
     });
     return reports.length > 0 ? { ...started, reports } : started;
+  }
+
+  /** `job_list`: the jobs of the caller's chat, the latest started first, one line each, at most `most` of them. */
+  async listFor(ctx: ToolCtx, most: number): Promise<LoopToolResult> {
+    const { scope } = ctx;
+    const part = lines(await loadGuidance(this.#core.env.files, scope).part(LINES_PART));
+    const page = await this.list({ user: scope.user, chat: scope.chat, limit: most });
+    if (page.jobs.length === 0) return answer(part?.line("none"));
+    const rows = page.jobs.flatMap((job) => {
+      const line = part?.line("listed", { id: job.id, agent: job.agent, state: job.state, brief: (job.brief.split("\n")[0] ?? "").trim(), ...(job.repeats !== undefined ? { repeats: job.repeats } : {}) });
+      return line === undefined ? [] : [line];
+    });
+    const more = page.next === undefined ? undefined : part?.line("more", { count: page.jobs.length });
+    const text = [...rows, ...(more === undefined ? [] : [more])].join("\n");
+    return answer(text === "" ? undefined : text);
+  }
+
+  /** `job_read`: one job of the caller's chat, its brief and its report whole. */
+  async readFor(ctx: ToolCtx, id: string): Promise<LoopToolResult> {
+    const { scope } = ctx;
+    const part = lines(await loadGuidance(this.#core.env.files, scope).part(LINES_PART));
+    const job = await this.get(scope.user, id);
+    if (job === undefined || job.scope.chat !== scope.chat) return answer(part?.line("no_job", { id }), true);
+    const report = job.report !== undefined && job.report.trim() !== "" ? part?.line("report", { report: job.report }) : part?.line("no_report");
+    const rows = [
+      part?.line("read", { id: job.id, agent: job.agent, state: job.state, ...(job.repeats !== undefined ? { repeats: job.repeats } : {}), ...(job.limit !== undefined ? { limit: job.limit.limit } : {}) }),
+      part?.line("brief", { brief: job.brief }),
+      ...(job.missing ?? []).map((ref) => part?.line("missing", { agent: job.agent, ref })),
+      report,
+    ].flatMap((line) => (line === undefined ? [] : [line]));
+    return answer(rows.length === 0 ? undefined : rows.join("\n"));
+  }
+
+  /**
+   * `job_cancel`: stops a job of the caller's chat that an agent started. One the player started is
+   * his to stop, and one that has ended is told so; neither is touched.
+   */
+  async cancelFor(ctx: ToolCtx, id: string): Promise<LoopToolResult> {
+    const { scope } = ctx;
+    const part = lines(await loadGuidance(this.#core.env.files, scope).part(LINES_PART));
+    const job = await this.get(scope.user, id);
+    if (job === undefined || job.scope.chat !== scope.chat) return answer(part?.line("no_job", { id }), true);
+    if (job.startedBy === "user") return answer(part?.line("not_yours", { id }), true);
+    const live = this.#live.get(id);
+    if (live === undefined || live.view.scope.user !== scope.user) return answer(part?.line("cancel_ended", { id, state: job.state }));
+    const ended = await this.#stop(live, "cancelled");
+    return answer(part?.line(ended.state === "cancelled" ? "cancelled" : "cancel_ended", { id, state: ended.state }));
   }
 
   // ---------------------------------------------------------------- the Jobs page (`JobsApi`)
@@ -268,8 +348,7 @@ export class Jobs implements JobsApi, JobsWork {
   async again(user: string, id: string): Promise<JobView | JobRefusal> {
     const old = await this.get(user, id);
     if (old === undefined) return { refused: "no-job", id };
-    const applies: JobState[] = ["interrupted", "failed", "cancelled"];
-    if (!applies.includes(old.state)) return { refused: "state", id, state: old.state, applies };
+    if (!AGAIN.includes(old.state)) return { refused: "state", id, state: old.state, applies: [...AGAIN] };
     const begun = await this.#begin({ scope: { user, chat: old.scope.chat, session: this.#core.ids() }, call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
     return this.#started(begun, old.agent);
   }

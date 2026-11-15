@@ -420,12 +420,13 @@ export interface Harness {
   turnShown(scope: Scope): Promise<void>;
   /**
    * The user talks with an agent (the assistant, or one kept alive past the reply, §13.4); its answer goes to `sink`.
-   * `talk`, `jobs` and `sessions` are absent until the harness has them: a host asks whether each is
-   * there and offers what depends on it only then. Nothing stands in for a missing one.
+   * `talk` is absent until the harness has it: a host asks whether it is there and offers what
+   * depends on it only then. Nothing stands in for a missing one.
    */
   talk?(scope: Scope, agent: string, message: string, sink: ReplySink, signal?: AbortSignal): Promise<void>;
-  jobs?: JobsApi;
-  sessions?: SessionsApi;
+  /** Jobs and sessions are always there (Appendix A): a host offers them without asking. */
+  jobs: JobsApi;
+  sessions: SessionsApi;
   rules: RulesApi;
   live: LiveApi;
   usage: UsageApi;

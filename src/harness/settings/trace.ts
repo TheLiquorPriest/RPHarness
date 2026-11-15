@@ -11,7 +11,7 @@ export const TRACE = worded(
     requests: { key: "trace.requests", takes: { type: "oneOf", values: ["first", "all", "none"] }, default: "first", perConnection: false, at: "requests" },
     // Appendix D.1's 50 turn folders kept whole per chat (§5.5): a turn older than that is compared with none.
     promptKept: { key: "prompt.kept", takes: { type: "whole", least: 1 }, default: 50, perConnection: false, at: "promptKept" },
-    // A page that has not taken this many of one run's items is cut off and told so (§5.6), so no run waits on it; each run reads it for itself.
+    // A page that has left more of one run's items untaken than this is cut off and told so (§14, the live view), so no run waits on it; each run reads it for itself.
     liveBacklog: { key: "live.backlog", takes: { type: "whole", least: 1 }, default: 5000, perConnection: false, at: "liveBacklog" },
   },
   TRACE_WORDS,

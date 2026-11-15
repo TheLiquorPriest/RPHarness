@@ -1,9 +1,10 @@
 // The kit's cases for the file port (§5, §5.1): layers in load order, exact reads, finding, the
-// three kinds, writes where agents may write, and refusal of everything else, which changes nothing.
+// three kinds, writes where agents may write, and refusal of everything else, which changes nothing;
+// and a read that names no chat, which sees the levels every chat shares alone.
 
 import { randomUUID } from "node:crypto";
 import { expect, test } from "bun:test";
-import type { AgentRef, FileOp, LayerLevel } from "../../contract/index";
+import type { AgentRef, FileOp, LayerLevel, UserScope, Writer } from "../../contract/index";
 import type { KitContext } from "./context";
 import { hitsOf, KIT_OTHER_USER, landed, mountOf, sha256, unlessRefused, viewPicture } from "./context";
 
@@ -225,6 +226,49 @@ export function fileCases(ctx: KitContext<"files">): void {
     }
     const found = await unlessRefused(ctx.env.files.find(foreign, { by: "grep", pattern: chatOnlyLine(ctx), literal: true }));
     if (Array.isArray(found)) leaks.push(...found.map((h) => h.path));
+    expect(leaks).toEqual([]);
+  });
+
+  test("a read that names no chat sees the shipped and global levels and no character's or chat's file, and a write so named is refused", async () => {
+    const user: UserScope = { user: ctx.scope.user };
+    const chatLayers = await ctx.env.files.layers(ctx.scope);
+    const layers = await ctx.env.files.layers(user);
+    // The two levels every chat shares, as a chat's scope has them, mounts and all.
+    expect(layers).toEqual(chatLayers.filter((l) => l.level === "shipped" || l.level === "global"));
+    for (const f of ctx.seed.files) {
+      const path = mountOf(chatLayers, f.level) + f.path;
+      const read = await ctx.env.files.read(user, path);
+      if (f.level === "shipped" || f.level === "global") expect({ path, read }).toMatchObject({ path, read: { status: "read", text: f.text, level: f.level } });
+      else expect({ path, read }).toEqual({ path, read: { status: "refused", path, reason: "outside", writable: [] } });
+    }
+    // A find under a shared level's mount finds that level's files alone; the root and a character's mount are outside the view.
+    const line = chatOnlyLine(ctx);
+    for (const layer of layers) {
+      const all = hitsOf(await ctx.env.files.find(user, { by: "glob", pattern: "**/*", path: layer.mount }));
+      expect({ level: layer.level, others: all.filter((h) => h.level !== layer.level).map((h) => h.path) }).toEqual({ level: layer.level, others: [] });
+      expect({ level: layer.level, found: hitsOf(await ctx.env.files.find(user, { by: "grep", pattern: line, literal: true, path: layer.mount })).map((h) => h.path) }).toEqual({ level: layer.level, found: [] });
+    }
+    for (const path of ["", "AGENTS.md", "persistent-workspace/", mountOf(chatLayers, "character")]) {
+      expect({ path, found: await ctx.env.files.find(user, { by: "list", path }) }).toMatchObject({ path, found: { status: "refused", reason: "outside", writable: [] } });
+    }
+    // A write so named is refused wherever it points, by an agent or by RPH itself, and changes nothing.
+    const places = await ctx.env.files.places(ctx.scope);
+    const before = await viewPicture(ctx.env.files, ctx.scope);
+    const writers: Writer[] = [KIT_AGENT, "harness"];
+    const paths = [`${places.notes}kit-shared.md`, `${places.session}kit-shared.md`, `${mountOf(layers, "global")}kit-shared.md`, `${mountOf(layers, "global")}ALL-AGENTS.md`, `${mountOf(layers, "shipped")}TURN.md`];
+    for (const path of paths) {
+      for (const by of writers) {
+        const result = await ctx.env.files.write(user, path, { op: "write", text: "overwritten\n" }, by);
+        expect({ path, by, result }).toMatchObject({ path, by, result: { status: "refused", writable: [] } });
+      }
+    }
+    expect(await viewPicture(ctx.env.files, ctx.scope)).toEqual(before);
+    // Another user's such read sees none of this user's global files.
+    const leaks: string[] = [];
+    for (const f of ctx.seed.files.filter((f) => f.level === "global")) {
+      const read = await unlessRefused(ctx.env.files.read({ user: KIT_OTHER_USER }, mountOf(layers, "global") + f.path));
+      if (read?.status === "read" && read.text === f.text) leaks.push(f.path);
+    }
     expect(leaks).toEqual([]);
   });
 }

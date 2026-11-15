@@ -7,8 +7,12 @@
 // root. The global, character and shipped levels appear under their layer's `mount`. The host
 // normalizes every path before it acts on it; one that leaves the view, or that passes through a
 // link, is refused (§5.1: "paths are normalized and links are not followed").
+//
+// A read with no chat in view (a connection's test, a sign-in, a request passed through) names only
+// the user (`UserScope`): its view is the two levels every chat shares, shipped then global, under
+// their mounts, and nothing of a character's or a chat's; it writes nowhere.
 
-import type { AgentRef, Scope } from "./common";
+import type { AgentRef, Scope, UserScope } from "./common";
 
 /** A level of the tree, farthest first: shipped < global < character < chat (§5.2). The nearer level wins a conflict. */
 export type LayerLevel = "shipped" | "global" | "character" | "chat";
@@ -210,22 +214,31 @@ export interface Unapplied {
 }
 
 export interface FilesPort {
-  /** The levels in load order, farthest first: shipped < global < character < chat (§5.2). The chat level is always there, with mount `""`. */
-  layers(scope: Scope): Promise<Layer[]>;
+  /**
+   * The levels in load order, farthest first: shipped < global < character < chat (§5.2). The chat
+   * level is always there, with mount `""`. For a scope that names only the user, the two levels
+   * every chat shares, shipped then global, under the same mounts, and no other.
+   */
+  layers(scope: Scope | UserScope): Promise<Layer[]>;
   /** The chat's notes, session and turn folders, and where agents of this scope may write. */
   places(scope: Scope): Promise<Places>;
-  /** Reads a file, or the lines `range` names. */
-  read(scope: Scope, path: string, range?: Range): Promise<FileRead>;
+  /**
+   * Reads a file, or the lines `range` names. With a scope that names only the user, a path at a
+   * character's or a chat's level (the root among them) is refused as `outside`, `writable` empty.
+   */
+  read(scope: Scope | UserScope, path: string, range?: Range): Promise<FileRead>;
   /**
    * Lists a folder, matches paths by a glob, or finds lines by a pattern. Hits come in the order of
    * their paths, a folder's path read with "/" after it. Links are never followed. A `path` that
-   * leaves the view is refused. An invalid `pattern` rejects with a `SyntaxError`.
+   * leaves the view is refused; with a scope that names only the user, so is one at a character's or
+   * a chat's level, the root among them. An invalid `pattern` rejects with a `SyntaxError`.
    */
-  find(scope: Scope, query: FileQuery): Promise<FileHit[] | Refused>;
+  find(scope: Scope | UserScope, query: FileQuery): Promise<FileHit[] | Refused>;
   /**
    * Changes one file. A place this writer may not write is `Refused`, and nothing changes (§5.1).
    * Every write of an agent is recorded against `scope.turn` where there is one (§5.1: "notes
-   * follow the turn"), so a swipe or a delete puts it back.
+   * follow the turn"), so a swipe or a delete puts it back. A scope that names only the user writes
+   * nowhere: every write so named is refused, `writable` empty.
    */
-  write(scope: Scope, path: string, op: FileOp, by: Writer): Promise<Written | Refused | Unapplied>;
+  write(scope: Scope | UserScope, path: string, op: FileOp, by: Writer): Promise<Written | Refused | Unapplied>;
 }

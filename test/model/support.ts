@@ -5,8 +5,9 @@
 
 import type { AssistantMessage, Message, Provider, SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
-import type { ConnectionsDoc, ModelsPort, SecretsDoc, UserScope } from "../../src/contract";
-import type { AgentModel, ModelLayer, ModelWait } from "../../src/model";
+import type { ConnectionsDoc, FilesPort, Layer, Log, ModelsPort, SecretsDoc, UserScope } from "../../src/contract";
+import { readModelSettings } from "../../src/harness/settings";
+import type { AgentModel, ModelLayer } from "../../src/model";
 import { createModelLayer } from "../../src/model";
 import { FakeClock } from "../../src/testing/rig";
 
@@ -187,6 +188,39 @@ export class MemoryStore implements ModelsPort {
   }
 }
 
+/** The config files the rig's settings are read from, as YAML, changed as a test goes: the global level's, and each chat's by its id. */
+export interface Configs {
+  global: string;
+  chats: Record<string, string>;
+}
+
+/** The global level's config file and a chat's, in the agents' view. */
+const GLOBAL_CONFIG = "@global/config.yml";
+const CHAT_CONFIG = "config.yml";
+
+/** A host's file port over the config files alone: a scope that names a chat has the chat's level too; one that names only the user, the shipped and global levels. */
+export function configFiles(configs: Configs): FilesPort {
+  const shared: Layer[] = [
+    { level: "shipped", mount: "@shipped/", folders: {} },
+    { level: "global", mount: "@global/", folders: {}, config: CHAT_CONFIG },
+  ];
+  const elsewhere = (): never => {
+    throw new Error("The model layer's settings are read from the levels and their config files alone.");
+  };
+  return {
+    layers: async (scope) => ("chat" in scope ? [...shared, { level: "chat", mount: "", folders: {}, config: CHAT_CONFIG }] : shared),
+    read: async (scope, path) => {
+      const text = path === GLOBAL_CONFIG ? configs.global : path === CHAT_CONFIG && "chat" in scope ? configs.chats[scope.chat] : undefined;
+      if (text === undefined) return "chat" in scope || path === GLOBAL_CONFIG ? { status: "missing", path } : { status: "refused", path, reason: "outside", writable: [] };
+      const lines = text.split("\n").length;
+      return { status: "read", path, level: path === GLOBAL_CONFIG ? "global" : "chat", kind: "yours", text, start: 1, end: lines, lines, bytes: Buffer.byteLength(text), hash: new Bun.CryptoHasher("sha256").update(text).digest("hex"), modified: 0 };
+    },
+    places: elsewhere,
+    find: elsewhere,
+    write: elsewhere,
+  };
+}
+
 export interface RigOptions {
   script?: Script;
   /** A fetch of the test's own in place of the scripted one. */
@@ -195,10 +229,10 @@ export interface RigOptions {
   /** The store to read: a new empty one when not given. */
   store?: MemoryStore;
   env?: Record<string, string | undefined>;
-  silentMs?: number;
-  askMs?: number;
-  signInMs?: number;
-  settingWords?: (wait: ModelWait) => string;
+  /** The global config file's text: none when not given, so every setting is at its default. */
+  global?: string;
+  /** Each chat's config file's text, by the chat's id. */
+  chats?: Record<string, string>;
   markNote?: (text: string) => string;
 }
 
@@ -208,6 +242,10 @@ export interface Rig {
   sent: Sent[];
   clock: FakeClock;
   logs: string[];
+  /** The config files the settings are read from: a change holds from the layer's next read. */
+  configs: Configs;
+  /** What reading the settings logged. */
+  settingsLog: string[];
   done(): Promise<void>;
 }
 
@@ -216,12 +254,19 @@ export const TEST_PROMPT = "Answer with one word.";
 /** The installation id the rig's layers make for OpenAI's sign-in. */
 export const DEVICE = "0f8e6a52-1c3b-4d7a-9e2f-5b6c7d8e9f01";
 
-/** A model layer over a store of its own, its HTTP scripted, its ids counted, its clock and its timers the rig's. */
+/** A model layer over a store of its own, its HTTP scripted, its ids counted, its clock and its timers the rig's, its settings read from config files the test writes. */
 export function rig(options: RigOptions = {}): Rig {
   const store = options.store ?? new MemoryStore();
   const { fetch, sent } = scriptedFetch(options.script ?? (() => failed(500, { error: { message: "nothing scripted" } })));
   const clock = new FakeClock(1_000_000);
   const logs: string[] = [];
+  const settingsLog: string[] = [];
+  const configs: Configs = { global: options.global ?? "", chats: { ...options.chats } };
+  const files = configFiles(configs);
+  const said = (message: string): void => {
+    settingsLog.push(message);
+  };
+  const log: Log = { debug: said, info: said, warn: said, error: said };
   let ids = 0;
   const layer = createModelLayer({
     store,
@@ -235,14 +280,11 @@ export function rig(options: RigOptions = {}): Rig {
     appName: "Harbour Tales",
     testPrompt: async () => TEST_PROMPT,
     env: options.env ?? {},
+    settings: (scope) => readModelSettings(files, scope, log),
     ...(options.providers ? { providers: options.providers } : {}),
-    ...(options.silentMs !== undefined ? { silentMs: () => options.silentMs ?? 0 } : {}),
-    ...(options.askMs !== undefined ? { askMs: () => options.askMs ?? 0 } : {}),
-    ...(options.signInMs !== undefined ? { signInMs: () => options.signInMs ?? 0 } : {}),
-    ...(options.settingWords ? { settingWords: options.settingWords } : {}),
     ...(options.markNote ? { markNote: options.markNote } : {}),
   });
-  return { layer, store, sent, clock, logs, done: () => layer.close() };
+  return { layer, store, sent, clock, logs, configs, settingsLog, done: () => layer.close() };
 }
 
 /** A signal that never ends. */

@@ -13,6 +13,7 @@ import type { FilesPort, GapQuery, JsonObject, JsonValue, Layer, Log, Scope, Sea
 import { loadGuidance } from "../../src/files";
 import { DEFAULT_SETTINGS, formFor, GROUPS, jobCountsFor, listOf, readSettings, readSettingsOf, type Settings, SettingsRead } from "../../src/harness/settings";
 import { type Group, type SettingEntry, type SettingWords, worded } from "../../src/harness/settings/entry";
+import { MODELS } from "../../src/harness/settings/models";
 import type { BaseToolsDeps } from "../../src/tools/base";
 import { toolSearch, type ToolSearchDeps } from "../../src/tools/search";
 import { bench as baseBench } from "../tools/base/support";
@@ -191,7 +192,17 @@ const LANDED: Readonly<Record<string, string>> = {
   "jobs.run.tokensIn": "jobs.run.tokensIn",
   "jobs.run.tokensOut": "jobs.run.tokensOut",
   "jobs.run.time": "jobs.run.time ms",
-  "effort.connections.<connection>": "efforts.<connection>",
+  "calls.silentAfter": "calls.silentAfter ms",
+  "calls.providerWait": "calls.providerWait ms",
+  "calls.signInOpen": "calls.signInOpen ms",
+  "calls.testRoom": "calls.testRoom",
+  "calls.listMost": "calls.listMost",
+  "calls.quoted": "calls.quoted",
+  "calls.signInWordsKept": "calls.signInWordsKept ms",
+  "calls.wordsMost": "calls.wordsMost",
+  "calls.retryWait": "calls.retryWait ms",
+  "calls.retries": "calls.retries",
+  "calls.cacheRetention": "calls.cacheRetention",
   "reply.form": "form",
   "reply.forms.<connection>": "forms.<connection>",
   "reply.streamAnyway": "streamAnyway",
@@ -484,6 +495,23 @@ test("every line of each words file, but the two that open and close its list, i
   }
   // One line for each listed setting, in all the files.
   expect(keys.sort()).toEqual([...listed.keys()].sort());
+});
+
+test("every setting name the model layer's words use is the name of a listed setting", async () => {
+  const folder = join(import.meta.dir, "../../src/model");
+  const named: string[] = [];
+  for (const file of new Bun.Glob("**/*.ts").scanSync(folder)) {
+    const text = await Bun.file(join(folder, file)).text();
+    // No setting is named in words written out in the layer: each is named through its entry.
+    expect({ file, written: text.match(/setting "[^"$]+"/g) ?? [] }).toEqual({ file, written: [] });
+    for (const found of text.matchAll(/settingWords\(MODELS\.(\w+)\)/g)) named.push(found[1]!);
+  }
+  expect([...new Set(named)].sort()).toEqual(["listMost", "providerWait", "signInOpen", "silentAfter"]);
+  const entries: Readonly<Record<string, SettingEntry & SettingWords>> = MODELS;
+  for (const name of named) {
+    const entry = entries[name];
+    expect({ name, listed: SETTINGS.find((def) => def.key === entry?.key)?.name }).toEqual({ name, listed: entry?.name });
+  }
 });
 
 test("the exported merge is the one readSettings reads by: a chat's value over a global one, mappings merged key by key, a value that is not a mapping replacing one that is", async () => {

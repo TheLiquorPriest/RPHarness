@@ -7,8 +7,12 @@
 //
 // And what keeps a secret out of every word that leaves the layer: a key, a token or a header's
 // value the layer holds, wherever it shows up in a provider's text (some echo a key they refused),
-// is taken out, and no text that leaves is longer than a page or a log line has use for.
+// is taken out, and no text that leaves is longer than `calls.wordsMost` says.
+//
+// The words of a wait that ran out name its setting as the list of settings names it, and say where
+// it is changed.
 
+import type { SettingWords } from "../harness/settings/entry";
 import { isRecord } from "./json";
 
 /** A status at the head of a provider's text: "529 {…}" or "429: {…}". */
@@ -77,20 +81,18 @@ export const SECRET_FLOOR = 8;
 const HIDDEN = "[secret]";
 /** Where pi-ai cut a long error body short ("… [truncated 120 chars]"): a secret the cut went through leaves its first characters just before it. */
 const CUT_MARK = "... [truncated ";
-/** The most characters of words that leave the layer: a server's error body can be any length, and a page or a log line has no use for more. */
-export const WORDS_MAX = 2000;
 
 /**
  * Text fit to leave the layer: every secret named taken out, wherever it stands, and the text cut
- * to `WORDS_MAX` characters after that, so no cut ever leaves part of a secret behind.
+ * to `most` characters after that (`calls.wordsMost`), so no cut ever leaves part of a secret behind.
  */
-export function redact(text: string, secrets: Iterable<string>): string {
+export function redact(text: string, secrets: Iterable<string>, most: number): string {
   // Longest first: a secret that holds a shorter one is taken out whole, never left half shown around it.
   const wanted = [...new Set(secrets)].filter((s) => s.length >= SECRET_FLOOR).sort((a, b) => b.length - a.length);
   let out = text;
   for (const secret of wanted) if (out.includes(secret)) out = out.split(secret).join(HIDDEN);
   out = withoutCutSecrets(out, wanted);
-  return out.length > WORDS_MAX ? `${out.slice(0, WORDS_MAX)}…` : out;
+  return out.length > most ? `${out.slice(0, most)}…` : out;
 }
 
 /** Takes out the first characters of a secret where a text was cut short through it: before pi-ai's mark of a cut, or at the text's very end. */
@@ -119,6 +121,11 @@ export function durationWords(ms: number): string {
   const seconds = Math.max(1, Math.round(ms / 1000));
   if (seconds % 60 === 0) return seconds === 60 ? "a minute" : `${seconds / 60} minutes`;
   return seconds === 1 ? "a second" : `${seconds} seconds`;
+}
+
+/** A setting of the layer in words, by the name the list of settings gives it, with where it is changed: the Settings page. */
+export function settingWords(setting: SettingWords): string {
+  return `The setting "${setting.name}" on the Settings page`;
 }
 
 /** An error's text: its message, or what it is. */

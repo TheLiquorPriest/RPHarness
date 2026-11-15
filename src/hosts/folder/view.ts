@@ -68,6 +68,9 @@ export interface ChatLocation {
   chat: string;
 }
 
+/** Where the levels in view are on disk: a chat's, or, for a scope that names only the user, the tree's folder alone, whose shipped and global levels every chat shares. */
+export type TreeLocation = ChatLocation | { files: string };
+
 /** A path in the view, found. */
 export interface Located {
   /** The path as normalized, in the agents' view. */
@@ -120,7 +123,7 @@ export type TopView = (name: string) => Promise<boolean>;
  * files and its guidance folders by their exact names, every other folder there being a chat;
  * everything at the others.
  */
-export async function topView(loc: ChatLocation, level: LayerLevel): Promise<TopView> {
+export async function topView(loc: TreeLocation, level: LayerLevel): Promise<TopView> {
   const folder = levelFolder(loc, level);
   if (level === "global") {
     const hidden = new Set<string>();
@@ -137,25 +140,25 @@ export async function topView(loc: ChatLocation, level: LayerLevel): Promise<Top
   return async () => true;
 }
 
-/** The segments from the tree's folder down to a level's own folder. */
-function levelBase(loc: ChatLocation, level: LayerLevel): string[] {
-  if (level === "chat") return ["chats", loc.character, loc.chat];
-  if (level === "character") return ["chats", loc.character];
+/** The segments from the tree's folder down to a level's own folder. A location with no chat has no character's or chat's level: `locate` refuses a path there before it asks. */
+function levelBase(loc: TreeLocation, level: LayerLevel): string[] {
   if (level === "shipped") return ["defaults"];
-  return [];
+  if (level === "global") return [];
+  if (!("chat" in loc)) throw new Error(`A view with no chat in it has no ${level} level.`);
+  return level === "chat" ? ["chats", loc.character, loc.chat] : ["chats", loc.character];
 }
 
 /** A level's folder on disk. */
-export function levelFolder(loc: ChatLocation, level: LayerLevel): string {
+export function levelFolder(loc: TreeLocation, level: LayerLevel): string {
   return join(loc.files, ...levelBase(loc, level));
 }
 
 /**
  * Finds a path of the view. Refused: `invalid` (empty of meaning, a NUL, a backslash), `outside`
- * (above the root, or into a part of a mounted level that is not in the view), `link` (any part
- * of it on disk is a link).
+ * (above the root, into a part of a mounted level that is not in the view, or, with no chat in view,
+ * at a character's or a chat's level, the root among them), `link` (any part of it on disk is a link).
  */
-export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
+export async function locate(loc: TreeLocation, path: string): Promise<Lookup> {
   if (path.includes("\0") || path.includes("\\")) return { ok: false, path, reason: "invalid" };
   const segments: string[] = [];
   for (const part of path.split("/")) {
@@ -170,6 +173,7 @@ export async function locate(loc: ChatLocation, path: string): Promise<Lookup> {
   const level: LayerLevel = first === "@global" ? "global" : first === "@character" ? "character" : first === "@shipped" ? "shipped" : "chat";
   const rest = level === "chat" ? segments : segments.slice(1);
   const normalized = viewPath(level, rest);
+  if (!("chat" in loc) && (level === "chat" || level === "character")) return { ok: false, path: normalized, reason: "outside" };
   const top = rest[0];
   if (top !== undefined && !(await (await topView(loc, level))(top))) return { ok: false, path: normalized, reason: "outside" };
 

@@ -16,17 +16,21 @@
 //
 // What the layer is handed (`ModelLayerDeps`) is everything it reaches the world through: where the
 // host keeps each user's connections and their secrets, the clock, ids, timers, `fetch`, the log, the
-// environment it takes the SDKs' own settings out of, its three waits (how long an answer may go
-// silent, how long a provider may take to answer a test or list its models, how long a sign-in
-// stays open), each read as it is used so a change of its setting holds from the next, and the text
-// a connection's test sends, which comes from a shipped file like every text sent to a model.
+// environment it takes the SDKs' own settings out of, its settings (`calls.*`: its waits, its sizes,
+// its retries and the prompt cache's retention), read as each is used so a change holds from the
+// next call, and the text a connection's test sends, which comes from a shipped file like every text
+// sent to a model. What has no chat in view (a connection's test, its list of models, a sign-in, a
+// request passed through) reads the settings at the levels every chat shares; an agent's call reads
+// them at its chat's levels.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { cleanupSessionResources, createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, SignInApi } from "../contract";
+import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, UserScope } from "../contract";
+import type { ModelSettings } from "../harness/settings";
+import { MODELS } from "../harness/settings/models";
 import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
@@ -37,16 +41,14 @@ import { reportedOf } from "./limits";
 import { passRequest } from "./pass";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
-import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact } from "./words";
+import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
 export { DEFAULT_CHARS_PER_TOKEN, callUsage, estimateOf, messageText, promptTokens, tokensOf } from "./tokens";
 export type { CallUsage, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
 export { limitsOf } from "./limits";
-
-/** The layer's waits, each a setting of the host's. */
-export type ModelWait = "silentMs" | "askMs" | "signInMs";
+export { connectionNamed, runOf } from "./runs-on";
 
 export interface ModelLayerDeps {
   /** Where the host keeps each user's connections and their secrets. */
@@ -69,14 +71,11 @@ export interface ModelLayerDeps {
   providers?: readonly Provider[];
   /** The process's environment, `process.env` when not given: what the SDKs under pi-ai would read in it for themselves (`STEERING`) is taken out as the layer is made. */
   env?: Record<string, string | undefined>;
-  /** How long an answer that has begun may go with nothing at all from its server before it is ended: `SILENT_MS` when not given, 0 for no limit. */
-  silentMs?(): number | Promise<number>;
-  /** How long a connection's test call, or a server's list of its models, waits for its answer: `ASK_MS` when not given. */
-  askMs?(): number | Promise<number>;
-  /** How long a sign-in flow stays open: `SIGN_IN_MS` when not given. */
-  signInMs?(): number | Promise<number>;
-  /** The words that name a wait's setting and where it is changed, for the words of a wait that ran out: `The setting "<its name>"` when not given. */
-  settingWords?(wait: ModelWait): string;
+  /**
+   * The layer's settings (`calls.*`) at a scope's levels, read as each is used: an agent's call reads
+   * them at its chat's levels, and what has no chat in view with a scope that names only the user.
+   */
+  settings(scope: Scope | UserScope): Promise<ModelSettings>;
   /** The text a system message is sent as, in its place, where its model takes no system message mid-conversation: from a shipped file's mark. Absent: its own text, unmarked. Never applied to a request passed through. */
   markNote?(text: string): string;
 }
@@ -98,17 +97,8 @@ export interface ModelLayer extends ModelSource {
   close(): Promise<void>;
 }
 
-/** The waits' own defaults, where their setting gives none: an answer may go silent 5 minutes, a provider has a minute to answer a test or list its models, a sign-in stays open 10 minutes. */
-const SILENT_MS = 5 * 60_000;
-const ASK_MS = 60_000;
-const SIGN_IN_MS = 10 * 60_000;
-/** Each wait's setting, by its name, for words where the host gives none of its own. */
-const WAIT_NAMES: Readonly<Record<ModelWait, string>> = { silentMs: 'The setting "Silent answer ends after"', askMs: 'The setting "Provider wait"', signInMs: 'The setting "Sign-in stays open"' };
-
-/** The room a test call gives its answer: enough for any provider's smallest answer (OpenAI asks at least 16), little enough to cost nothing to speak of. */
-const TEST_ROOM = 64;
-/** The most of a server's list of models read: lists of hundreds of models run to a few megabytes, and an answer without end would otherwise grow until the process is restarted. */
-const LIST_MAX = 8 * 1024 * 1024;
+/** Megabytes, as `calls.listMost` counts them, in bytes. */
+const MEGABYTE = 1024 * 1024;
 /** A key's last four characters are shown for a key long enough that they don't give it away. */
 const SHOWN_FROM = 12;
 
@@ -194,7 +184,6 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   if (steering.length > 0) deps.log(`took out of the environment what would sign or steer model calls and sign-ins: ${steering.join(", ")}`);
   // pi-ai loads its sign-in flows by a path a single-file bundle can't follow; these load them from the bundle. pi-ai registers all its flows at once (its other providers' too): it has no way to register two alone.
   registerLazyOAuthFlows();
-  const settingWords = (wait: ModelWait): string => deps.settingWords?.(wait) ?? WAIT_NAMES[wait];
 
   /** Each model `agentModel` made, with the user's choice it was made for. */
   const made = new WeakMap<Model<Api>, UserChoice>();
@@ -208,8 +197,9 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
     const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
     for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-    const calls: CallDeps = { pi, book, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, silentMs: async () => (await deps.silentMs?.()) ?? SILENT_MS, silentSetting: () => settingWords("silentMs"), ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
-    const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, signInMs: async () => (await deps.signInMs?.()) ?? SIGN_IN_MS, signInSetting: () => settingWords("signInMs"), appName: deps.appName });
+    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
+    // A sign-in has no chat in view: its settings are the levels every chat shares.
+    const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: () => deps.settings({ user }), appName: deps.appName });
     // A model made for another user's agent is none of this desk's: its call goes on no connection of his.
     const streamFn = streamFunction(calls, (model) => {
       const choice = made.get(model);
@@ -220,11 +210,11 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     return desk;
   };
 
-  /** A signal the layer's own wait ends after the provider wait (`askMs`, else `ASK_MS`), with words that say what didn't come in time (`late`, given the wait in words) and where that wait is changed; and its timer's release. */
-  const deadline = async (late: (wait: string) => string): Promise<{ signal: AbortSignal; clear(): void }> => {
-    const ms = (await deps.askMs?.()) ?? ASK_MS;
+  /** A signal the layer's own wait ends after the provider wait (`calls.providerWait`), with words that say what didn't come in time (`late`, given the wait in words) and name that setting; and its timer's release. */
+  const deadline = (settings: ModelSettings, late: (wait: string) => string): { signal: AbortSignal; clear(): void } => {
+    const ms = settings.providerWait;
     const stop = new AbortController();
-    const timer = deps.setTimeout(() => stop.abort(new Error(`${late(durationWords(ms))} ${settingWords("askMs")} says how long to wait for it.`)), ms);
+    const timer = deps.setTimeout(() => stop.abort(new Error(`${late(durationWords(ms))} ${settingWords(MODELS.providerWait)} says how long to wait for it.`)), ms);
     return { signal: stop.signal, clear: () => deps.clearTimeout(timer) };
   };
 
@@ -243,17 +233,20 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   /**
    * A compatible server's own list of its models (`GET …/models`, Anthropic's under `/v1`), with what
    * it says of each one's limits: no redirect followed, since its key and headers would go with it,
-   * and no more of it read than `LIST_MAX`.
+   * and no more of it read than `calls.listMost`. A list has no chat in view: its settings are the
+   * levels every chat shares.
    */
-  const serverModels = async (book: Book, c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
+  const serverModels = async (desk: Desk, c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {
+    const { book, calls } = desk;
+    const settings = await calls.settings({ user: calls.user });
     const key = c.auth === "key" ? await book.key(c.id) : undefined;
     const anthropic = api === "anthropic-messages";
     const signs: Record<string, string> = key === undefined ? {} : anthropic ? { "x-api-key": key } : { authorization: `Bearer ${key}` };
-    const wait = await deadline((ms) => `it didn't answer within ${ms}.`);
+    const wait = deadline(settings, (ms) => `it didn't answer within ${ms}.`);
     try {
       const response = await deps.fetch(`${c.baseUrl ?? ""}${anthropic ? "/v1/models" : "/models"}`, { headers: { accept: "application/json", ...(anthropic ? { "anthropic-version": "2023-06-01" } : {}), ...signs, ...sentHeaders(c) }, redirect: "error", signal: wait.signal });
-      const text = await cappedText(response, LIST_MAX);
-      if (text === null) throw new Error(`${response.ok ? "" : `${response.status}: `}its answer is larger than ${LIST_MAX / 1024 / 1024} MB, more than is read.`);
+      const text = await cappedText(response, settings.listMost * MEGABYTE);
+      if (text === null) throw new Error(`${response.ok ? "" : `${response.status}: `}its answer is larger than ${settings.listMost} MB, more than is read. ${settingWords(MODELS.listMost)} says how much of it is read.`);
       if (!response.ok) throw new Error(failureWords(`${response.status}: ${text}`));
       let body: unknown;
       try {
@@ -270,7 +263,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       });
     } catch (error) {
       const words = errorWords(wait.signal.aborted ? wait.signal.reason : error);
-      throw new Error(redact(`The server didn't list its models: ${REDIRECT_REFUSED.test(words) ? REDIRECT_WORDS : words}`, await book.secretValues()));
+      throw new Error(redact(`The server didn't list its models: ${REDIRECT_REFUSED.test(words) ? REDIRECT_WORDS : words}`, await book.secretValues(), settings.wordsMost));
     } finally {
       wait.clear();
     }
@@ -293,31 +286,36 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     async test(user, id, signal) {
       const { calls } = deskOf(user);
       const t0 = deps.now();
-      const wait = await deadline((ms) => `The provider didn't answer within ${ms}.`);
-      const ended = signal === undefined ? wait.signal : AbortSignal.any([signal, wait.signal]);
+      let wait: { signal: AbortSignal; clear(): void } | undefined;
       try {
+        // A test has no chat in view: its settings are the levels every chat shares.
+        const settings = await calls.settings({ user });
+        const timed = deadline(settings, (ms) => `The provider didn't answer within ${ms}.`);
+        wait = timed;
+        const ended = signal === undefined ? timed.signal : AbortSignal.any([signal, timed.signal]);
         const shape = await shapeOf(calls, { connectionId: id, model: null, effort: "off" });
         const context = normalizeContext({ messages: [{ role: "user", content: await deps.testPrompt(), timestamp: deps.now() }] });
         const out = createAssistantMessageEventStream();
-        // A test says how the connection stands now: it is never made again.
-        await makeCall(calls, shape, context, { maxTokens: TEST_ROOM, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, ended, out);
+        // A test says how the connection stands now: it is never made again, and keeps nothing in the provider's cache.
+        await makeCall(calls, shape, context, { maxTokens: settings.testRoom, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, settings, ended, out);
         const result = await out.result();
         if (result.stopReason !== "error" && result.stopReason !== "aborted") return { ok: true, ms: deps.now() - t0, model: result.responseModel ?? result.model };
-        return { ok: false, ms: deps.now() - t0, error: wait.signal.aborted ? errorWords(wait.signal.reason) : (result.errorMessage ?? "") };
+        return { ok: false, ms: deps.now() - t0, error: timed.signal.aborted ? errorWords(timed.signal.reason) : (result.errorMessage ?? "") };
       } catch (error) {
         return { ok: false, ms: deps.now() - t0, error: errorWords(error) };
       } finally {
-        wait.clear();
+        wait?.clear();
       }
     },
     async models(user, connectionId) {
-      const { book, calls } = deskOf(user);
+      const desk = deskOf(user);
+      const { book, calls } = desk;
       const c = await book.connection(connectionId);
       if (c === null) throw new Error(connectionId === null ? "There is no default connection to list models for." : "That connection is no longer there: reload the page.");
       const kind = kindOf(c.provider);
       if (kind === undefined) throw new Error(`The connection "${c.name}" names a provider that isn't offered.`);
       if (!kind.needsBaseUrl) return calls.pi.getModels(kind.id).map((m) => ({ id: m.id, name: m.name }));
-      const listed = await serverModels(book, c, c.api ?? kind.apis[0]);
+      const listed = await serverModels(desk, c, c.api ?? kind.apis[0]);
       // What the server says of each model's limits is kept with the connection, for a model pi doesn't know.
       await book.noteReported(c, Object.fromEntries(listed.filter((m) => Object.keys(m.reported).length > 0).map((m) => [m.id, m.reported])));
       return listed.map(({ id, name }) => ({ id, name }));

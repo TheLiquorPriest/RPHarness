@@ -1,3 +1,13 @@
 export const MODELS_WORDS = {
-  "effort.connections.<connection>": { name: "Effort on a connection", about: "The effort every agent on this connection thinks at, whatever its definition says." },
+  "calls.silentAfter": { name: "Silent answer ends after", about: "Seconds an answer that has begun may go with nothing from its server before it is ended." },
+  "calls.providerWait": { name: "Provider wait", about: "Seconds a provider has to answer a connection's test or list its models." },
+  "calls.signInOpen": { name: "Sign-in stays open", about: "Seconds a sign-in to a provider stays open for you to finish it." },
+  "calls.testRoom": { name: "Test call's room", about: "Tokens a connection's test call lets its answer take." },
+  "calls.listMost": { name: "Most of a model list read", about: "Megabytes of a server's list of its models that are read; a longer list is refused." },
+  "calls.quoted": { name: "Address quoted in a refusal", about: "Characters of a media address that the words of a refused request quote." },
+  "calls.signInWordsKept": { name: "Failed sign-in's words kept", about: "Seconds the words of why a sign-in did not finish are kept to be shown." },
+  "calls.wordsMost": { name: "Length of failure words", about: "Characters of a provider's or a call's failure words that are kept; the rest is cut." },
+  "calls.retryWait": { name: "Wait before a retry", about: "Seconds before a failed call is made again the first time; each wait after is twice the one before." },
+  "calls.retries": { name: "Retries of a failed call", about: "Times a call that failed before any answer came is made again, where its connection sets no number of its own." },
+  "calls.cacheRetention": { name: "Prompt cache retention", about: "How long a provider is asked to keep a prompt in its cache: none, short or long." },
 };

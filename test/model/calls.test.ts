@@ -2,9 +2,10 @@
 // the provider takes it (`off` none; a level as pi-ai's, or the nearest the model takes; `auto` and
 // `inherit` the connection's own, else the provider's default), the sampling parameters the
 // provider takes and none it would refuse, one tool per answer when the connection asks it, and the
-// prompt cache as the call asks. And what a failed call says: the provider's words with the status
-// first, never a key or a header's value the layer holds, and what to do when the connection can't
-// be used; pi-ai never tries again on its own.
+// prompt cache as `calls.cacheRetention` says. And what a failed call says: the provider's words with
+// the status first, never a key or a header's value the layer holds, cut to `calls.wordsMost`, and
+// what to do when the connection can't be used; pi-ai never tries again on its own, and the layer
+// tries again as the connection or `calls.retries` says, after `calls.retryWait`, doubling.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message, SimpleStreamOptions, Tool } from "@earendil-works/pi-ai";
@@ -30,9 +31,9 @@ afterEach(async () => {
   r = undefined;
 });
 
-/** The body a call on a connection sent, the agent asking `effort`, the call asking `options`. */
-async function bodyFor(script: Script, connection: ConnectionInput, key: string | undefined, effort: ModelEffort | undefined, options: SimpleStreamOptions = {}): Promise<Record<string, unknown>> {
-  r = rig({ script });
+/** The body a call on a connection sent, the agent asking `effort`, the call asking `options`, the settings as `global` sets them. */
+async function bodyFor(script: Script, connection: ConnectionInput, key: string | undefined, effort: ModelEffort | undefined, options: SimpleStreamOptions = {}, global?: string): Promise<Record<string, unknown>> {
+  r = rig({ script, ...(global !== undefined ? { global } : {}) });
   const saved = await r.layer.api.save(USER, connection, key);
   const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, ...(effort !== undefined ? { effort } : {}) });
   const answer = await call(agent, ASK, { ...options, ...(agent.thinkingLevel !== "off" ? { reasoning: agent.thinkingLevel } : {}) });
@@ -76,12 +77,29 @@ describe("an Anthropic call", () => {
     expect(Object.keys(plain)).not.toContain("output_config");
   });
 
-  test("marks the prompt cache as the call's retention says, and not at all for none", async () => {
-    const kept = await bodyFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY, "off", { cacheRetention: "long" });
-    expect((kept.system as { cache_control?: unknown }[])[0]?.cache_control).toEqual({ type: "ephemeral", ttl: "1h" });
+  test("a call and a passed request carry the retention the setting gives, whatever the loop asks", async () => {
+    const marks = (body: Record<string, unknown>): unknown => (body.system as { cache_control?: unknown }[])[0]?.cache_control;
+    // Short where nothing is set, pi-ai's own default, even where the loop asks for another.
+    expect(marks(await bodyFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY, "off", { cacheRetention: "long" }))).toEqual({ type: "ephemeral" });
     await r?.done();
-    const none = await bodyFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY, "off", { cacheRetention: "none" });
+    expect(marks(await bodyFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY, "off", {}, "calls:\n  cacheRetention: long\n"))).toEqual({ type: "ephemeral", ttl: "1h" });
+    await r?.done();
+    const none = await bodyFor(anthropicAnswer, claude("claude-sonnet-4-5"), ANTHROPIC_KEY, "off", { cacheRetention: "long" }, "calls:\n  cacheRetention: none\n");
     expect(JSON.stringify(none)).not.toContain("cache_control");
+    await r?.done();
+    // A request passed through keeps a prompt as the setting says, and as it says from the next request on.
+    const made = rig({ script: anthropicAnswer, global: "calls:\n  cacheRetention: long\n" });
+    r = made;
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const passed = async (): Promise<Record<string, unknown>> => {
+      let ended = "";
+      await made.layer.api.pass(USER, { connection: saved.id, body: { messages: [{ role: "system", content: "You summarize harbour gossip." }, { role: "user", content: "What happened at the mill?" }], max_tokens: 64 } }, { content: () => undefined, reasoning: () => undefined, finish: () => (ended = "finished"), error: (e) => (ended = e.code) }, new AbortController().signal);
+      expect(ended).toBe("finished");
+      return bodyOf(made.sent.at(-1));
+    };
+    expect(marks(await passed())).toEqual({ type: "ephemeral", ttl: "1h" });
+    made.configs.global = "calls:\n  cacheRetention: none\n";
+    expect(JSON.stringify(await passed())).not.toContain("cache_control");
   });
 });
 
@@ -101,9 +119,9 @@ describe("a chat-completions call", () => {
   });
 });
 
-/** The words a call on an Anthropic connection ends in when its API answers as `script` does, the rig's clock run through every wait. */
-async function anthropicFailure(script: Script): Promise<string> {
-  const made = rig({ script });
+/** The words a call on an Anthropic connection ends in when its API answers as `script` does, the settings as `global` sets them, the rig's clock run through every wait. */
+async function anthropicFailure(script: Script, global?: string): Promise<string> {
+  const made = rig({ script, ...(global !== undefined ? { global } : {}) });
   r = made;
   const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
   const answer = await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" }), ASK));
@@ -190,6 +208,32 @@ describe("a call that failed before any piece of its answer came", () => {
     expect(made.sent.length).toBe(2 + 1);
   });
 
+  test("a call that failed before anything came waits the set first wait, then twice it, and is made again as many times as its connection says, or as calls.retries says where it says nothing", async () => {
+    const at: number[] = [];
+    const made: Rig = rig({
+      script: () => {
+        at.push(made.clock.now());
+        return rateLimited();
+      },
+      global: "calls:\n  retryWait: 3\n  retries: 3\n",
+    });
+    r = made;
+    const unsaid = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: unsaid.id, model: null, effort: "off" }), ASK));
+    // Three tries again, after 3, 6 and 12 seconds.
+    expect(at.map((t) => t - at[0]!)).toEqual([0, 3_000, 9_000, 21_000]);
+    // A connection's own count stands over the setting.
+    at.length = 0;
+    const once = await made.layer.api.save(USER, claude("claude-sonnet-4-5", { name: "Claude once", retries: 1 }), ANTHROPIC_KEY);
+    await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: once.id, model: null, effort: "off" }), ASK));
+    expect(at.map((t) => t - at[0]!)).toEqual([0, 3_000]);
+    // Changed in the file, the setting holds from the next call.
+    at.length = 0;
+    made.configs.global = "calls:\n  retryWait: 0\n  retries: 1\n";
+    await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: unsaid.id, model: null, effort: "off" }), ASK));
+    expect(at.map((t) => t - at[0]!)).toEqual([0, 0]);
+  });
+
   test("a refusal that no second try changes is never made again, nor is a call stopped while it waits", async () => {
     await anthropicFailure(() => failed(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }));
     expect(r?.sent.length).toBe(1);
@@ -214,6 +258,32 @@ describe("a call that failed before any piece of its answer came", () => {
     const gateway = "gw-token-Okoro0123456789abcdef";
     expect(await serverFailure(() => failed(401, { error: { message: `Unknown gateway token ${gateway}.`, type: "invalid_request_error" } }), { "x-gateway-token": gateway })).toBe("401: Unknown gateway token [secret]. (invalid_request_error)");
     expect(r?.sent[0]?.headers["x-gateway-token"]).toBe(gateway);
+  });
+});
+
+describe("each size is its setting", () => {
+  test("a set value changes the test's room, the list read and the words' length", async () => {
+    const made = rig({ script: anthropicAnswer, global: "calls:\n  testRoom: 32\n" });
+    r = made;
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    expect((await made.layer.api.test(USER, saved.id)).ok).toBe(true);
+    made.configs.global = "calls:\n  testRoom: 48\n";
+    expect((await made.layer.api.test(USER, saved.id)).ok).toBe(true);
+    expect(made.sent.map((sent) => bodyOf(sent).max_tokens)).toEqual([32, 48]);
+    await made.done();
+
+    // A list a little over one megabyte: past `listMost: 1`, refused in words that name the setting; read under 2.
+    const list = JSON.stringify({ data: [{ id: "served-model", name: "x".repeat(1024 * 1024) }] });
+    const listed = rig({ script: () => new Response(list, { status: 200, headers: { "content-type": "application/json" } }), global: "calls:\n  listMost: 1\n" });
+    r = listed;
+    const server = await listed.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model" }, SERVER_KEY);
+    await expect(listed.layer.api.models(USER, server.id)).rejects.toThrow('The server didn\'t list its models: its answer is larger than 1 MB, more than is read. The setting "Most of a model list read" on the Settings page says how much of it is read.');
+    listed.configs.global = "calls:\n  listMost: 2\n";
+    expect(await listed.layer.api.models(USER, server.id)).toEqual([{ id: "served-model", name: "x".repeat(1024 * 1024) }]);
+    await listed.done();
+
+    // The words of a failure are cut where the setting says.
+    expect(await anthropicFailure(() => failed(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }), "calls:\n  wordsMost: 10\n")).toBe("401: inval…");
   });
 });
 

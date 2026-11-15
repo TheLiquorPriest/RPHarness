@@ -1,18 +1,46 @@
-// The settings of the models agents run on: the effort every agent on a connection thinks at, by the
-// connection's name or its id, whatever its definition says; none by default, so each agent thinks at
-// the effort its definition gives, or its model's own.
+// The settings of the model layer (§13.2, §13.3; Appendix D.1 l.2416-2418; READINGS N-9), under
+// `calls` in a config file: how long an answer that has begun may go silent, how long a provider has
+// to answer a connection's test or list its models, how long a sign-in stays open; a test call's
+// room, how much of a server's list of models is read, how much of a media address a refusal quotes,
+// how long a failed sign-in's words are kept and how long any failure's words may be; the wait before
+// a failed call is made again, and how many times where its connection says nothing; and how long a
+// provider is asked to keep a prompt in its cache. Times are in seconds, the list in megabytes.
+//
+// What these govern often has no chat in view (a connection's test, a sign-in, a request passed
+// through), so each is read at the levels every chat shares, shipped and global; the silent wait is
+// read at an agent's chat's levels too. An agent's thinking effort is no setting: it is its
+// definition's alone (READINGS N-7).
 
-import type { Effort } from "../../contract";
 import { worded } from "./entry";
 import { MODELS_WORDS } from "./models-words";
 
-/** Every effort a definition's `effort:` takes, which `effort.connections` takes too. */
-const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
+/** The levels every chat shares. */
+const SHARED = ["shipped", "global"] as const;
 
 export const MODELS = worded(
   {
-    // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
-    effort: { key: "effort.connections.<connection>", takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, orNone: true, none: "as each agent's definition says", perConnection: true, at: "efforts.<connection>" },
+    // Appendix D.1 l.2417: an answer that goes silent is ended after 5 minutes.
+    silentAfter: { key: "calls.silentAfter", takes: { type: "whole", least: 1 }, default: 300, orNone: true, none: "no limit", perConnection: false, at: "calls.silentAfter", ms: true },
+    providerWait: { key: "calls.providerWait", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "calls.providerWait", ms: true },
+    signInOpen: { key: "calls.signInOpen", takes: { type: "whole", least: 1 }, default: 600, perConnection: false, levels: SHARED, at: "calls.signInOpen", ms: true },
+    // Enough for any provider's smallest answer (OpenAI asks at least 16), little enough to cost nothing to speak of.
+    testRoom: { key: "calls.testRoom", takes: { type: "whole", least: 1 }, default: 64, perConnection: false, levels: SHARED, at: "calls.testRoom" },
+    // Lists of hundreds of models run to a few megabytes; an answer without end would otherwise grow until the process is restarted.
+    listMost: { key: "calls.listMost", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, levels: SHARED, at: "calls.listMost" },
+    quoted: { key: "calls.quoted", takes: { type: "whole", least: 1 }, default: 80, perConnection: false, levels: SHARED, at: "calls.quoted" },
+    // Long enough for a page that asks every few seconds, or one the user comes back to, to say why.
+    signInWordsKept: { key: "calls.signInWordsKept", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, levels: SHARED, at: "calls.signInWordsKept", ms: true },
+    // A server's error body can be any length, and a page or a log line has no use for more.
+    wordsMost: { key: "calls.wordsMost", takes: { type: "whole", least: 1 }, default: 2000, perConnection: false, levels: SHARED, at: "calls.wordsMost" },
+    // Appendix D.1 l.2416: 1 second, then twice the wait before; a connection's own count of tries stands over `retries`.
+    retryWait: { key: "calls.retryWait", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, levels: SHARED, at: "calls.retryWait", ms: true },
+    retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "calls.retries" },
+    cacheRetention: { key: "calls.cacheRetention", takes: { type: "oneOf", values: ["none", "short", "long"] }, default: "short", perConnection: false, levels: SHARED, at: "calls.cacheRetention" },
   },
   MODELS_WORDS,
 );
+
+/** Keys this group once read and reads no longer, each with what holds in its place: a file that still sets one is told so in the log. */
+export const MODELS_GONE: Readonly<Record<string, string>> = {
+  "effort.connections": "an agent thinks at the effort its definition gives, or where it gives none at its connection's own",
+};

@@ -67,9 +67,6 @@ interface PassedTool {
   strict?: boolean;
 }
 
-/** The most of an address a refusal quotes. Not a setting: it only keeps one refusal's words short. */
-const QUOTED = 80;
-
 /** Whether a field holds nothing: absent, null, or an empty text, list or object. */
 function holdsNothing(value: unknown): boolean {
   return value === undefined || value === null || value === "" || (Array.isArray(value) && value.length === 0) || (isRecord(value) && Object.keys(value).length === 0);
@@ -85,18 +82,18 @@ function onlyFields(record: Record<string, unknown>, fields: readonly string[], 
 /**
  * Media given as a base64 `data:` URL, which is how the layer's calls take it: its type (with
  * whatever parameters the type has) and its data. Media named by an address can't be handed on,
- * since nothing here downloads.
+ * since nothing here downloads; a refusal quotes `quoted` characters of the address (`calls.quoted`).
  */
-function dataOf(url: unknown, what: string): { mimeType: string; data: string } {
+function dataOf(url: unknown, what: string, quoted: number): { mimeType: string; data: string } {
   if (typeof url !== "string" || url === "") throw new NotCarried(`${what} has no data`);
   const found = /^data:([^,]+);base64,(.*)$/s.exec(url);
   if (found) return { mimeType: found[1] ?? "", data: found[2] ?? "" };
   if (url.startsWith("data:")) throw new NotCarried(`${what} is a \`data:\` URL of another form than \`data:<type>;base64,<data>\``);
-  throw new NotCarried(`${what} is given by its address (${url.length > QUOTED ? `${url.slice(0, QUOTED)}…` : url}), and model calls take media only as its data: send it as a base64 \`data:\` URL (nothing is downloaded)`);
+  throw new NotCarried(`${what} is given by its address (${url.length > quoted ? `${url.slice(0, quoted)}…` : url}), and model calls take media only as its data: send it as a base64 \`data:\` URL (nothing is downloaded)`);
 }
 
 /** One part of a message's content list. */
-function partOf(raw: unknown, what: string): PassedPart {
+function partOf(raw: unknown, what: string, quoted: number): PassedPart {
   if (!isRecord(raw) || typeof raw.type !== "string") throw new NotCarried(`${what} isn't a content part`);
   /** The object a part of this kind keeps its media in, with no field but those named. */
   const held = (field: string, fields: readonly string[]): Record<string, unknown> => {
@@ -116,10 +113,10 @@ function partOf(raw: unknown, what: string): PassedPart {
       const image = held("image_url", ["url", "detail"]);
       // `auto` is what a provider does when nothing is said.
       if (!holdsNothing(image.detail) && image.detail !== "auto") throw new NotCarried(`${what} asks for its image at \`detail: ${String(image.detail)}\`, which model calls have no place for: leave \`detail\` out`);
-      return { type: "media", media: "image", ...dataOf(image.url, what) };
+      return { type: "media", media: "image", ...dataOf(image.url, what, quoted) };
     }
     case "video_url":
-      return { type: "media", media: "video", ...dataOf(held("video_url", ["url"]).url, what) };
+      return { type: "media", media: "video", ...dataOf(held("video_url", ["url"]).url, what, quoted) };
     case "input_audio": {
       const audio = held("input_audio", ["data", "format"]);
       if (typeof audio.data !== "string" || audio.data === "" || typeof audio.format !== "string" || audio.format === "") throw new NotCarried(`${what} is audio without its data or its format`);
@@ -131,11 +128,11 @@ function partOf(raw: unknown, what: string): PassedPart {
 }
 
 /** A message's content: text as it came, or its list of parts as parts. */
-function contentOf(raw: unknown, what: string): string | PassedPart[] {
+function contentOf(raw: unknown, what: string, quoted: number): string | PassedPart[] {
   if (raw === undefined || raw === null) return "";
   if (typeof raw === "string") return raw;
   if (!Array.isArray(raw)) throw new NotCarried(`${what}'s content is neither text nor a list of parts`);
-  return raw.map((part, i) => partOf(part, `${what}'s part ${i + 1}`));
+  return raw.map((part, i) => partOf(part, `${what}'s part ${i + 1}`, quoted));
 }
 
 /** One of an assistant message's tool calls (`tool_calls[]`). */
@@ -169,7 +166,7 @@ const TOOL_FIELDS = [...MESSAGE_FIELDS, "tool_call_id"];
  * `tool_result` parts; `prefix: true` (or `partial: true`) on an assistant message is its mark as a
  * prefix.
  */
-function passedMessages(raw: unknown): PassedMessage[] {
+function passedMessages(raw: unknown, quoted: number): PassedMessage[] {
   if (!Array.isArray(raw)) throw new NotCarried("it has no list of messages");
   const out: PassedMessage[] = [];
   // The user message a run of tool results goes into, while the run lasts.
@@ -177,7 +174,7 @@ function passedMessages(raw: unknown): PassedMessage[] {
   raw.forEach((m: unknown, i) => {
     const what = `message ${i + 1}`;
     if (!isRecord(m)) throw new NotCarried(`${what} isn't a message`);
-    const content = contentOf(m.content, what);
+    const content = contentOf(m.content, what, quoted);
     if (m.role === "tool") {
       // A result's `name` repeats its call's, which is sent: nothing is lost with it.
       onlyFields(m, TOOL_FIELDS, what);
@@ -423,14 +420,16 @@ function notPassedWords(what: string): string {
 
 /**
  * Passes a request through (see the head of this file), its answer streamed to `sink`, which hears
- * exactly one `finish` or one `error`. Nothing of the request is sent when it is refused.
+ * exactly one `finish` or one `error`. Nothing of the request is sent when it is refused. Its
+ * settings are read at the levels every chat shares: a request passed through has no chat in view.
  */
 export async function passRequest(deps: CallDeps, request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void> {
   const fail = (code: PassError["code"], detail: string): void => sink.error({ code, detail });
   const body = request.body;
+  const settings = await deps.settings({ user: deps.user });
   let out: AssistantMessageEventStream;
   try {
-    const messages = passedMessages(body.messages);
+    const messages = passedMessages(body.messages, settings.quoted);
     const tools = passedTools(body.tools);
     refuseUncarried(messages);
     const toolChoice = tools.length > 0 ? toolChoiceOf(body.tool_choice) : undefined;
@@ -462,11 +461,12 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
         sampling: samplingOf(body),
         ...(toolChoice !== undefined ? { toolChoice } : {}),
         serialTools: body.parallel_tool_calls === false || shape.connection.serialTools === true,
-        // pi-ai's own default retention; a request passed through belongs to no session.
-        cacheRetention: "short",
+        // A request passed through belongs to no session; it keeps a prompt as `calls.cacheRetention` says.
+        cacheRetention: settings.cacheRetention,
         ...(Object.keys(extras).length > 0 ? { extras } : {}),
         carried: {},
       },
+      settings,
       signal,
       out,
     );

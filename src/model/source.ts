@@ -5,7 +5,7 @@
 
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelLimits } from "../contract";
+import type { ModelLimits, Scope } from "../contract";
 
 /**
  * How hard an agent's model reasons: `inherit` and `auto` leave it to the connection's own effort
@@ -24,9 +24,12 @@ export interface AgentChoice {
 /**
  * An agent's choice as the harness asks for it: the user it acts for, whose connections the choice is
  * among. A connection's id, and which connection is the default, are one user's alone (READINGS R-52).
+ * `scope` is the scope of the run the agent is in: its calls read the model layer's settings at its
+ * chat's levels. Absent, the agent has no chat in view, and its calls read the levels every chat shares.
  */
 export interface UserChoice extends AgentChoice {
   user: string;
+  scope?: Scope;
 }
 
 export interface AgentModel {

@@ -347,6 +347,7 @@ describe("the kit fails a host that breaks the jail, or shows one user another's
     const { code, output } = await runKit("./test/hosts/leaky-users.kit.ts");
     expect(code).not.toBe(0);
     for (const area of ["files", "chat", "lore", "prompt"]) expect(output).toMatch(new RegExp(`\\(fail\\) .*> ${area} > another user's scope reads none of this user's`));
-    expect(output).toMatch(/\b4 fail\b/);
+    // Its four areas' cases, and the files' read that names no chat, which sees another user's global files.
+    expect(output).toMatch(/\b5 fail\b/);
   }, 30_000);
 });

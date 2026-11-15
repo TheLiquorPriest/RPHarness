@@ -2,13 +2,18 @@
 // environment signs it, steers it or adds to it; no redirect takes its key or its headers to another
 // address, on any provider (one whose calls can't go through the layer's own fetch takes no address
 // but its provider's own); and a stream that goes silent once its answer has begun is ended in words
-// that say so, while a model slow to begin is left to begin. Every wait runs on the rig's clock.
+// that say so, while a model slow to begin is left to begin. Each of the layer's waits is its setting,
+// read as it is used, and its words name the setting as the list of settings does. Every wait runs on
+// the rig's clock.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { AssistantMessageEvent, Message } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, normalizeContext } from "@earendil-works/pi-ai";
+import { SETTINGS } from "rp-harness/helpers";
+import type { Scope } from "../../src/contract";
 import type { AgentModel } from "../../src/model";
 import { KINDS } from "../../src/model/kinds";
+import type { FakeClock } from "../../src/testing/rig";
 import type { Rig } from "./support";
 import { anthropicStream, anthropicTurn, call, failed, rig, USER } from "./support";
 
@@ -61,10 +66,85 @@ const event = (...events: Record<string, unknown>[]): string => anthropicStream(
 /** A keep-alive Anthropic sends while a call is open, which pi-ai passes on as nothing. */
 const PING = event({ type: "ping" });
 
-/** An Anthropic connection's agent model, its API answering with `held`. */
-async function heldClaude(made: Rig): Promise<AgentModel> {
+/** An Anthropic connection's agent model, its API answering with `held`; with `scope`, an agent of that run. */
+async function heldClaude(made: Rig, scope?: Scope): Promise<AgentModel> {
   const saved = await made.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
-  return made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+  return made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off", ...(scope !== undefined ? { scope } : {}) });
+}
+
+/** Whether a promise has settled once everything that can happen without the clock moving has happened. */
+async function settledBy(clock: FakeClock, promise: Promise<unknown>): Promise<boolean> {
+  let settled = false;
+  promise.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  await clock.idle();
+  return settled;
+}
+
+/** A chat of the user's, whose own config file the tests write. */
+const QUAY: Scope = { user: USER, chat: "chat-quay", session: "s1", turn: "t1" };
+
+/** The name a setting has in the exported list. */
+function listedName(key: string): string {
+  const name = SETTINGS.find((def) => def.key === key)?.name;
+  if (name === undefined) throw new Error(`${key} is not a listed setting.`);
+  return name;
+}
+
+/**
+ * Each of the layer's three waits run until it runs out, held to end at `waits` (in milliseconds)
+ * and not a millisecond before: a stream gone silent for an agent of `scope` (none: no chat in view),
+ * a connection's test its provider never answers, a sign-in left open. Gives the words of each.
+ */
+async function waitsRunOut(made: Rig, waits: { silent: number; provider: number; signIn: number }, scope?: Scope): Promise<{ silent: string; provider: string; signIn: string }> {
+  const agent = await heldClaude(made, scope);
+  const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
+  const events = stream[Symbol.asyncIterator]();
+  await silentHeld.send(event(...ANSWER.slice(0, 3)));
+  await untilText(events);
+  const answer = stream.result();
+  made.clock.advance(waits.silent - 1);
+  expect({ wait: "silent", settled: await settledBy(made.clock, answer) }).toEqual({ wait: "silent", settled: false });
+  made.clock.advance(1);
+  const silent = (await answer).errorMessage ?? "";
+
+  const connection = (await made.layer.api.list(USER)).connections[0]!.id;
+  const testing = made.layer.api.test(USER, connection);
+  await made.clock.idle();
+  made.clock.advance(waits.provider - 1);
+  expect({ wait: "provider", settled: await settledBy(made.clock, testing) }).toEqual({ wait: "provider", settled: false });
+  made.clock.advance(1);
+  const tested = await testing;
+  const provider = tested.ok ? "answered" : tested.error;
+
+  const flow = await made.layer.api.signIn(USER).start("anthropic");
+  made.clock.advance(waits.signIn - 1);
+  expect((await made.layer.api.signIn(USER).state("anthropic")).flow).toBe(flow.flow);
+  made.clock.advance(1);
+  const signIn = (await made.layer.api.signIn(USER).state("anthropic")).ended ?? "still open";
+  return { silent, provider, signIn };
+}
+
+/** The held stream `waitsRunOut`'s silent call is answered with; every later request is never answered. */
+let silentHeld = heldStream();
+/** A rig whose first call is answered by a new `silentHeld`, and whose other requests are never answered. */
+function waitsRig(options: Parameters<typeof rig>[0] = {}): Rig {
+  silentHeld = heldStream();
+  let answered = false;
+  return rig({
+    script: () => {
+      if (answered) return new Promise<Response>(() => undefined);
+      answered = true;
+      return silentHeld.response;
+    },
+    ...options,
+  });
 }
 
 /** Reads a call's events until its first piece of text has come. */
@@ -135,14 +215,14 @@ describe("a stream that goes silent", () => {
     r.clock.advance(5 * 60_000);
     const answer = await stream.result();
     expect(answer.stopReason).toBe("error");
-    expect(answer.errorMessage).toBe('The model went silent: nothing came from its server for 5 minutes after its answer began, so the stream was ended. The setting "Silent answer ends after" says how long an answer may go silent.');
+    expect(answer.errorMessage).toBe('The model went silent: nothing came from its server for 5 minutes after its answer began, so the stream was ended. The setting "Silent answer ends after" on the Settings page says how long an answer may go silent.');
     // What had come before the silence is kept: the answer's first block, never ended.
     expect(answer.content).toEqual([{ type: "text", text: "The mill is closed." }]);
   });
 
-  test("a model slow to begin is left to begin, a keep-alive counts as life, and the wait is the one the layer is given", async () => {
+  test("a model slow to begin is left to begin, a keep-alive counts as life, and the wait is the one its setting gives", async () => {
     const held = heldStream();
-    r = rig({ script: () => held.response, silentMs: 30_000, settingWords: (wait) => `The harbour's "${wait}"` });
+    r = rig({ script: () => held.response, global: "calls:\n  silentAfter: 30\n" });
     const agent = await heldClaude(r);
     const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
     const events = stream[Symbol.asyncIterator]();
@@ -166,31 +246,58 @@ describe("a stream that goes silent", () => {
     expect(r.clock.pending).toBe(0);
   });
 
-  test("a wait of none, or of what isn't a length, sets no limit at all", async () => {
-    for (const silentMs of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
+  test("a wait of none sets no limit at all: set so in the global file, or in a chat's over a global wait, for that chat's agents", async () => {
+    for (const configs of [{ global: "calls:\n  silentAfter: ~\n" }, { global: "calls:\n  silentAfter: 30\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: ~\n" } }]) {
       const faux = fauxProvider({ provider: "groq", models: [{ id: "faux-1" }], tokenSize: { min: 1, max: 1 } });
       faux.setResponses([fauxAssistantMessage("The mill is closed.")]);
-      const made = rig({ providers: [faux.provider], silentMs });
+      const made = rig({ providers: [faux.provider], ...configs });
       const saved = await made.layer.api.save(USER, { name: "Groq", provider: "groq", auth: "key", model: "faux-1" }, "gsk_0123456789abcdefghij");
-      const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+      const agent = await made.layer.agentModel({ user: USER, scope: QUAY, connectionId: saved.id, model: null, effort: "off" });
       const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
       // What waits while the answer streams.
       const waiting: number[] = [];
       for await (const _ of stream) waiting.push(made.clock.pending);
       await made.done();
-      expect({ wait: String(silentMs), timers: Math.max(...waiting) }).toEqual({ wait: String(silentMs), timers: 0 });
+      expect({ configs, timers: Math.max(...waiting) }).toEqual({ configs, timers: 0 });
     }
+  });
+});
+
+describe("each wait is its setting", () => {
+  test("set in the global file, a silent stream, a slow test call and an open sign-in end at the set time on the fake clock and not before; a chat's own silent wait holds for that chat's agents", async () => {
+    r = waitsRig({ global: "calls:\n  silentAfter: 40\n  providerWait: 20\n  signInOpen: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: 15\n" } });
+    const shared = await waitsRunOut(r, { silent: 40_000, provider: 20_000, signIn: 70_000 });
+    expect(shared).toEqual({
+      silent: 'The model went silent: nothing came from its server for 40 seconds after its answer began, so the stream was ended. The setting "Silent answer ends after" on the Settings page says how long an answer may go silent.',
+      provider: 'The provider didn\'t answer within 20 seconds. The setting "Provider wait" on the Settings page says how long to wait for it.',
+      signIn: 'The Anthropic sign-in didn\'t finish: The sign-in was left open longer than 70 seconds. The setting "Sign-in stays open" on the Settings page says how long a sign-in stays open. Start it again.',
+    });
+    await r.done();
+    // A chat's file sets the silent wait for its own agents; the waits with no chat in view are the global file's still.
+    r = waitsRig({ global: "calls:\n  silentAfter: 40\n  providerWait: 20\n  signInOpen: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: 15\n  providerWait: 5\n" } });
+    const chat = await waitsRunOut(r, { silent: 15_000, provider: 20_000, signIn: 70_000 }, QUAY);
+    expect(chat.silent).toStartWith("The model went silent: nothing came from its server for 15 seconds");
+    // The chat's provider wait is read from no file of a chat's: it is passed over, and said so.
+    expect(r.settingsLog).toContain("A setting is set in a file it is not read from; the value there is passed over.");
+  });
+
+  test("the words of each wait that ran out carry the name its setting has in the exported list", async () => {
+    r = waitsRig();
+    const words = await waitsRunOut(r, { silent: 5 * 60_000, provider: 60_000, signIn: 10 * 60_000 });
+    expect(words.silent).toContain(`The setting "${listedName("calls.silentAfter")}" on the Settings page`);
+    expect(words.provider).toContain(`The setting "${listedName("calls.providerWait")}" on the Settings page`);
+    expect(words.signIn).toContain(`The setting "${listedName("calls.signInOpen")}" on the Settings page`);
   });
 });
 
 describe("a provider that never answers", () => {
   test("a connection's test says so after the provider wait, naming that setting", async () => {
-    r = rig({ script: () => new Promise<Response>(() => undefined), askMs: 90_000 });
+    r = rig({ script: () => new Promise<Response>(() => undefined), global: "calls:\n  providerWait: 90\n" });
     const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
     const testing = r.layer.api.test(USER, saved.id);
     await r.clock.idle();
     r.clock.advance(90_000);
-    expect(await testing).toEqual({ ok: false, ms: 90_000, error: 'The provider didn\'t answer within 90 seconds. The setting "Provider wait" says how long to wait for it.' });
+    expect(await testing).toEqual({ ok: false, ms: 90_000, error: 'The provider didn\'t answer within 90 seconds. The setting "Provider wait" on the Settings page says how long to wait for it.' });
   });
 
   test("a test that is answered says by which model, and sends the text it was given", async () => {

@@ -155,6 +155,19 @@ describe("a request passed through", () => {
     expect(made.sent).toEqual([]);
   });
 
+  test("each size is its setting: a set calls.quoted changes how much of a media address the refusal quotes, from the next request", async () => {
+    const address = `https://images.example.com/${"reef-".repeat(30)}.png`;
+    const made = rig({ global: "calls:\n  quoted: 20\n" });
+    r = made;
+    await made.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });
+    const body = { ...BODY, messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: address } }] }] as JsonObject[] };
+    expect(await refusal(made, body)).toContain(`is given by its address (${address.slice(0, 20)}…), and model calls`);
+    made.configs.global = "";
+    // As it is where nothing is set: 80 characters.
+    expect(await refusal(made, body)).toContain(`is given by its address (${address.slice(0, 80)}…), and model calls`);
+    expect(made.sent).toEqual([]);
+  });
+
   test("refuses a prefix where the connection's API can't continue one, after the tools' results too, and sends nothing", async () => {
     r = rig();
     await r.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" });

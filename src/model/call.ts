@@ -9,9 +9,9 @@
 // and a stopped one each end the stream with an error event, in words: a failure in the provider's
 // own words with its status first, a stop with the reason "aborted", and never a secret the layer
 // holds. A call that failed before any piece of its answer came (its server couldn't be reached, or
-// answered 429 or 5xx) is made again, as many times as its connection's setting says (`RETRIES`
-// when it says nothing), after a wait that doubles each time; one that failed after something came
-// never is. pi-ai's own retries stay off, so these are the only ones.
+// answered 429 or 5xx) is made again, as many times as its connection says (`calls.retries` where it
+// says nothing), after a wait that starts at `calls.retryWait` and doubles each time; one that failed
+// after something came never is. pi-ai's own retries stay off, so these are the only ones.
 //
 // Every request carries everything it is about, so that what an agent was sent can be read back
 // whole: Anthropic's message threads, where pi-ai sends a later request only what is new and the
@@ -21,37 +21,40 @@
 // its key and headers would go with it to an address nobody gave them for, and neither a key nor a
 // header the loop passes in its options is sent. Google's calls are the one kind that can't go out
 // through the layer's own fetch, so a Google connection takes no address but Google's own (book.ts).
-// A stream that goes silent once its answer has begun is ended after a wait (`silenceWatch`), in
-// words that say so.
+// A stream that goes silent once its answer has begun is ended after `calls.silentAfter`
+// (`silenceWatch`), in words that say so and name that setting. A call's settings are read as it is
+// made, at its agent's chat's levels, or, with no chat in view, at the levels every chat shares.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
 import { createAssistantMessageEventStream } from "@earendil-works/pi-ai";
 import { DEFAULT_THINKING_BUDGETS, MIN_ANSWER_TOKENS, clampReasoning } from "@earendil-works/pi-ai/api/simple-options";
 import { clampThinkingLevel } from "@earendil-works/pi-ai/models";
-import type { JsonObject, ModelLimits } from "../contract";
+import type { JsonObject, ModelLimits, Scope, UserScope } from "../contract";
+import type { ModelSettings } from "../harness/settings";
+import { MODELS } from "../harness/settings/models";
 import type { Book, Connection } from "./book";
 import { sentHeaders } from "./book";
 import { isRecord, isTokenCount, own } from "./json";
 import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
 import { limitsOf } from "./limits";
-import type { AgentChoice, ModelEffort } from "./source";
+import type { AgentChoice, ModelEffort, UserChoice } from "./source";
 import { compatSays, inPlace, keepsSystemInPlace } from "./transcript";
-import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact } from "./words";
+import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export interface CallDeps {
   pi: MutableModels;
   book: Book;
+  /** The user the calls are made for: a scope that names him alone reads the levels every chat shares. */
+  user: string;
   /** How HTTP goes out, where pi-ai's client for the API takes it. */
   fetch: typeof globalThis.fetch;
   now(): number;
   setTimeout(run: () => void, ms: number): unknown;
   clearTimeout(handle: unknown): void;
-  /** How long a call whose answer has begun may go with nothing from its server before it is ended; 0 for no limit. */
-  silentMs(): Promise<number>;
-  /** The words that name that wait's setting, and where it is changed. */
-  silentSetting(): string;
+  /** The model layer's settings at a scope's levels, read as each call is made. */
+  settings(scope: Scope | UserScope): Promise<ModelSettings>;
   /** The text a system message is sent as where its model takes none mid-conversation, from the system message's text; absent: its text, unmarked. */
   markNote?(text: string): string;
 }
@@ -83,7 +86,7 @@ export interface CallAsk {
   cacheRetention: CacheRetention;
   /** The agent session the call belongs to: its calls share the provider's prompt cache. */
   sessionId?: string;
-  /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's setting, else `RETRIES`. */
+  /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's own count, else `calls.retries`. */
   retries?: number;
   /** Fields of a passed request sent as they came, where the call speaks the request's own API (OpenAI's chat completions). */
   extras?: JsonObject;
@@ -229,31 +232,33 @@ interface SilenceWatch {
 const LONGEST_TIMER = 2_147_483_647;
 
 /**
- * Watches a call for silence, and calls `silent` once it has lasted `ms` (none at all where `ms`
- * isn't a positive length). The wait starts with the answer, at its first piece of text, of thinking
- * or of a tool call: until then the model may still be reading a long prompt, or thinking where
- * nothing of it is shown, and a slow start is no dead stream. From then on anything from the server
- * is life: any byte of the response (a ping or a keep-alive that pi-ai never passes on among them)
- * and any event pi-ai makes of it.
+ * Watches a call for silence, and calls `silent` once it has lasted `ms` (none at all where `ms` is
+ * none: `calls.silentAfter` set to no limit). The wait starts with the answer, at its first piece of
+ * text, of thinking or of a tool call: until then the model may still be reading a long prompt, or
+ * thinking where nothing of it is shown, and a slow start is no dead stream. From then on anything
+ * from the server is life: any byte of the response (a ping or a keep-alive that pi-ai never passes
+ * on among them) and any event pi-ai makes of it.
  */
-function silenceWatch(deps: CallDeps, ms: number, silent: () => void): SilenceWatch {
+function silenceWatch(deps: CallDeps, ms: number | undefined, silent: (ms: number) => void): SilenceWatch {
+  if (ms === undefined) return { alive() {}, begun() {}, stop() {} };
+  const wait = ms;
   let started = false;
   let last = 0;
   let timer: unknown;
   const check = (): void => {
     const quiet = deps.now() - last;
-    if (quiet >= ms) silent();
-    else timer = deps.setTimeout(check, Math.min(ms - quiet, LONGEST_TIMER));
+    if (quiet >= wait) silent(wait);
+    else timer = deps.setTimeout(check, Math.min(wait - quiet, LONGEST_TIMER));
   };
   return {
     alive() {
       last = deps.now();
     },
     begun() {
-      if (started || !Number.isFinite(ms) || ms <= 0) return;
+      if (started) return;
       started = true;
       last = deps.now();
-      timer = deps.setTimeout(check, Math.min(ms, LONGEST_TIMER));
+      timer = deps.setTimeout(check, Math.min(wait, LONGEST_TIMER));
     },
     stop() {
       deps.clearTimeout(timer);
@@ -294,11 +299,6 @@ function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void
   return Object.assign(watched, { preconnect: fetch.preconnect });
 }
 
-/** How many times a call that failed before any piece of its answer came is made again, where its connection doesn't say. */
-const RETRIES = 2;
-/** The wait before a call is first made again; each wait after is twice the one before. */
-const RETRY_WAIT_MS = 1_000;
-
 /** Whether a call that failed before any piece of its answer came may be made again: no server was reached, or it answered 429 or 5xx. */
 function mayRetry(wire: Wire, failed: AssistantMessage): boolean {
   if (wire.unreached === true) return true;
@@ -325,10 +325,11 @@ function stopWords(signal: AbortSignal | undefined): string {
 const STOPPED = Symbol("stopped");
 
 /**
- * Makes one call (see the head of this file), its events pushed to `out` as they come: whatever
- * happens, `out` ends with a `done` or an `error` event.
+ * Makes one call (see the head of this file) under the model layer's settings as its caller read
+ * them, its events pushed to `out` as they come: whatever happens, `out` ends with a `done` or an
+ * `error` event.
  */
-export async function makeCall(deps: CallDeps, shape: CallShape, context: TranscriptContext, ask: CallAsk, signal: AbortSignal | undefined, out: AssistantMessageEventStream): Promise<void> {
+export async function makeCall(deps: CallDeps, shape: CallShape, context: TranscriptContext, ask: CallAsk, settings: ModelSettings, signal: AbortSignal | undefined, out: AssistantMessageEventStream): Promise<void> {
   const { connection, kind, model, limits } = shape;
   // Ends a call that went silent, beside the caller's own signal, with words that say so.
   const quiet = new AbortController();
@@ -339,7 +340,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     if (signal?.aborted === true) return { ...message, content: [...message.content], stopReason: "aborted", errorMessage: message.errorMessage ?? stopWords(signal) };
     // The silence's own words, which hold no secret.
     if (quiet.signal.aborted) return { ...message, content: [...message.content], stopReason: "error", errorMessage: errorWords(quiet.signal.reason) };
-    return { ...message, content: [...message.content], stopReason: "error", errorMessage: redact(failedWith(message, kind), await secrets()) };
+    return { ...message, content: [...message.content], stopReason: "error", errorMessage: redact(failedWith(message, kind), await secrets(), settings.wordsMost) };
   };
   try {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
@@ -372,8 +373,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const messages = inPlace(context.messages, keepsSystemInPlace(model), deps.markNote);
     // Under the provider's own default its model may think, so what thinking refuses is left out then too.
     const changes: PayloadChanges = { sampling: openAI ? {} : rest, serial: ask.serialTools, providerDefault: leftToProvider, thinking: reasoning !== undefined || leftToProvider, extras: ask.extras, uncapped: room === undefined };
-    const silentFor = await deps.silentMs();
-    const watching = silenceWatch(deps, silentFor, () => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${deps.silentSetting()} says how long an answer may go silent.`)));
+    const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
     watch = watching;
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
     const headers = sentHeaders(connection);
@@ -463,7 +463,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       return undefined;
     };
 
-    const retries = ask.retries ?? connection.retries ?? RETRIES;
+    const retries = ask.retries ?? connection.retries ?? settings.retries;
     for (let tried = 0; ; tried += 1) {
       delete wire.status;
       delete wire.unreached;
@@ -471,7 +471,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       if (failed === undefined) return;
       if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) return endWith(out, await failure(failed));
       const { promise: waited, resolve: wake } = Promise.withResolvers<void>();
-      const timer = deps.setTimeout(wake, RETRY_WAIT_MS * 2 ** tried);
+      const timer = deps.setTimeout(wake, settings.retryWait * 2 ** tried);
       const woke = await Promise.race([waited, stopped]);
       deps.clearTimeout(timer);
       if (woke === STOPPED) return endWith(out, await failure(emptyAnswer(model, "aborted", stopWords(signal), deps.now())));
@@ -479,7 +479,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   } catch (error) {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
     // Whatever words leave here, no key, token or header's value the layer holds is in them.
-    endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets()), deps.now()));
+    endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets(), settings.wordsMost), deps.now()));
   } finally {
     watch?.stop();
   }
@@ -499,8 +499,8 @@ function samplingOf(options: SimpleStreamOptions): Sampling {
   return out;
 }
 
-/** What pi's loop asks of a call, from the options it hands its stream function. */
-function askOf(options: SimpleStreamOptions, shape: CallShape): CallAsk {
+/** What pi's loop asks of a call, from the options it hands its stream function; the prompt cache is kept as `calls.cacheRetention` says. */
+function askOf(options: SimpleStreamOptions, shape: CallShape, settings: ModelSettings): CallAsk {
   const { identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload } = options;
   const carried = Object.fromEntries(Object.entries({ identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload }).filter(([, v]) => v !== undefined)) as CallAsk["carried"];
   return {
@@ -510,8 +510,7 @@ function askOf(options: SimpleStreamOptions, shape: CallShape): CallAsk {
     sampling: samplingOf(options),
     ...(options.toolChoice !== undefined ? { toolChoice: options.toolChoice } : {}),
     serialTools: shape.connection.serialTools === true,
-    // pi-ai's own default retention, said here so that nothing of the environment's changes it.
-    cacheRetention: options.cacheRetention ?? "short",
+    cacheRetention: settings.cacheRetention,
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     carried,
   };
@@ -521,9 +520,9 @@ function askOf(options: SimpleStreamOptions, shape: CallShape): CallAsk {
  * pi's stream function over the layer's calls (see the head of this file). The model it is handed
  * must be one the layer made for an agent (`choiceOf`): the call is shaped from that agent's choice
  * as the connection stands at the time of the call, so a key, a model or a limit changed since takes
- * effect at once.
+ * effect at once, and made under the settings at its agent's chat's levels as they stand then.
  */
-export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => AgentChoice | undefined): StreamFn {
+export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => UserChoice | undefined): StreamFn {
   return (model, context, options = {}) => {
     const out = createAssistantMessageEventStream();
     const choice = choiceOf(model);
@@ -531,7 +530,8 @@ export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => 
       try {
         if (choice === undefined) throw new Error("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
         const shape = await shapeOf(deps, choice);
-        await makeCall(deps, shape, context, askOf(options, shape), options.signal, out);
+        const settings = await deps.settings(choice.scope ?? { user: choice.user });
+        await makeCall(deps, shape, context, askOf(options, shape, settings), settings, options.signal, out);
       } catch (error) {
         endWith(out, emptyAnswer(model, options.signal?.aborted === true ? "aborted" : "error", errorWords(error), deps.now()));
       }

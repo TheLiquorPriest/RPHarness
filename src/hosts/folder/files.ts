@@ -1,16 +1,25 @@
 // The folder host's file port (§5, §5.1): reads and finds over the agents' view, and writes held to
 // where each writer may write. An agent's write in a turn goes in the turn's journal, so the lead
-// can drop that agent's writes (§13.4).
+// can drop that agent's writes (§13.4). A scope that names only the user sees the shipped and global
+// levels alone, and writes nowhere.
 
 import { appendFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Range, Refused, Scope, Unapplied, Writer, Written } from "../../contract/index";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, LayerLevel, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
 import type { Serial } from "./disk";
 import { codeOf, sha256, writeWhole } from "./disk";
 import type { JournalLine } from "./shape";
 import type { Site } from "./site";
-import type { Located, TopView } from "./view";
+import type { Located, TopView, TreeLocation } from "./view";
 import { folderLayers, folderPlaces, kindOf, locate, MOUNTS, refusalFor, topView, viewPath, writableFor } from "./view";
+
+/** The levels every chat shares, which a scope that names only the user sees. */
+const SHARED: readonly LayerLevel[] = ["shipped", "global"];
+
+/** Whether a scope names a chat: one that names only the user has no chat in view. */
+function namesChat(scope: Scope | UserScope): scope is Scope {
+  return "chat" in scope;
+}
 
 /** The most hits a find gives when its query names no limit. */
 export const FIND_LIMIT = 200;
@@ -144,13 +153,21 @@ async function apply(at: Located, op: FileOp): Promise<{ result: Written | Unapp
 
 /** The file port. `serial` runs one change at a time per file, shared with whatever else changes the tree's files (dropping an agent's writes), so two changes to one file both land. */
 export function folderFiles(site: Site, serial: Serial): FilesPort {
-  function refusal(scope: Scope, path: string, reason: Refused["reason"], writer: Writer | undefined): Refused {
+  /** Where a scope's levels are on disk: its chat's, or, with no chat in view, the tree's folder alone. */
+  async function locationOf(scope: Scope | UserScope): Promise<TreeLocation> {
+    if (namesChat(scope)) return site.location(scope);
+    site.serves(scope);
+    return { files: site.files };
+  }
+
+  function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | undefined): Refused {
+    if (!namesChat(scope)) return { status: "refused", path, reason, writable: [] };
     const places = folderPlaces(scope);
     return { status: "refused", path, reason, writable: writer === undefined ? places.writable : writableFor(places, writer) };
   }
 
-  async function find(scope: Scope, query: FileQuery): Promise<FileHit[] | Refused> {
-    const loc = await site.location(scope);
+  async function find(scope: Scope | UserScope, query: FileQuery): Promise<FileHit[] | Refused> {
+    const loc = await locationOf(scope);
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
@@ -203,6 +220,10 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
 
   return {
     async layers(scope) {
+      if (!namesChat(scope)) {
+        site.serves(scope);
+        return folderLayers().filter((layer) => SHARED.includes(layer.level));
+      }
       site.check(scope);
       return folderLayers();
     },
@@ -213,7 +234,7 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     },
 
     async read(scope, path, range): Promise<FileRead> {
-      const lookup = await locate(await site.location(scope), path);
+      const lookup = await locate(await locationOf(scope), path);
       if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
       const at = lookup.at;
       if (at.is === "none") return { status: "missing", path: at.path };
@@ -226,9 +247,11 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     find,
 
     async write(scope, path, op, by) {
-      const loc = await site.location(scope);
+      const loc = await locationOf(scope);
       const lookup = await locate(loc, path);
       if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, by);
+      // With no chat in view, what is found is a level every chat shares: no one's to write through the port.
+      if (!namesChat(scope)) return refusal(scope, lookup.at.path, "mounted", by);
       const reason = refusalFor(lookup.at, writableFor(folderPlaces(scope), by));
       if (reason !== undefined) return refusal(scope, lookup.at.path, reason, by);
       return serial.run(lookup.at.disk, async () => {

@@ -263,8 +263,8 @@ export interface LiveFilter {
 /**
  * What the live view is sent: every event, and the text of model calls as it streams; and, last, to
  * a listener cut off for falling behind (C29), how many items it had not taken. A listener is sent
- * its items in turn, the next once a promise it returns settles; one that has not taken more of a
- * run's items than that run's setting `live.backlog` allows is cut off, so no run waits on it.
+ * its items in turn, the next once a promise it returns settles; one that has left more of a run's
+ * items untaken than that run's setting `live.backlog` allows is cut off, so no run waits on it.
  */
 export type LiveItem = { type: "event"; record: TraceRecord } | { type: "delta"; scope: Scope; delta: TraceDelta } | { type: "cut"; behind: number };
 

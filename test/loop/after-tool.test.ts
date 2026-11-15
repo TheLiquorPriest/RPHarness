@@ -132,4 +132,93 @@ describe("after a tool, in pi's afterToolCall", () => {
     expect(await kept(s, "w-1")).toBe(never);
     expect(await kept(s, "h-1")).toBe(HOLD_TEXT);
   });
+
+  test("a write that went through, with a result rule that throws and a keeping that fails: the model reads the write's own answer and the two lines beside it, the log names both, and the write is made once", async () => {
+    const ran: string[] = [];
+    const written = "Ledger opened for Mira, with forty silver marks entered on its first page.";
+    let breakRules = false;
+    const tools = hostTools(ran);
+    const ledger = tools["ledger_open"];
+    if (ledger === undefined) throw new Error("The fixture has no ledger_open.");
+    tools["ledger_open"] = {
+      ...ledger,
+      run: async (args) => {
+        ran.push(`ledger_open ${JSON.stringify(args)}`);
+        // The rules on its result are read next: that read fails once.
+        breakRules = true;
+        return { content: [{ type: "text", text: written }] };
+      },
+    };
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".rules/fixture-tides.md": TIDE_RULE },
+      config: "results:\n  clip: 30\n",
+      tools,
+      filesPort: (inner) => ({
+        layers: async (scope) => {
+          if (!breakRules) return inner.layers(scope);
+          breakRules = false;
+          throw new Error("Fixture: the levels cannot be listed.");
+        },
+        places: (scope) => inner.places(scope),
+        find: (scope, query) => inner.find(scope, query),
+        read: (scope, path, range) => inner.read(scope, path, range),
+        write: async (scope, path, op, by) => {
+          if (path.includes("cache/results/")) throw new Error("Fixture: the disk is full.");
+          return inner.write(scope, path, op, by);
+        },
+      }),
+      answers: [{ pieces: [{ call: "ledger_open", args: { holder: "Mira" }, id: "w-1" }] }, REPLY],
+    }));
+
+    expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+
+    const lines = await notices(s);
+    expect(ran).toEqual(['ledger_open {"holder":"Mira"}']);
+    const answer = answerTo(s, "w-1");
+    expect(answer).toStartWith(written.slice(0, 30));
+    expect(answer).toContain(lines.line("rule_unasked", { tool: "ledger_open" }) ?? "?");
+    expect(answer).toContain(lines.line("not_kept", { tool: "ledger_open" }) ?? "?");
+    expect(answer).not.toContain(lines.line("failed", { tool: "ledger_open" }) ?? "?");
+    expect(s.logged.map((line) => line.message)).toEqual(expect.arrayContaining(["The rules on a tool's answer could not be asked; the answer stands as the tool gave it.", "A clipped tool answer's whole could not be kept."]));
+  });
+
+  test("an answer pi words for a long refused argument list keeps to the clip, its whole kept", async () => {
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD },
+      config: "results:\n  clip: 60\n",
+      tools: hostTools([]),
+      answers: [{ pieces: [{ call: "tide_table", args: { day: "the ninth ".repeat(40) }, id: "p-1" }] }, REPLY],
+    }));
+
+    expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+
+    const lines = await notices(s);
+    // pi's own refusal, worded by the runner with the tool's whole schema: longer than the setting.
+    const whole = await kept(s, "p-1");
+    expect(whole.length).toBeGreaterThan(60);
+    expect(answerTo(s, "p-1")).toBe(clipped(lines, whole, 60, "p-1"));
+    expect(s.trace.of("tool_ended").find((record) => record.event.callId === "p-1")?.event.result.content).toEqual([{ type: "text", text: whole.slice(0, 60) }, { type: "text", text: lines.line("clipped", { shown: 60, length: whole.length, left: whole.length - 60, path: "sessions/s1/turns/t1/cache/results/p-1.md" }) ?? "" }]);
+  });
+
+  test("a job from the Jobs page with a long answer: the whole is in its session's cache/ and the line names it", async () => {
+    const keeper = "---\nname: keeper\ndescription: Fixture keeper.\nmodel: default\ntools: [tide_table]\n---\nFixture keeper: you read the tides.\n";
+    const s = (open = await stage({
+      files: { ".agents/keeper.md": keeper },
+      config: "results:\n  clip: 40\n",
+      tools: hostTools([]),
+      answers: [{ pieces: [{ call: "tide_table", args: { day: 9 }, id: "j-1" }] }, { pieces: [{ text: "Read." }] }],
+    }));
+    const scope = { user: request("t1").scope.user, chat: request("t1").scope.chat, session: "s1" };
+
+    const started = await s.harness.jobs.start(scope, { agent: "keeper", brief: "Read the tides for the ninth." });
+    if ("refused" in started) throw new Error("The job was not started.");
+    await s.trace.seen(() => s.trace.records.some((record) => record.event.kind === "job" && record.event.job.state === "done"));
+
+    // A job runs in a session of its own, with no turn: the whole goes in that session's cache/.
+    const lines = await notices(s);
+    const path = `sessions/${started.scope.session}/cache/results/j-1.md`;
+    const read = await s.env.files.read(started.scope, path);
+    expect(read.status === "read" ? read.text : "").toBe(TIDES);
+    expect(answerTo(s, "j-1")).toBe(`${TIDES.slice(0, 40)}${lines.line("clipped", { shown: 40, length: TIDES.length, left: TIDES.length - 40, path }) ?? ""}`);
+  });
 });

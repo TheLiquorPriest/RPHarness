@@ -872,6 +872,7 @@ export class Turn {
       trace: this.#trace,
       clock: env.clock,
       files: env.files,
+      log: env.log,
       ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
       ...(env.switches !== undefined ? { switches: env.switches } : {}),
       places: this.#places ?? { notes: "", session: "", writable: [] },

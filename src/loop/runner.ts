@@ -27,7 +27,7 @@
 // files. A text the file does not have leaves the answer empty.
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
-import type { AgentRef, CallPermission, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import type { AgentRef, CallPermission, CallRefusal, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import type { LayerOptions } from "../model/source";
 import { type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, emptyUsage, type Room } from "./budget";
@@ -64,6 +64,8 @@ export interface RunnerTexts {
   failed?(fields: { tool: string }): string | undefined;
   /** The answer to a call the work stopped before it finished (a stop, or a limit), kept so the agent can be continued: it may have done its work, or not. */
   unfinished?(fields: { tool: string }): string | undefined;
+  /** The answer to a call a spent limit kept from starting (R-194): it never started. */
+  notStarted?(fields: { tool: string }): string | undefined;
   /** What the owner said to the run's main agent, as the agent is given it: his words marked as his. Absent, the words go in bare. */
   said?(fields: { words: string }): string | undefined;
 }
@@ -179,6 +181,10 @@ interface Stint {
   readonly writing: Map<number, number>;
   /** The permission each call of a write or external tool ran under, by call id, for the record of its end. */
   readonly permissions: Map<string, CallPermission>;
+  /** Why each call that never ran did not, by call id, for the record of its end (C1's note). */
+  readonly refusals: Map<string, CallRefusal>;
+  /** Calls pi answered in its own words, reworded by the runner and waiting to be held to the bound before the next request (`#finishTurn`), by call id. */
+  readonly reworded: Map<string, { tool: string; made: AgentToolResult; ms: number }>;
   /** The rules on each call's arguments that remind, by call id: their texts come back with its answer. */
   readonly argued: Map<string, Fired[]>;
   /** Each tool's own answer as it ran, by call id, until the hook after it takes it. */
@@ -345,6 +351,8 @@ export class AgentRunner {
       calling: false,
       writing: new Map(),
       permissions: new Map(),
+      refusals: new Map(),
+      reworded: new Map(),
       argued: new Map(),
       ran: new Map(),
       results: new Map(),
@@ -417,6 +425,9 @@ export class AgentRunner {
   #finish(stint: Stint, failure: string | undefined): void {
     if (stint.timer !== undefined) this.#clock.clearTimeout(stint.timer);
     if (stint.callTimer !== undefined) this.#clock.clearTimeout(stint.callTimer);
+    // pi's own words for calls the work ended before their step finished: recorded as they are.
+    for (const [id, { tool, made, ms }] of stint.reworded) this.#ended(stint, id, tool, made, true, ms);
+    stint.reworded.clear();
     const last = stint.last;
     const failed = stint.halt === undefined && (failure !== undefined || last === undefined || last.stopReason === "error");
     if (stint.halt !== undefined || failed) this.#settle(stint);
@@ -669,6 +680,8 @@ export class AgentRunner {
       case "message_end": {
         const message = event.message;
         if (message.role === "toolResult") {
+          // A tool's answer carries the host's time, as every other message of the run does.
+          message.timestamp = this.#clock.now();
           stint.reading.delete(message.toolCallId);
           return;
         }
@@ -729,22 +742,52 @@ export class AgentRunner {
         // The very answer pi turns into the call's result message right after this event; pi types the event's field loosely.
         const made: AgentToolResult = event.result;
         const read = stint.read.get(id);
+        const ms = event.durationMs ?? 0;
         // A call the hook before it answered in its tool's place: what the model reads is the gate's, never pi's words for a blocked call.
         if (read !== undefined) made.content.splice(0, made.content.length, ...read);
-        else if (!stint.results.has(id)) this.#reword(stint, id, event.toolName, made);
-        const ranAs = stint.ranAs.get(id);
-        const tool = ranAs ?? event.toolName;
-        const own = stint.results.get(id);
-        const result: ToolResult = own !== undefined ? withoutAsk(own) : { content: made.content, ...(event.isError ? { error: true as const } : {}) };
-        const clean = !event.isError && isClean(result) && !stint.unclean.has(id);
-        const carried = stint.carried.get(id);
-        if (carried !== undefined && ranAs === undefined) this.#emit(stint, { kind: "tool_started", callId: id, tool, args: carried.args, closing: carried.closing });
-        const permission = stint.permissions.get(id);
-        this.#emit(stint, { kind: "tool_ended", callId: id, tool, result, clean, endedRun: stint.ended.has(id), ms: event.durationMs ?? 0, ...(permission !== undefined ? { permission } : {}) });
+        else if (!stint.results.has(id)) {
+          this.#reword(stint, id, event.toolName, made);
+          // The runner's words for it are held to the bound as a tool's own answer is, and recorded then, before the next request (`#finishTurn`).
+          if (this.#o.gate?.bound !== undefined) {
+            stint.reworded.set(id, { tool: event.toolName, made, ms });
+            return;
+          }
+        }
+        this.#ended(stint, id, event.toolName, made, event.isError, ms);
         return;
       }
       default:
         return;
+    }
+  }
+
+  /**
+   * A call's end record. A found tool is recorded as itself: through `runAs`, or, where its carrier
+   * ran nothing because the tool it names was kept from starting, by the name the carrier gave.
+   */
+  #ended(stint: Stint, id: string, toolName: string, made: AgentToolResult, isError: boolean, ms: number): void {
+    const ranAs = stint.ranAs.get(id);
+    const own = stint.results.get(id);
+    const carried = stint.carried.get(id);
+    const refused = own?.refused ?? stint.refusals.get(id);
+    const named = carried !== undefined && ranAs === undefined && own?.refused !== undefined ? foundOf(carried.args) : undefined;
+    const tool = ranAs ?? named?.name ?? toolName;
+    const result: ToolResult = own !== undefined ? ownPart(own) : { content: made.content, ...(isError ? { error: true as const } : {}) };
+    const clean = !isError && isClean(result) && !stint.unclean.has(id);
+    if (carried !== undefined && ranAs === undefined) this.#emit(stint, { kind: "tool_started", callId: id, tool, args: named?.args ?? carried.args, closing: carried.closing, ...(named !== undefined ? { via: "tool_use" as const } : {}) });
+    const permission = stint.permissions.get(id);
+    this.#emit(stint, { kind: "tool_ended", callId: id, tool, result, clean, endedRun: stint.ended.has(id), ms, ...(permission !== undefined ? { permission } : {}), ...(refused !== undefined ? { refused } : {}) });
+  }
+
+  /** pi's own words for the calls of the step that just finished, held to the bound, then recorded: before the next request reads them. */
+  async #boundReworded(stint: Stint): Promise<void> {
+    const waiting = [...stint.reworded];
+    stint.reworded.clear();
+    for (const [id, { tool, made, ms }] of waiting) {
+      const { kept, read } = await this.#bounded(stint, { agent: this.agent, callId: id, tool, args: {} }, { content: [...made.content], error: true }, []);
+      made.content.splice(0, made.content.length, ...read);
+      stint.results.set(id, kept);
+      this.#ended(stint, id, tool, made, true, ms);
     }
   }
 
@@ -834,11 +877,19 @@ export class AgentRunner {
     const hit = this.#budget.reached(this.agent).find((reached) => reached.limit !== "calls");
     if (hit !== undefined) {
       this.#halt(stint, { status: "limit", hit });
+      // A found tool is recorded as itself, whether its carrier had begun or not.
       const carried = this.#carriers.has(name) ? stint.carried.get(id) : undefined;
-      if (carried !== undefined) this.#emit(stint, { kind: "tool_started", callId: id, tool: name, args: carried.args, closing: carried.closing });
-      // Its answer is the one the transcript keeps for a call the work ended before (`#settle`); the `limit` record before it says which.
-      const line = this.#o.texts.unfinished?.({ tool: name });
-      this.#emit(stint, { kind: "tool_ended", callId: id, tool: name, result: { content: line === undefined ? [] : [{ type: "text", text: line }], error: true }, clean: false, endedRun: false, ms: 0 });
+      const named = carried === undefined ? undefined : foundOf(carried.args);
+      const tool = named?.name ?? name;
+      if (carried !== undefined) this.#emit(stint, { kind: "tool_started", callId: id, tool, args: named?.args ?? carried.args, closing: carried.closing, ...(named !== undefined ? { via: "tool_use" as const } : {}) });
+      const refused: CallRefusal = { by: "limit", hit };
+      stint.refusals.set(id, refused);
+      // A write so stopped still names its lane and the permission it would have run under.
+      const args = named?.args ?? (stint.carried.has(id) ? (context.args as JsonValue) : withoutClosing(context.args as JsonValue));
+      const permission = await this.#o.gate?.permissionOf?.({ agent: this.agent, callId: id, tool, args });
+      // It never started: answered with a line of its own, the one the transcript keeps for it (`#settle`); the `limit` record before it says which.
+      const line = this.#o.texts.notStarted?.({ tool });
+      this.#emit(stint, { kind: "tool_ended", callId: id, tool, result: { content: line === undefined ? [] : [{ type: "text", text: line }], error: true }, clean: false, endedRun: false, ms: 0, ...(permission !== undefined ? { permission } : {}), refused });
       return { block: true };
     }
     if (this.#carriers.has(name)) return undefined;
@@ -852,15 +903,20 @@ export class AgentRunner {
       before = await untilAborted(gate.before(call, signal ?? new AbortController().signal), signal);
     } catch (error) {
       if (stint.halt !== undefined) return { block: true };
-      // What fails around the tool (a permission or a rule that could not be asked) is answered as a tool that failed, never in pi's words.
+      // What fails around the tool (a permission or a rule that could not be asked) is answered as a tool that failed, never in pi's words; the record says why.
+      stint.refusals.set(id, { by: "unasked", error: error instanceof Error ? error.message : String(error) });
       return this.#blocked(stint, call, this.#failed(name, error), []);
     }
     if (before === undefined || stint.halt !== undefined) return { block: true };
     if (before.permission !== undefined) stint.permissions.set(id, before.permission);
-    if (before.refuse !== undefined) return this.#blocked(stint, call, before.refuse, []);
+    if (before.refuse !== undefined) {
+      if (before.refused !== undefined) stint.refusals.set(id, before.refused);
+      return this.#blocked(stint, call, before.refuse, []);
+    }
     if (before.hold !== undefined) {
       // Answered with the rule's text in its tool's place, the texts of the rules that remind after it: never clean, so a closing call goes on to a call that reads it (§10.7).
       stint.unclean.add(id);
+      stint.refusals.set(id, { by: "hold", rule: before.hold.firing.rule });
       this.#ruled(stint, call, before.hold, "hold");
       for (const fired of before.remind) this.#ruled(stint, call, fired, "remind");
       return this.#blocked(stint, call, { content: [{ type: "text", text: before.hold.text.trimEnd() }] }, before.remind.map((fired) => fired.text.trimEnd()));
@@ -949,8 +1005,9 @@ export class AgentRunner {
 
   /**
    * A call that ran, through the gate after it: the rules on its result, and its answer held to the
-   * bound with the texts of every rule on the call, each firing traced. A gate that fails is
-   * answered as a tool that failed. Undefined once the work stopped.
+   * bound with the texts of every rule on the call, each firing traced. Whatever fails around it, the
+   * tool's own answer stands (§6.1): a write that went through is never told as failed. Undefined once
+   * the work stopped.
    */
   async #after(stint: Stint, call: GateCall, ran: LoopToolResult, argued: Fired[], signal: AbortSignal | undefined): Promise<{ kept: LoopToolResult; read: ToolContent[] } | undefined> {
     const gate = this.#o.gate;
@@ -958,10 +1015,12 @@ export class AgentRunner {
     let after: GateAfter | undefined;
     try {
       after = gate === undefined ? { result: ran, remind: [] } : await untilAborted(gate.after(call, ran, signal ?? new AbortController().signal, texts, this.#promptRoom(stint)), signal);
-    } catch (error) {
+    } catch {
       if (stint.halt !== undefined) return undefined;
-      // What fails around the tool (a rule that could not be asked, a whole answer that could not be kept) is answered as a tool that failed, never in pi's words.
-      return this.#bounded(stint, call, this.#failed(call.tool, error), []);
+      // The gate says what it could not do beside the answer, and logs it; failing whole, the answer goes as the tool gave it.
+      if (!isClean(ran) || argued.length > 0) stint.unclean.add(call.callId);
+      for (const fired of argued) this.#ruled(stint, call, fired, "remind");
+      return this.#bounded(stint, call, ran, texts);
     }
     if (after === undefined || stint.halt !== undefined) return undefined;
     // Whether an answer is clean is the tool's own: what it reported counts though the model reads none of it.
@@ -994,6 +1053,7 @@ export class AgentRunner {
   async #finishTurn(turn: AgentTurnContext): Promise<AgentTurnDecision | undefined> {
     const stint = this.#stint;
     if (stint === undefined) return undefined;
+    await this.#boundReworded(stint);
     const { message } = turn;
     // A message a rule stopped ends pi's loop as it stands, whatever end the provider gave it: no
     // call of it is answered and no run ends on it. `#drive` goes on from before it.
@@ -1079,14 +1139,15 @@ export class AgentRunner {
       if (calls.every((call) => stint.finished.has(call.id))) break;
       const answers = new Map(messages.slice(at + 1).flatMap((after) => (after.role === "toolResult" ? [[after.toolCallId, after] as const] : [])));
       // What pi holds for a call that did not finish is the empty answer the stop gave it, or pi's own words: neither is kept.
-      messages.splice(at + 1, messages.length, ...calls.map((call) => (stint.finished.has(call.id) ? answers.get(call.id) : undefined) ?? this.#unfinished(call)));
+      messages.splice(at + 1, messages.length, ...calls.map((call) => (stint.finished.has(call.id) ? answers.get(call.id) : undefined) ?? this.#unfinished(stint, call)));
       break;
     }
     this.#pi.state.messages = messages;
   }
 
-  #unfinished(call: ToolCall): ToolResultMessage {
-    const line = this.#o.texts.unfinished?.({ tool: call.name });
+  /** The answer the transcript keeps for a call the work ended before it finished: never started, where a spent limit kept it from starting; else it may have done its work, or not. */
+  #unfinished(stint: Stint, call: ToolCall): ToolResultMessage {
+    const line = stint.refusals.get(call.id)?.by === "limit" ? this.#o.texts.notStarted?.({ tool: call.name }) : this.#o.texts.unfinished?.({ tool: call.name });
     return { role: "toolResult", toolCallId: call.id, toolName: call.name, content: line === undefined ? [] : [{ type: "text", text: line }], isError: true, timestamp: this.#clock.now() };
   }
 
@@ -1232,9 +1293,17 @@ function isClean(result: ToolResult): boolean {
   return result.error !== true && (result.reports?.length ?? 0) === 0;
 }
 
-function withoutAsk(result: LoopToolResult): ToolResult {
-  const { ask: _ask, ...rest } = result;
+/** A call's answer as the trace keeps it: what only RPH's own tools add to an answer (a question, why it never ran) stays out. */
+function ownPart(result: LoopToolResult): ToolResult {
+  const { ask: _ask, refused: _refused, ...rest } = result;
   return rest;
+}
+
+/** The tool a carrier's call names (`tool_use`'s `name` and `args`), as itself: undefined where it names none. */
+function foundOf(args: JsonValue): { name: string; args: JsonValue } | undefined {
+  if (typeof args !== "object" || args === null || Array.isArray(args)) return undefined;
+  const name = args["name"];
+  return typeof name === "string" && name !== "" ? { name, args: args["args"] ?? {} } : undefined;
 }
 
 /** What the model reads of a call: its answer's content, then its reports and the texts that go after it, one part each. */

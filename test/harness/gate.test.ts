@@ -1,10 +1,11 @@
 // What runs around each tool call (§13.3, §6.8, §5.4): the user's permission for what a tool writes,
-// the rules on its arguments and its result, a long result clipped, and a call that cannot run or
-// whose tool failed, each answered in the words of a file, never in pi's or an exception's own.
+// the host's switches, each user's own, for a tool that calls out, the rules on its arguments and
+// its result, a long result clipped, and a call that cannot run or whose tool failed, each answered
+// in the words of a file, never in pi's or an exception's own.
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message } from "@earendil-works/pi-ai";
-import type { ApprovalAnswer, ApprovalsPort, LanePermission, RuleFiring } from "../../src/contract";
-import { request, said, type Stage, stage, textOf } from "./support";
+import type { ApprovalAnswer, ApprovalsPort, LanePermission, RuleFiring, SwitchesPort } from "../../src/contract";
+import { request, said, type Stage, stage, textOf, USER } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -97,6 +98,47 @@ describe("permissions", () => {
       "n-1": { lane: "cast", setting: "never" },
       "r-1": null,
     });
+  });
+});
+
+describe("switches", () => {
+  const TOWER = { kind: "mcp-server", name: "dice-tower", target: "dice-tower --stdio" } as const;
+  /** The host's registry, each user's own: the dice tower switched on for `on` alone. */
+  const switchedOnFor = (on: string): SwitchesPort & { asked: string[] } => {
+    const asked: string[] = [];
+    return {
+      asked,
+      state: async (user, thing) => {
+        asked.push(user);
+        return user === on && thing.name === TOWER.name && thing.target === TOWER.target ? "on" : "waiting";
+      },
+    };
+  };
+  const played = async (port: SwitchesPort, ran: string[]): Promise<Stage> => {
+    const s = (open = await stage({
+      files: { ".agents/lead.md": "---\nname: lead\ndescription: Fixture lead.\nmodel: default\ntools: [dice_roll]\ngiven: [prompt:*]\n---\nFixture lead: you run the turn.\n" },
+      switches: port,
+      tools: { dice_roll: { tier: "read", description: "Fixture: rolls dice on the dice tower.", switchable: TOWER, run: async () => (ran.push("dice_roll"), said("17")) } },
+      answers: [{ pieces: [{ call: "dice_roll", args: {}, id: "d-1" }] }, { pieces: [{ text: "<reply>The dice fall.</reply>" }] }],
+    }));
+    await s.turn(request("t1", { lead: "lead" }));
+    return s;
+  };
+
+  test("a tool that calls out, switched on for one user, is off for another of the same kind, name and target: the second user's call is refused by the switch, and its record says so", async () => {
+    const ran: string[] = [];
+    const mine = switchedOnFor(USER);
+    const first = await played(mine, ran);
+    expect(ran).toEqual(["dice_roll"]);
+    expect(mine.asked).toEqual([USER]);
+    await first.close();
+
+    // The same thing, switched on for another user only: this user's call is refused.
+    const theirs = switchedOnFor("second-reader");
+    const second = await played(theirs, ran);
+    expect(ran).toEqual(["dice_roll"]);
+    expect(theirs.asked).toEqual([USER]);
+    expect(second.trace.of("tool_ended").find((record) => record.event.callId === "d-1")?.event).toMatchObject({ tool: "dice_roll", refused: { by: "switch", thing: TOWER, state: "waiting" } });
   });
 });
 

@@ -175,9 +175,8 @@ describe("before a tool runs, in pi's beforeToolCall", () => {
     const lines = await notices(s);
     expect(ran).toEqual(['tide_table {"day":2}']);
     expect(answerTo(s, "x-1")).toBe(lines.line("not_switched_on", { tool: "dice_roll", name: "dice-tower", kind: "mcp-server" }) ?? "");
-    expect(toolOrder(s)).toEqual(["started:x-1", "ended:x-1", "started:r-1", "ended:r-1"]);
-    // Refused before any permission was read: its end names none.
-    expect(ended(s, "x-1")?.permission).toBeUndefined();
+    // Refused by the switch: its end gives that reason as a fact, and the permission it would have run under.
+    expect(ended(s, "x-1")).toMatchObject({ permission: { lane: "external", setting: "auto" }, refused: { by: "switch", thing: DICE_TOWER, state: "off" } });
   });
 
   test("once the turn's tokens have run out no tool starts: the work ends at that limit and says which, and the call it kept from running still ends in the trace", async () => {
@@ -199,7 +198,43 @@ describe("before a tool runs, in pi's beforeToolCall", () => {
     expect(s.model.requests).toHaveLength(1);
     const kinds = s.trace.records.map((record) => (record.event.kind === "tool_started" || record.event.kind === "tool_ended" ? `${record.event.kind}:${record.event.callId}` : record.event.kind));
     expect(kinds.slice(kinds.indexOf("tool_started:r-1"))).toEqual(["tool_started:r-1", "limit", "tool_ended:r-1", "agent_ended", "run_ended"]);
-    expect(ended(s, "r-1")).toMatchObject({ result: { content: [{ type: "text", text: lines.line("unfinished", { tool: "tide_table" }) ?? "" }], error: true }, clean: false });
+    // It never started: its own line, not the line for a call that may have done its work, and its end says why.
+    expect(ended(s, "r-1")).toMatchObject({ result: { content: [{ type: "text", text: lines.line("not_started", { tool: "tide_table" }) ?? "" }], error: true }, clean: false, refused: { by: "limit", hit: { limit: "tokensOut", per: "turn", max: 300, value: 320 } } });
+    expect(lines.line("not_started", { tool: "tide_table" })).not.toBe(lines.line("unfinished", { tool: "tide_table" }));
+  });
+
+  test("a found tool stopped by a spent limit before its carrier began, and one refused by a switch: each recorded under its own name, the stopped one answered with its own line; a write so stopped names its lane; each end record gives its reason", async () => {
+    // Refused by the switch through tool_use: recorded as the tool it named, with the switch's state.
+    const waiting: SwitchesPort = { state: async () => "waiting" };
+    const switched = (open = await stage({
+      files: { ".agents/lead.md": LEAD },
+      switches: waiting,
+      tools: hostTools([]),
+      answers: [{ pieces: [{ call: "tool_use", args: { name: "dice_roll", args: { formula: "2d6" } }, id: "u-2" }] }, REPLY],
+    }));
+    expect((await switched.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+    expect(switched.trace.of("tool_started").find((record) => record.event.callId === "u-2")?.event).toMatchObject({ tool: "dice_roll", via: "tool_use", args: { formula: "2d6" } });
+    expect(ended(switched, "u-2")).toMatchObject({ tool: "dice_roll", refused: { by: "switch", thing: DICE_TOWER, state: "waiting" } });
+    await switched.close();
+
+    // Stopped by a spent limit before its carrier began: recorded as the write it named, with its lane, its own line and the limit.
+    const ran: string[] = [];
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD },
+      config: "limits:\n  turn:\n    tokensOut: 300\n",
+      tools: hostTools(ran),
+      answers: [{ pieces: [{ call: "tool_use", args: { name: "ledger_open", args: { holder: "Mira" } }, id: "u-1" }], usage: { input: 400, output: 320 } }, REPLY],
+    }));
+    expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("limit");
+    const lines = await notices(s);
+    expect(ran).toEqual([]);
+    expect(s.trace.of("tool_started").find((record) => record.event.callId === "u-1")?.event).toMatchObject({ tool: "ledger_open", via: "tool_use", args: { holder: "Mira" } });
+    expect(ended(s, "u-1")).toMatchObject({
+      tool: "ledger_open",
+      result: { content: [{ type: "text", text: lines.line("not_started", { tool: "ledger_open" }) ?? "" }], error: true },
+      permission: { lane: "engine", setting: "auto" },
+      refused: { by: "limit", hit: { limit: "tokensOut", per: "turn" } },
+    });
   });
 
   test("the last call a calls limit allows runs its tools, as today's budget controls do, and no further model call is made (R-194)", async () => {

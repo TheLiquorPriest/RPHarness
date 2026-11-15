@@ -50,7 +50,7 @@ function steps(items: readonly LiveItem[]): (string | LiveItem)[] {
 const cutLines = (lines: readonly Line[]): Line[] => lines.filter((line) => line.message.startsWith("A live listener fell behind"));
 
 describe("the live hub", () => {
-  test("a listener that throws and one that stalls: every record reaches the trace as the run writes it, and the other listener in time; the log names the one that throws, once, and the stalled one is cut off past the run's setting and told how far behind it was", async () => {
+  test("a listener that throws and one that stalls: every record reaches the trace as the run writes it, and the other listener in time; the log names the one that throws, once, and the stalled one is cut off past the run's setting and told how far behind it was; the log line for a listener cut off says that more of the run's items were left untaken than live.backlog allows", async () => {
     const lines: Line[] = [];
     const hub = new LiveHub({ log: recordingLog(lines) });
     const recorder = new TraceRecorder();
@@ -81,7 +81,7 @@ describe("the live hub", () => {
     expect(lines.filter((line) => line.message.startsWith("A live listener threw"))).toEqual([{ level: "warn", message: "A live listener threw; it goes on being sent the items of the runs it follows.", fields: { user: "ana", chat: "harbour", error: "Fixture: the page broke." } }]);
     // It took step 1 and never let go of it; steps 2 to 4 waited for it, and step 5 was one more than the run's setting allows.
     expect(steps(stalled)).toEqual(["step 1", { type: "cut", behind: 4 }]);
-    expect(cutLines(lines)).toEqual([{ level: "warn", message: "A live listener fell behind and was cut off: it had not taken more of a run's items than live.backlog allows.", fields: { user: "ana", run: "t1", cutAt: "t1", behind: 4, backlog: 3 } }]);
+    expect(cutLines(lines)).toEqual([{ level: "warn", message: "A live listener fell behind and was cut off: more of a run's items were left untaken than live.backlog allows.", fields: { user: "ana", run: "t1", cutAt: "t1", behind: 4, backlog: 3 } }]);
   });
 
   test("a listener that returns a promise is sent its next item only once that promise settles, in order", async () => {

@@ -56,6 +56,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     appName: options.appName ?? env.id,
     texts: (scope) => modelTexts(env.files, scope),
     settings: (scope) => readModelSettings(env.files, scope, env.log),
+    ...(env.switches !== undefined ? { switches: env.switches } : {}),
   });
   const hub = new LiveHub({ log: env.log });
   const usage = new UsageBook({ store: env.store, clock: env.clock, log: env.log, files: env.files });

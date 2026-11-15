@@ -4,17 +4,25 @@
 // external tier's own setting, §6.8), and the user's rules on its arguments; after it
 // (`afterToolCall`), the rules on its result, and the user's bound on what the model reads of one
 // call (R-118): its answer and reports, the rules' texts after it, and a refusal's or a hold's words,
-// with the whole kept in the turn's folder (`cache/results/`). A tool found through `tool_use` is
-// asked about as itself. Every word the model is told comes from the tool answers' file.
-import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Places, Scope, SwitchesPort, ToolContent } from "../contract";
+// with the whole kept in the turn's folder (`cache/results/`), or the session's where the run has no
+// turn. A tool found through `tool_use` is asked about as itself. Every word the model is told comes
+// from the tool answers' file. A tool's own answer stands whatever fails around it: a rule on its
+// result that could not be asked, or a whole that could not be kept, is a line beside it, and the log
+// names what failed. Every refusal says why, as a fact, for the call's end record.
+import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Log, Places, Scope, SwitchesPort, ToolContent } from "../contract";
 import type { RuleRun } from "../files/api";
+import type { Fired } from "../loop/rules";
 import type { ParentCall, RunTrace } from "../loop/trace";
 import type { Bounded, GateAfter, GateBefore, GateCall, LoopToolResult, ToolGate } from "../loop/types";
 import type { HeldTool } from "../tools/registry";
 import { answer, type Words } from "../tools/kit";
 
-/** Where a clipped result's whole is kept, inside the turn's own `cache/` folder. */
+/** Where a clipped result's whole is kept, inside the turn's own `cache/` folder, or the session's. */
 const KEPT_RESULTS = "cache/results/";
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
 export interface GateDeps {
   scope: Scope;
@@ -33,6 +41,8 @@ export interface GateDeps {
   tools: ReadonlyMap<string, HeldTool>;
   /** Characters of one call that the model reads (`results.clip`). */
   clipChars: number;
+  /** Where what failed around a tool is named: a rule that could not be asked, a whole that could not be kept. */
+  log: Log;
 }
 
 export class TurnGate implements ToolGate {
@@ -45,37 +55,57 @@ export class TurnGate implements ToolGate {
   async before(call: GateCall, signal: AbortSignal): Promise<GateBefore> {
     const d = this.#d;
     const tool = d.tools.get(call.tool);
-    // A tool that runs a command or calls out does nothing until the host's switches have its thing on, pinned or found (§16).
+    // A tool that runs a command or calls out does nothing until the host's switches have its thing on for this user, pinned or found (§16, C31).
     const thing = tool?.switchable;
     if (thing !== undefined) {
-      const state = d.switches === undefined ? "off" : await d.switches.state(thing);
-      if (state !== "on") return { refuse: answer(d.words("not_switched_on", { tool: call.tool, name: thing.name, kind: thing.kind, ...(state === "waiting" ? { waiting: true } : {}) }), true), remind: [] };
+      const state = d.switches === undefined ? "off" : await d.switches.state(d.scope.user, thing);
+      if (state !== "on") {
+        // Its record still names the lane and the permission it would have run under.
+        const would = await this.permissionOf(call);
+        return { refuse: answer(d.words("not_switched_on", { tool: call.tool, name: thing.name, kind: thing.kind, ...(state === "waiting" ? { waiting: true } : {}) }), true), refused: { by: "switch", thing, state }, remind: [], ...(would !== undefined ? { permission: would } : {}) };
+      }
     }
-    // A tool of the external tier is under the user's `external` setting whatever lane it names; a write, under its lane's.
-    const lane = tool?.tier === "external" ? "external" : tool?.tier === "write" ? tool.lane : undefined;
+    const lane = laneOf(tool);
     let permission: CallPermission | undefined;
     if (lane !== undefined) {
       // Without the host's approvals port every lane is Auto (Appendix D.1), and the record says so.
       const approvals = d.approvals;
       const setting = approvals === undefined ? "auto" : await approvals.permission(d.scope, lane);
       permission = { lane, setting };
-      if (setting === "never") return { refuse: answer(d.words("never", { tool: call.tool, lane }), true), remind: [], permission };
+      if (setting === "never") return { refuse: answer(d.words("never", { tool: call.tool, lane }), true), refused: { by: "never", lane }, remind: [], permission };
       if (setting === "confirm" && approvals !== undefined) {
         d.trace.event(d.agent, d.parent, { kind: "approval_asked", callId: call.callId, tool: call.tool, lane });
         const said = await approvals.ask(d.scope, { agent: d.agent, callId: call.callId, tool: call.tool, lane, args: call.args, at: d.clock.now() }, signal);
         d.trace.event(d.agent, d.parent, { kind: "approval_answered", callId: call.callId, tool: call.tool, lane, answer: said });
         permission = { lane, setting, answer: said };
-        if (!said.go) return { refuse: answer(d.words("declined", { tool: call.tool, ...(said.reason !== undefined ? { reason: said.reason } : {}) }), true), remind: [], permission };
+        if (!said.go) return { refuse: answer(d.words("declined", { tool: call.tool, ...(said.reason !== undefined ? { reason: said.reason } : {}) }), true), refused: { by: "declined", lane, ...(said.reason !== undefined ? { reason: said.reason } : {}) }, remind: [], permission };
       }
     }
     const fired = await d.rules.toolCall(d.agent, { id: call.callId, tool: call.tool, args: call.args });
     return { ...(fired.hold !== undefined ? { hold: fired.hold } : {}), remind: fired.remind, ...(permission !== undefined ? { permission } : {}) };
   }
 
+  async permissionOf(call: GateCall): Promise<CallPermission | undefined> {
+    const d = this.#d;
+    const lane = laneOf(d.tools.get(call.tool));
+    if (lane === undefined) return undefined;
+    return { lane, setting: d.approvals === undefined ? "auto" : await d.approvals.permission(d.scope, lane) };
+  }
+
   async after(call: GateCall, result: LoopToolResult, _signal?: AbortSignal, added: readonly string[] = [], room?: number): Promise<GateAfter> {
+    const d = this.#d;
     // The rules see the result whole; the model reads it held to the bound, with every rule's text after it.
-    const remind = await this.#d.rules.toolResult(this.#d.agent, { id: call.callId, tool: call.tool }, result);
-    const bounded = await this.bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())], room);
+    let remind: Fired[] = [];
+    const beside: string[] = [];
+    try {
+      remind = await d.rules.toolResult(d.agent, { id: call.callId, tool: call.tool }, result);
+    } catch (error) {
+      // The tool's answer stands: a write that went through is never told as failed, so it is not made again.
+      d.log.warn("The rules on a tool's answer could not be asked; the answer stands as the tool gave it.", { agent: d.agent.id, tool: call.tool, callId: call.callId, error: errorText(error) });
+      const line = d.words("rule_unasked", { tool: call.tool });
+      if (line !== undefined) beside.push(line);
+    }
+    const bounded = await this.#bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())], room, beside);
     return { ...bounded, remind };
   }
 
@@ -83,12 +113,18 @@ export class TurnGate implements ToolGate {
    * What the model reads of one call, cut to the setting where it is longer. It reads the answer's
    * text, then its reports, one line each, then the texts that go after it (the rules' texts), in
    * that order, and the setting counts them all: no more than the setting of any call reaches the
-   * model, the trace, the session file or a later request. Its whole is kept in the turn's folder,
-   * and the file's line says how much was left out and where: it comes after all that is shown, and
-   * the answer as it is kept ends with it, among its reports where it has any. With `room` (what is
+   * model, the trace, the session file or a later request. Its whole is kept in the turn's folder (the
+   * session's, for a run with no turn), and the file's line says how much was left out and where: it
+   * comes after all that is shown, and the answer as it is kept ends with it, among its reports where
+   * it has any. A whole that could not be kept is said beside it, and logged. With `room` (what is
    * left of the agent's prompt per call), the least of the two holds.
    */
-  async bound(call: GateCall, result: LoopToolResult, added: readonly string[] = [], room?: number): Promise<Bounded> {
+  bound(call: GateCall, result: LoopToolResult, added: readonly string[] = [], room?: number): Promise<Bounded> {
+    return this.#bound(call, result, added, room, []);
+  }
+
+  /** `bound`, with lines that go beside the answer whatever the cut: what could not be done around it. */
+  async #bound(call: GateCall, result: LoopToolResult, added: readonly string[], room: number | undefined, beside: readonly string[]): Promise<Bounded> {
     const d = this.#d;
     const most = room === undefined ? d.clipChars : Math.min(d.clipChars, room);
     const texts = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
@@ -96,7 +132,11 @@ export class TurnGate implements ToolGate {
     const whole = [...texts, ...reports, ...added];
     const length = whole.reduce((sum, text) => sum + text.length, 0);
     const lines = (shown: readonly string[]): ToolContent[] => shown.map((text) => ({ type: "text", text }));
-    if (length <= most) return { result, read: [...result.content, ...lines([...reports, ...added])] };
+    if (length <= most) {
+      const read = [...result.content, ...lines([...reports, ...added, ...beside])];
+      if (beside.length === 0) return { result, read };
+      return reports.length > 0 ? { result: { ...result, reports: [...reports, ...beside] }, read } : { result: { ...result, content: [...result.content, ...lines(beside)] }, read };
+    }
     let left = most;
     const cut = (text: string): string | undefined => {
       if (left <= 0) return undefined;
@@ -119,15 +159,31 @@ export class TurnGate implements ToolGate {
     });
     const shown = most - left;
     const reportsLeft = reports.length - shownReports.filter((kept, at) => kept.length === reports[at]?.length).length;
-    let path: string | undefined;
-    if (d.places.turn !== undefined) {
-      const written = await d.files.write(d.scope, `${d.places.turn}${KEPT_RESULTS}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`, { op: "write", text: whole.join("\n") }, "harness");
-      if (written.status === "written") path = written.path;
-    }
+    const path = await this.#keep(call, whole.join("\n"));
     const line = d.words("clipped", { shown, length, left: length - shown, ...(reportsLeft > 0 ? { reports: reports.length, reports_left: reportsLeft } : {}), ...(path !== undefined ? { path } : {}) });
-    const said = line === undefined ? [] : [line];
+    const notKept = path === undefined ? d.words("not_kept", { tool: call.tool }) : undefined;
+    const said = [line, notKept, ...beside].filter((text): text is string => text !== undefined);
     const read = [...content, ...lines([...shownReports, ...shownAdded, ...said])];
     if (reports.length > 0) return { result: { ...result, content, reports: [...shownReports, ...said] }, read };
     return { result: { ...result, content: [...content, ...lines(said)] }, read };
   }
+
+  /** Keeps a clipped answer's whole in the turn's `cache/results/`, or the session's for a run with no turn (§11); where it went, or undefined, logged, when it could not be kept. */
+  async #keep(call: GateCall, text: string): Promise<string | undefined> {
+    const d = this.#d;
+    const at = `${d.places.turn ?? d.places.session}${KEPT_RESULTS}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`;
+    try {
+      const written = await d.files.write(d.scope, at, { op: "write", text }, "harness");
+      if (written.status === "written") return written.path;
+      d.log.warn("A clipped tool answer's whole could not be kept.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status });
+    } catch (error) {
+      d.log.warn("A clipped tool answer's whole could not be kept.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
+    }
+    return undefined;
+  }
+}
+
+/** The lane a tool's permission is asked under: the external tier's own setting whatever lane it names; a write, its lane's. */
+function laneOf(tool: HeldTool | undefined): string | undefined {
+  return tool?.tier === "external" ? "external" : tool?.tier === "write" ? tool.lane : undefined;
 }

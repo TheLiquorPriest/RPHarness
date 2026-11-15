@@ -1,10 +1,10 @@
 // The live view's way in (Appendix A `LiveApi`): which runs are going on now, and every event and
 // piece of streaming text of the runs a page follows, as it happens. Everything a run does goes to
-// the host's trace first; this hands the same to whoever subscribed, off the run's way (§5.6): each
+// the host's trace first; this hands the same to whoever subscribed, off the run's way (§14): each
 // listener has its own queue, sent in turn once the trace has the item, and a listener that returns
 // a promise is sent its next item when that settles, so a slow page slows no agent and no other page.
 // A listener that throws is logged once, with what it follows, and goes on being sent items. One
-// that has not taken more of a run's items than that run's setting `live.backlog` allows is cut
+// that has left more of a run's items untaken than that run's setting `live.backlog` allows is cut
 // off: logged, dropped, and told how far behind it was (C29). Each run hands `tee` the setting as it
 // read it, so a listener following a turn and a job at once is held to each run's own for that
 // run's items, and a change to the setting is taken by the next run. The owner's hand on each run
@@ -164,7 +164,7 @@ export class LiveHub implements LiveApi {
     this.#subscribers.delete(subscriber);
     subscriber.queue.length = 0;
     subscriber.behind.clear();
-    this.#log?.warn("A live listener fell behind and was cut off: it had not taken more of a run's items than live.backlog allows.", { ...subscriber.fields, cutAt: run, behind, backlog: most });
+    this.#log?.warn("A live listener fell behind and was cut off: more of a run's items were left untaken than live.backlog allows.", { ...subscriber.fields, cutAt: run, behind, backlog: most });
     // Told off the run's way too, and at once: a listener stalled on its last item still hears it.
     queueMicrotask(() => void this.#hand(subscriber, { type: "cut", behind }));
   }

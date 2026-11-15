@@ -262,7 +262,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
     const working = new Set<{ runner: AgentRunner; work: Work }>();
     plays.push(working);
     const gateFor = (agent: AgentRef, parent: ParentCall | undefined, tools: readonly HeldTool[]): TurnGate =>
-      new TurnGate({ scope, agent, ...(parent !== undefined ? { parent } : {}), trace: run, clock, files: env.files, ...(env.approvals !== undefined ? { approvals: env.approvals } : {}), places, rules, words, tools: new Map(tools.map((tool) => [tool.name, tool])), clipChars: 12_000 });
+      new TurnGate({ scope, agent, ...(parent !== undefined ? { parent } : {}), trace: run, clock, files: env.files, log: env.log, ...(env.approvals !== undefined ? { approvals: env.approvals } : {}), places, rules, words, tools: new Map(tools.map((tool) => [tool.name, tool])), clipChars: 12_000 });
     let registry: Registry | undefined;
     const team = new Team({
       env,

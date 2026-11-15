@@ -1,7 +1,7 @@
 // What the agent runner takes and gives, beyond the contract's own types.
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
-import type { AgentRef, AgentStatus, CallPermission, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
+import type { AgentRef, AgentStatus, CallPermission, CallRefusal, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
 import type { Fired } from "./rules";
 
 /** What the loop needs of the host's clock: the time, and timers. */
@@ -35,6 +35,11 @@ export interface LoopToolResult extends ToolResult {
    * host's tool never sets it: a host cannot end a run.
    */
   ask?: JsonValue;
+  /**
+   * A carrier's answer when it ran no tool because the one it names is kept from starting (`tool_use`
+   * naming a tool not switched on): why, for the end record, which then names that tool as itself.
+   */
+  refused?: CallRefusal;
 }
 
 /** A tool call as the gate sees it: who made it, the model's id for it, the tool, and its arguments without `closing`. */
@@ -47,12 +52,14 @@ export interface GateCall {
 
 /**
  * Before a call runs. `refuse`: it does not run, and this is its answer (the host's switches or the
- * user's permission said no, in a file's words). `hold`: a rule on its arguments holds it, and the
- * rule's text is its answer. `remind`: rules on its arguments whose texts come back with its answer.
- * `permission`: for a write or external tool, the permission it runs (or was refused) under.
+ * user's permission said no, in a file's words), with `refused`, why, as a fact. `hold`: a rule on
+ * its arguments holds it, and the rule's text is its answer. `remind`: rules on its arguments whose
+ * texts come back with its answer. `permission`: for a write or external tool, the permission it
+ * runs (or was refused, or would have run) under.
  */
 export interface GateBefore {
   refuse?: LoopToolResult;
+  refused?: CallRefusal;
   hold?: Fired;
   remind: Fired[];
   permission?: CallPermission;
@@ -100,6 +107,8 @@ export interface ToolGate {
    * hold, a failure around it), as `after` holds an answer to it, `room` too. Absent: such an answer goes as it is.
    */
   bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[], room?: number): Promise<Bounded>;
+  /** For a write or external tool, the lane and the user's setting it would run under, asking him nothing: the record of a call a limit kept from starting. */
+  permissionOf?(call: GateCall): Promise<CallPermission | undefined>;
 }
 
 /** What one model call is sent with besides its messages, decided in pi's request hook before that request alone. */

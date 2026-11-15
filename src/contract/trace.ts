@@ -11,6 +11,22 @@ import type { PromptNotice } from "./prompt";
 import type { ToolResult } from "./tools";
 import type { LimitHit, Release, RunOutcome, Sampling, TurnKind } from "./turn";
 import type { ApprovalAnswer, LanePermission } from "./approvals";
+import type { Switchable, SwitchState } from "./switches";
+
+/**
+ * Why a tool call never ran, as a fact on its end record (C1's note), so the record says why after
+ * the words of the tool answers' file are gone: a limit spent before it started (R-194); the thing it
+ * calls out to not switched on for the user; its lane set to Never; the user's no, with his reason;
+ * a rule that held it; or a permission or a rule that could not be asked (`error`, the failure's own
+ * words, for the trace alone).
+ */
+export type CallRefusal =
+  | { by: "limit"; hit: LimitHit }
+  | { by: "switch"; thing: Switchable; state: SwitchState }
+  | { by: "never"; lane: string }
+  | { by: "declined"; lane: string; reason?: string }
+  | { by: "hold"; rule: string }
+  | { by: "unasked"; error: string };
 
 /**
  * A tool call a model made: the model's id for it, the tool, and its arguments. `began`: when the
@@ -101,10 +117,11 @@ export type TraceEvent =
   | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult }
   /**
    * A tool's answer: whether it was clean, and whether it ended the batch's run (§10.7). For a write
-   * or external tool, the permission it ran under, Auto included (`never`: refused; `confirm`: with
-   * the user's word); a call refused before its permission was read (a tool switched off) has none.
+   * or external tool, the permission it ran under, or would have run under, Auto included (`never`:
+   * refused; `confirm`: with the user's word), a call a limit or a switch kept from starting included.
+   * `refused`: why a call that never ran did not (C1's note). A found tool's record is under its own name.
    */
-  | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission }
+  | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal }
   /** A rule fired (§5.4), as it fired: its `then` comes later, in `TurnEvents.ruleFired`. */
   | { kind: "rule_fired"; firing: RuleFiring }
   /** A hook ran (§5.4 "Hooks"): what it did, and how long it took. */

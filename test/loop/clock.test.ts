@@ -60,4 +60,16 @@ describe("the host's clock", () => {
     const began = recorder.of("call_ended")[0]?.event.toolCalls[0]?.began;
     expect([firstWords, began]).toEqual([RIG_START + 30, RIG_START + 280]);
   });
+
+  test("on the rig's clock, every tool-result message of a run carries the rig's time", async () => {
+    const clock = new FakeClock(RIG_START);
+    const look = tool("look", async () => said("a quiet room"));
+    const listen = tool("listen", async () => said("the sea"));
+    const { runner } = rigAgent(author, [{ pieces: [{ wait: 40 }, { call: "look" }] }, { pieces: [{ wait: 60 }, { call: "listen" }, { call: "missing_tool" }] }, { pieces: [{ text: "Quiet." }] }], { clock, tools: [look, listen] });
+
+    await clock.settle(runner.start({ messages: [user("Look around.")] }).done);
+
+    // Its own tools' answers and the one pi gave for a tool it does not hold, each at the time its call came back.
+    expect(times(runner.transcript, "toolResult")).toEqual([RIG_START + 40, RIG_START + 100, RIG_START + 100]);
+  });
 });

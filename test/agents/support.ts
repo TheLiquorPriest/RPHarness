@@ -19,7 +19,7 @@ import type { AgentDefinition, PromptPart } from "../../src/files/api";
 import { TurnGate } from "../../src/harness/gate";
 import { LiveHub } from "../../src/harness/live";
 import { userMessage } from "../../src/harness/prompt";
-import { readSettings } from "../../src/harness/settings";
+import { callTerms, readSettings } from "../../src/harness/settings";
 import { UsageBook } from "../../src/harness/usage";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/index";
@@ -230,7 +230,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
   const models = Object.fromEntries(Object.entries(options.models).map(([name, answers]) => [name, scriptedModel(answers, { clock, id: name, contextWindow: 64_000, maxTokens: 4_000 })]));
   const source = scriptedSource(models, USER);
   const hub = new LiveHub();
-  const usage = new UsageBook(env.store, clock, env.log);
+  const usage = new UsageBook({ store: env.store, clock, log: env.log, files: env.files });
   const progress: string[] = [];
   /** Every play's agents at work, so a close stops each. */
   const plays: Set<{ runner: AgentRunner; work: Work }>[] = [];
@@ -279,6 +279,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
       budget: () => budget,
       settings: () => settings.subAgents,
       perCall: () => settings.perCall,
+      terms: (definition) => callTerms(settings, definition),
       track: (entry) => {
         working.add(entry);
         return () => working.delete(entry);
@@ -307,6 +308,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
     const runner = new AgentRunner({
       agent: lead,
       trace: run,
+      terms: callTerms(settings, "lead"),
       model: model.model,
       streamFn: model.streamFn,
       connection: connection.label,

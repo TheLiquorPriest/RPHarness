@@ -9,7 +9,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { describe, expect, test } from "bun:test";
 import type { JsonValue, ToolCtx } from "../../src/contract";
 import { type AgentOutcome, AgentRunner, type LoopTool, type LoopToolResult, type RunTrace, type WorkInput } from "../../src/loop";
-import { type Answer, FakeClock, gate, type RecordedRequest, rigAgent, scriptedModel, type ScriptedModel, textOf, tool, TraceRecorder, user } from "./support";
+import { type Answer, FakeClock, gate, type RecordedRequest, rigAgent, scriptedModel, type ScriptedModel, terms, textOf, tool, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 
@@ -42,7 +42,7 @@ function team(trace: RunTrace, clock: FakeClock, scripts: Record<string, Answer[
     const handle = `${definition}#1`;
     const scripted = scriptedModel(scripts[definition] ?? [], { clock, id: `model-of-${handle}` });
     models[definition] = scripted;
-    const runner = new AgentRunner({ agent: { id: handle, definition, parent: ctx.agent.id }, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${handle}`, texts: { continueAfterRule: () => "" }, tools: [askAuthor] });
+    const runner = new AgentRunner({ agent: { id: handle, definition, parent: ctx.agent.id }, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${handle}`, texts: { continueAfterRule: () => "" }, terms, tools: [askAuthor] });
     agents.set(handle, runner);
     return work(handle, runner, { messages: [user(field(args, "brief"))] }, ctx);
   });

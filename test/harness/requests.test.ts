@@ -8,7 +8,8 @@
 // so the front a provider caches never moves. Everything here is invented.
 import { afterEach, expect, test } from "bun:test";
 import type { TraceRecord } from "../../src/contract";
-import { DEFAULT_CHARS_PER_TOKEN, tokensOf } from "../../src/model/tokens";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
+import { tokensOf } from "../../src/model/tokens";
 import { PROMPT, type RecordedRequest, request, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;
@@ -79,8 +80,8 @@ test("as shipped, an agent's first call is kept beside the transcripts: every me
 test("every call carries the tokens of its tool list as sent and of its opening block; `all` keeps every call's request, `none` keeps none", async () => {
   const all = await played("trace:\n  requests: all\n");
   const sent = all.s.model.requests;
-  const tools = tokensOf(JSON.stringify(sent[0]!.tools), DEFAULT_CHARS_PER_TOKEN);
-  const opening = tokensOf(textOf(sent[0]!.messages[0]!), DEFAULT_CHARS_PER_TOKEN);
+  const tools = tokensOf(JSON.stringify(sent[0]!.tools), DEFAULT_SETTINGS.tokens.charsPerToken);
+  const opening = tokensOf(textOf(sent[0]!.messages[0]!), DEFAULT_SETTINGS.tokens.charsPerToken);
   expect(tools).toBeGreaterThan(0);
   expect(opening).toBeGreaterThan(0);
   expect(all.started.map((record) => [record.event.toolTokens, record.event.openingTokens])).toEqual([

@@ -58,7 +58,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     settings: (scope) => readModelSettings(env.files, scope, env.log),
   });
   const hub = new LiveHub({ log: env.log });
-  const usage = new UsageBook(env.store, env.clock, env.log);
+  const usage = new UsageBook({ store: env.store, clock: env.clock, log: env.log, files: env.files });
   const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now() });
   const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage });
   const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs };

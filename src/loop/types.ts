@@ -89,13 +89,17 @@ export interface GateAfter {
  */
 export interface ToolGate {
   before(call: GateCall, signal: AbortSignal): Promise<GateBefore>;
-  /** `added`: texts already due after the answer (the rules on its arguments), held to the bound with it. */
-  after(call: GateCall, result: LoopToolResult, signal: AbortSignal, added?: readonly string[]): Promise<GateAfter>;
+  /**
+   * `added`: texts already due after the answer (the rules on its arguments), held to the bound with
+   * it. `room`: characters left of the agent's prompt per call (`limits.callTokensIn`); what the model
+   * reads is held to the least of it and the bound, whole kept as a clipped result is.
+   */
+  after(call: GateCall, result: LoopToolResult, signal: AbortSignal, added?: readonly string[], room?: number): Promise<GateAfter>;
   /**
    * The bound on what the model reads of a call answered without running its tool (a refusal, a
-   * hold, a failure around it), as `after` holds an answer to it. Absent: such an answer goes as it is.
+   * hold, a failure around it), as `after` holds an answer to it, `room` too. Absent: such an answer goes as it is.
    */
-  bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[]): Promise<Bounded>;
+  bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[], room?: number): Promise<Bounded>;
 }
 
 /** What one model call is sent with besides its messages, decided in pi's request hook before that request alone. */
@@ -107,6 +111,16 @@ export interface CallSettings {
   sampling?: Sampling;
   /** The longest answer the call may give, in tokens. */
   maxTokens?: number;
+}
+
+/** What every model call of an agent is made on, from the settings: how its tokens are estimated, the least room an answer is given, and its definition's own sampling. */
+export interface CallTerms {
+  /** Characters per token, where a provider has not counted (`tokens.charsPerToken`). */
+  charsPerToken: number;
+  /** The least room an answer is given (`limits.answerFloor`): with less left under a limit, no call is made. */
+  answerFloor: number;
+  /** Its definition's sampling (`sampling.<definition>`), on each call whose settings give none. */
+  sampling?: Sampling;
 }
 
 /** Which call is about to be made, for deciding its settings. */
@@ -196,6 +210,12 @@ export interface AgentLimits {
   tokensOut?: number;
   /** Wall time, in milliseconds. */
   time?: number;
+  /** The prompt of one call, as estimated before it is sent. */
+  callTokensIn?: number;
+  /** The answer of one call. */
+  callTokensOut?: number;
+  /** One call's wall time, in milliseconds, apart from the model layer's silent wait. */
+  callTime?: number;
 }
 
 /** How one stretch of an agent's work ended. */

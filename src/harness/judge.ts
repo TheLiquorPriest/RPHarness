@@ -15,7 +15,7 @@ import { AgentRunner, type Budget, type Finished, type Judged, type Judgment, ty
 import type { AgentModel, ModelSource } from "../model/source";
 import { type Connection, connectionOf, template } from "./means";
 import { userMessage } from "./prompt";
-import type { Settings } from "./settings";
+import { callTerms, type Settings } from "./settings";
 
 /** The prompt part the judging model is sent (`.prompts/judge.md`). */
 const JUDGE_PART = "judge";
@@ -119,6 +119,7 @@ export class Judges implements QuestionRules {
       connection: connection.label,
       session,
       thinkingLevel: model.thinkingLevel,
+      terms: callTerms(d.settings),
       texts: { continueAfterRule: () => "" },
       turn: d.budget,
     });

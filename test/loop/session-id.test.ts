@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { AgentRunner, type LoopTool, RunTrace } from "../../src/loop";
 import { sessionKey } from "../../src/model";
 import { anthropicStream, anthropicTurn, bodyOf, eventStream, type Rig, rig } from "../model/support";
-import { replyMissing, rigAgent, said, scope, texts, tool, TraceRecorder, user } from "./support";
+import { replyMissing, rigAgent, said, scope, terms, texts, tool, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 
@@ -48,7 +48,7 @@ describe("the session's id on every request", () => {
     r = rig({ script: () => openAIAnswer("At the quay.") });
     const saved = await r.layer.api.save(scope.user, { name: "OpenAI", provider: "openai", auth: "key", model: "gpt-4.1" }, "sk-proj-0123456789abcdef");
     const agent = await r.layer.agentModel({ user: scope.user, connectionId: saved.id, model: null, effort: "off" });
-    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "OpenAI", session: "scene-7", texts });
+    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "OpenAI", session: "scene-7", texts, terms });
 
     // The layer's HTTP is a scripted fetch, which answers at once: nothing waits on the clock.
     const outcome = await runner.start({ messages: [user("Where is Ilse?")] }).done;
@@ -62,7 +62,7 @@ describe("the session's id on every request", () => {
     r = rig({ script: (_sent, index) => eventStream(anthropicStream(index === 0 ? anthropicTurn({ tool: { id: "toolu_1", name: "lookup", input: { what: "keys" } } }) : anthropicTurn({ text: "Under the mat." }))) });
     const saved = await r.layer.api.save(scope.user, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5", messageThreads: true }, "sk-ant-api03-0123456789abcdef");
     const agent = await r.layer.agentModel({ user: scope.user, connectionId: saved.id, model: null, effort: "off" });
-    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "Claude", session: "scene-7", texts, tools: [LOOKUP] });
+    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", r.clock), model: agent.model, streamFn: agent.streamFn, connection: "Claude", session: "scene-7", texts, terms, tools: [LOOKUP] });
 
     expect((await runner.start({ messages: [user("Where are the keys?")] }).done).status).toBe("done");
     expect(r.sent.map((sent) => bodyOf(sent)["thread"])).toEqual([{ type: "create" }, { type: "continue", previous_message_id: "msg_1" }]);

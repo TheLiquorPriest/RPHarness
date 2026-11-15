@@ -69,7 +69,7 @@ test("a continue goes on from the turn it continues: that turn's work stays carr
     .slice(1)
     .map((line) => JSON.parse(line) as { type: string; id: string; parent: string | null; turn?: string });
   expect(entries.filter((entry) => entry.type === "turn" && entry.turn === "t3")).toHaveLength(1);
-  const third = entries.filter((entry) => entry.turn === "t3");
+  const third = entries.filter((entry) => entry.turn === "t3" && entry.type !== "spent");
   for (const [i, entry] of third.entries()) if (i > 0) expect(entry.parent).toBe(third[i - 1]!.id);
 });
 

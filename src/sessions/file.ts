@@ -6,7 +6,7 @@
 //
 // Which entries are on the path is worked out from the file alone, by reading it in order, so a
 // harness that starts again finds the session as it stood.
-import type { JsonObject, JsonValue, TurnKind } from "../contract";
+import type { JsonObject, JsonValue, TurnKind, Usage } from "../contract";
 import { isMapping } from "../files/header";
 
 /** The file's first line: which session, whose, when it began, and for a branch, where it was forked from. */
@@ -138,12 +138,28 @@ export interface OpeningEntry extends EntryBase {
   turn?: undefined;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry;
+/**
+ * What a turn's runs have spent so far (N-22), written as each run of it ends: the calls and tokens
+ * of every agent of its runs, and their wall time in milliseconds, added up. The newest for a turn,
+ * in the order of the file, is the turn's: a later run of it (a continue, a run that settles) goes on
+ * counting from it, over a restart too. A mark: it is never the leaf, and no entry follows it.
+ */
+export interface SpentEntry extends EntryBase {
+  type: "spent";
+  turn: string;
+  usage: Usage;
+  ms: number;
+}
+
+export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
   return `${JSON.stringify(item)}\n`;
 }
+
+/** The counts a kept `Usage` holds, each a number. */
+const USAGE_FIELDS = ["calls", "input", "output", "cacheRead", "cacheWrite"] as const;
 
 const KINDS: Record<TurnKind, true> = { new: true, swipe: true, regenerate: true, continue: true, impersonate: true };
 
@@ -183,6 +199,10 @@ function isEntry(v: Record<string, unknown>): boolean {
       return v["turn"] === undefined;
     case "opening":
       return v["turn"] === undefined && str(v["lead"]) && isMapping(v["opening"]);
+    case "spent": {
+      const usage = v["usage"];
+      return str(v["turn"]) && isMapping(usage) && USAGE_FIELDS.every((field) => typeof usage[field] === "number") && typeof v["ms"] === "number";
+    }
     default:
       return false;
   }
@@ -237,7 +257,9 @@ export function parseSession(text: string): ParsedSession {
  *   in the order of the file, wherever either stands; the mark is never the leaf, so a turn at work
  *   when it was given goes on where the session stands;
  * - a lead's opening block stands from its mark until a newer one for that lead is written, in the
- *   order of the file, wherever either stands; the mark is never the leaf either.
+ *   order of the file, wherever either stands; the mark is never the leaf either;
+ * - what a turn's runs spent stands from its mark until a newer one for that turn is written; the
+ *   mark is never the leaf, nor its turn's tip.
  *
  * Each entry keeps its place in the file, so what the host said can be told apart from what was
  * written before it (a summary written before a turn it stands for left the path).
@@ -261,6 +283,8 @@ export class SessionLog {
   #asked: CompactEntry | undefined;
   /** Each lead's newest opening block, in the order of the file. */
   readonly #openings = new Map<string, OpeningEntry>();
+  /** What each turn's runs spent, the newest mark of each, in the order of the file. */
+  readonly #spent = new Map<string, SpentEntry>();
 
   constructor(entries: readonly SessionEntry[] = []) {
     for (const entry of entries) this.add(entry);
@@ -314,6 +338,9 @@ export class SessionLog {
       case "opening":
         this.#openings.set(entry.lead, entry);
         return;
+      case "spent":
+        this.#spent.set(entry.turn, entry);
+        return;
       default: {
         if (entry.type === "compacted") this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
@@ -349,6 +376,11 @@ export class SessionLog {
   /** Each lead's newest opening block, in the order they were written. */
   openings(): OpeningEntry[] {
     return [...this.#openings.values()].sort((a, b) => this.place(a.id) - this.place(b.id));
+  }
+
+  /** What a turn's runs have spent so far: its newest mark, in the order of the file. */
+  spent(turn: string): SpentEntry | undefined {
+    return this.#spent.get(turn);
   }
 
   /** A turn's first entry. */

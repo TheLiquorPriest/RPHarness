@@ -23,7 +23,7 @@ import type { AgentRef, Environment, JsonObject, JsonValue, LimitHit, ModelsApi,
 import { changes, changesText, createFacts, loadGuidance, snapshot } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
-import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
+import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
@@ -44,7 +44,7 @@ import { type Connection, connectionOf, lines, runnerTexts, template } from "./m
 import { assistantMessage, promptMessages, promptText, systemMessage, userMessage } from "./prompt";
 import { placed, requestPath, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
-import { DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
+import { callTerms, DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
@@ -165,6 +165,8 @@ export class Turn {
   /** Rules that fired, waiting to be told with what the agent did next. */
   #firings: { firing: RuleFiring; call: number }[] = [];
   #budget = new Budget("turn", {});
+  /** What the turn's earlier runs spent (N-22): this run counts on from it, its time too. */
+  #earlier: { usage: Usage; ms: number } | undefined;
   #settings: Settings = DEFAULT_SETTINGS;
   #keep: KeepAlive | undefined;
   #progress: LinesPart | undefined;
@@ -252,6 +254,9 @@ export class Turn {
       signal.removeEventListener("abort", onAbort);
       if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     }
+    // What the turn's runs have spent, this run's added: a later run of the turn counts on from it (N-22).
+    const begun = this.#file?.log.turn(this.scope.turn);
+    if (begun !== undefined) this.#file?.add({ type: "spent", parent: begun.id, turn: begun.turn, usage: { ...this.#budget.used }, ms: (this.#earlier?.ms ?? 0) + env.clock.now() - this.#startedAt });
     this.#keep?.stop();
     if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
     await this.#settled();
@@ -323,8 +328,17 @@ export class Turn {
     });
     this.#keep.start();
     this.#say("started");
-    this.#budget = new Budget("turn", counted);
-    if (time !== undefined) this.#timer = env.clock.setTimeout(() => this.#outOfTime(time), time);
+    // A turn's counts run across its runs (N-22): a continue, or a run that settles, goes on from what
+    // its earlier runs spent, and its time from theirs; a limit spent already ends it at once.
+    const earlier = file.log.spent(scope.turn);
+    this.#earlier = earlier;
+    const day = await this.#c.usage.spend(scope.user);
+    this.#budget = new Budget("turn", counted, new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: day.all, cachedWeight: settings.jobs.cachedWeight }), earlier !== undefined ? { used: { ...earlier.usage } } : {});
+    if (time !== undefined) {
+      const left = time - (earlier?.ms ?? 0);
+      if (left <= 0) this.#outOfTime(time);
+      else this.#timer = env.clock.setTimeout(() => this.#outOfTime(time), left);
+    }
     if (definition === undefined) return this.#outcome({ status: "failed", error: { code: "no-definition", agent: req.lead } });
 
     const session = this.#c.sessions.of(scope);
@@ -354,6 +368,7 @@ export class Turn {
       budget: () => this.#budget,
       settings: () => this.#settings.subAgents,
       perCall: () => this.#settings.perCall,
+      terms: (definition) => callTerms(this.#settings, definition),
       track: (entry) => {
         this.#working.add(entry);
         return () => this.#working.delete(entry);
@@ -514,6 +529,7 @@ export class Turn {
         connection: connection.label,
         session: scope.session,
         thinkingLevel: model.thinkingLevel,
+        terms: callTerms(settings, this.#lead.definition),
         instructions: opening.text,
         context: messages,
         tools: declared,
@@ -565,13 +581,14 @@ export class Turn {
   async #compact(c: Compacting, refused: boolean): Promise<boolean> {
     const { env } = this.#c;
     const { file, carry, messages, model, opening, declared, settings } = c;
+    const ratio = settings.tokens.charsPerToken;
     const window = model.limits.contextWindow?.tokens ?? 0;
     // The model layer's own estimate of a request, before a provider has counted it.
-    const sent = (): number => tokensOf(opening.text, DEFAULT_CHARS_PER_TOKEN) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), DEFAULT_CHARS_PER_TOKEN) + promptTokens(messages, DEFAULT_CHARS_PER_TOKEN);
+    const sent = (): number => tokensOf(opening.text, ratio) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio) + promptTokens(messages, ratio);
     const before = sent();
     const asked = file.log.asked !== undefined;
     const tight = refused || (window > 0 && before > window - settings.compaction.reserve);
-    const folding = recordsTokens(c.carried, DEFAULT_CHARS_PER_TOKEN) > settings.compaction.records;
+    const folding = recordsTokens(c.carried, ratio) > settings.compaction.records;
     if (this.#ended() || (!asked && !tight && !folding)) return false;
     const current = file.log.turn(this.scope.turn);
     // The mode "nothing" carries only what the session opened with, which no summary makes smaller.
@@ -602,6 +619,7 @@ export class Turn {
         connection: c.connection.label,
         session: this.scope.session,
         thinkingLevel: model.thinkingLevel,
+        terms: callTerms(settings, this.#lead.definition),
         instructions: opening.text,
         context: messages,
         tools: declared,
@@ -633,7 +651,7 @@ export class Turn {
     let summary = material.summary;
     let left = material.turns;
     while (left.length > 0) {
-      const { piece, rest } = nextPiece(left, room, (turns) => tokensOf(instructions, DEFAULT_CHARS_PER_TOKEN) + tokensOf(laid(summary, turns), DEFAULT_CHARS_PER_TOKEN));
+      const { piece, rest } = nextPiece(left, room, (turns) => tokensOf(instructions, ratio) + tokensOf(laid(summary, turns), ratio));
       const written = await this.#summarize(c, instructions, laid(summary, piece));
       if (written === undefined) return false;
       summary = written;
@@ -668,6 +686,7 @@ export class Turn {
       connection: c.connection.label,
       session,
       thinkingLevel: model.thinkingLevel,
+      terms: callTerms(c.settings, this.#req.lead),
       instructions,
       texts: this.#texts,
       turn: this.#budget,
@@ -1062,6 +1081,8 @@ export class Turn {
       connection: connection.label,
       session,
       thinkingLevel: model.thinkingLevel,
+      // The preset's sampling comes by its settings; a writer has none of its own.
+      terms: callTerms(this.#settings),
       tools: held.tools,
       texts: this.#texts,
       settings: () => ({ ...(req.presetSampling !== undefined ? { sampling: req.presetSampling } : {}), ...(req.replyMaxTokens !== undefined ? { maxTokens: req.replyMaxTokens } : {}) }),
@@ -1147,7 +1168,7 @@ export class Turn {
 
   /** The turn's own time ran out: every agent ends where it stands, at that limit. */
   #outOfTime(max: number): void {
-    const hit = { limit: "time" as const, per: "turn" as const, max, value: this.#c.env.clock.now() - this.#startedAt };
+    const hit = { limit: "time" as const, per: "turn" as const, max, value: (this.#earlier?.ms ?? 0) + this.#c.env.clock.now() - this.#startedAt };
     this.#timeUp = hit;
     for (const { runner } of this.#working) runner.limit(hit);
   }
@@ -1260,7 +1281,14 @@ export class Turn {
   }
 
   #outcome(ended: Pick<RunOutcome, "status"> & Partial<RunOutcome>): RunOutcome {
-    return { released: this.#desk.released, usage: { ...this.#budget.used }, ...ended };
+    // What this run spent: the turn's counts less what its earlier runs had spent (N-22).
+    const used = this.#budget.used;
+    const before = this.#earlier?.usage;
+    const usage: Usage =
+      before === undefined
+        ? { ...used }
+        : { calls: used.calls - before.calls, input: used.input - before.input, cacheRead: used.cacheRead - before.cacheRead, cacheWrite: used.cacheWrite - before.cacheWrite, output: used.output - before.output, ...(used.reasoning !== undefined ? { reasoning: used.reasoning - (before.reasoning ?? 0) } : {}) };
+    return { released: this.#desk.released, usage, ...ended };
   }
 
   #outcomeOf(outcome: AgentOutcome): RunOutcome {

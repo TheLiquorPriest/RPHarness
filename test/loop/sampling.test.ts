@@ -6,7 +6,7 @@ import { streamSimple } from "@earendil-works/pi-ai/api/openai-completions";
 import { describe, expect, test } from "bun:test";
 import type { Sampling } from "../../src/contract";
 import { AgentRunner, type CallRequest, RunTrace } from "../../src/loop";
-import { FakeClock, rigAgent, said, scope, texts, tool, TraceRecorder, user } from "./support";
+import { FakeClock, rigAgent, said, scope, terms, texts, tool, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 
@@ -59,7 +59,7 @@ describe("sampling per request", () => {
     const streamFn: StreamFn = (_callModel, context, options) => streamSimple(model, context, { ...options, apiKey: "fixture-key", fetch });
     const clock = new FakeClock();
     const trace = new RunTrace(new TraceRecorder(), scope, "run-1", clock);
-    const runner = new AgentRunner({ agent: author, trace, model, streamFn, connection: "connection-a", session: "session-a", texts, settings: () => ({ sampling: preset, maxTokens: 700 }) });
+    const runner = new AgentRunner({ agent: author, trace, model, streamFn, connection: "connection-a", session: "session-a", texts, terms, settings: () => ({ sampling: preset, maxTokens: 700 }) });
 
     const outcome = await runner.start({ messages: [user("Look around.")] }).done;
 

@@ -50,8 +50,8 @@ test("each turn's entries hang from the one before; a swipe branches from the en
     if (entry.parent !== null) expect(seen.has(entry.parent)).toBe(true);
     seen.add(entry.id);
   }
-  // The first turn, in the order it happened, each entry following the one before.
-  const first = entries.filter((entry) => entry.turn === "t1");
+  // The first turn, in the order it happened, each entry following the one before; what its run spent is a mark hung from its turn entry.
+  const first = entries.filter((entry) => entry.turn === "t1" && entry.type !== "spent");
   expect(first.map((entry) => entry.type)).toEqual(["turn", "intent", "message", "call", "result", "message"]);
   for (const [i, entry] of first.entries()) if (i > 0) expect(entry.parent).toBe(first[i - 1]!.id);
   expect(first[1]).toMatchObject({ text: "Check the tide." });
@@ -62,12 +62,13 @@ test("each turn's entries hang from the one before; a swipe branches from the en
 
   // The second turn follows the first one's last entry; both tries at the third hang from the second's last.
   const turnEntry = (turn: string) => entries.find((entry) => entry.type === "turn" && entry.turn === turn)!;
-  const last = (turn: string) => entries.filter((entry) => entry.turn === turn).at(-1)!;
+  const last = (turn: string) => entries.filter((entry) => entry.turn === turn && entry.type !== "spent").at(-1)!;
+  expect(entries.find((entry) => entry.type === "spent" && entry.turn === "t1")).toMatchObject({ parent: turnEntry("t1").id });
   expect(turnEntry("t1").parent).toBeNull();
   expect(turnEntry("t2").parent).toBe(last("t1").id);
   expect(turnEntry("t3").parent).toBe(last("t2").id);
   expect(turnEntry("t3b")).toMatchObject({ parent: last("t2").id, kind: "swipe", follows: "t2" });
-  expect(entries.filter((entry) => entry.turn === "t3").map((entry) => entry.type)).toEqual(["turn", "intent", "message"]);
+  expect(entries.filter((entry) => entry.turn === "t3" && entry.type !== "spent").map((entry) => entry.type)).toEqual(["turn", "intent", "message"]);
 
   const text = JSON.stringify(entries);
   expect(text).not.toContain("FIXTURE-THINKING");

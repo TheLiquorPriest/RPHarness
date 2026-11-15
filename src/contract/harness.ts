@@ -300,8 +300,8 @@ export interface WindowGauge {
 export interface UsageApi {
   /** A run's calls and tokens, to the user whose run it is: asked by another user, or for a run that was never one, it answers undefined (§16: one user never reaches another's). */
   run(user: string, run: string): Promise<RunUsage | undefined>;
-  /** What the user's runs spent on a day (`Clock.day`; today when absent): what the daily caps count (§10.11). */
-  day(user: string, day?: string): Promise<Usage>;
+  /** What the user's agents spent over the last 24 hours, turns and jobs alike: what the daily caps count (§10.11). */
+  day(user: string): Promise<Usage>;
   /** An agent's gauge, by its handle, while its run lasts. */
   window(scope: Scope, agent: string): Promise<WindowGauge | undefined>;
 }

@@ -72,10 +72,10 @@ export class TurnGate implements ToolGate {
     return { ...(fired.hold !== undefined ? { hold: fired.hold } : {}), remind: fired.remind, ...(permission !== undefined ? { permission } : {}) };
   }
 
-  async after(call: GateCall, result: LoopToolResult, _signal?: AbortSignal, added: readonly string[] = []): Promise<GateAfter> {
+  async after(call: GateCall, result: LoopToolResult, _signal?: AbortSignal, added: readonly string[] = [], room?: number): Promise<GateAfter> {
     // The rules see the result whole; the model reads it held to the bound, with every rule's text after it.
     const remind = await this.#d.rules.toolResult(this.#d.agent, { id: call.callId, tool: call.tool }, result);
-    const bounded = await this.bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())]);
+    const bounded = await this.bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())], room);
     return { ...bounded, remind };
   }
 
@@ -85,17 +85,19 @@ export class TurnGate implements ToolGate {
    * that order, and the setting counts them all: no more than the setting of any call reaches the
    * model, the trace, the session file or a later request. Its whole is kept in the turn's folder,
    * and the file's line says how much was left out and where: it comes after all that is shown, and
-   * the answer as it is kept ends with it, among its reports where it has any.
+   * the answer as it is kept ends with it, among its reports where it has any. With `room` (what is
+   * left of the agent's prompt per call), the least of the two holds.
    */
-  async bound(call: GateCall, result: LoopToolResult, added: readonly string[] = []): Promise<Bounded> {
+  async bound(call: GateCall, result: LoopToolResult, added: readonly string[] = [], room?: number): Promise<Bounded> {
     const d = this.#d;
+    const most = room === undefined ? d.clipChars : Math.min(d.clipChars, room);
     const texts = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
     const reports = result.reports ?? [];
     const whole = [...texts, ...reports, ...added];
     const length = whole.reduce((sum, text) => sum + text.length, 0);
     const lines = (shown: readonly string[]): ToolContent[] => shown.map((text) => ({ type: "text", text }));
-    if (length <= d.clipChars) return { result, read: [...result.content, ...lines([...reports, ...added])] };
-    let left = d.clipChars;
+    if (length <= most) return { result, read: [...result.content, ...lines([...reports, ...added])] };
+    let left = most;
     const cut = (text: string): string | undefined => {
       if (left <= 0) return undefined;
       const kept = text.slice(0, left);
@@ -115,7 +117,7 @@ export class TurnGate implements ToolGate {
       const kept = cut(text);
       return kept === undefined ? [] : [kept];
     });
-    const shown = d.clipChars - left;
+    const shown = most - left;
     const reportsLeft = reports.length - shownReports.filter((kept, at) => kept.length === reports[at]?.length).length;
     let path: string | undefined;
     if (d.places.turn !== undefined) {

@@ -9,9 +9,10 @@
 import { describe, expect, test } from "bun:test";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import { type AgentOutcome, Budget, RunTrace } from "../../src/loop";
 import type { PendingRequest, RequestPoint } from "../../src/loop/types";
-import { DEFAULT_CHARS_PER_TOKEN, promptTokens } from "../../src/model/tokens";
+import { promptTokens } from "../../src/model/tokens";
 import { FakeClock, type RecordedRequest, type Reply, rigAgent, said, scope, textOf, tool, TraceRecorder, user } from "./support";
 
 const lead = { id: "lead", definition: "lead" };
@@ -139,7 +140,7 @@ describe("the run's point before each request", () => {
     // Where it put nothing in place, what it was shown is what went out, and its size is that request's.
     for (const at of [0, 1, 2, 4]) {
       expect(asSent(shown[at]!.messages)).toEqual(scripted.requests[at]!.messages);
-      expect(shown[at]!.tokens).toBe(promptTokens(scripted.requests[at]!.messages, DEFAULT_CHARS_PER_TOKEN));
+      expect(shown[at]!.tokens).toBe(promptTokens(scripted.requests[at]!.messages, DEFAULT_SETTINGS.tokens.charsPerToken));
     }
     // Call 4 went out on the summary and the newest call with its result; call 5 the same, and its own call after.
     const summed: [string, string] = ["user", textOf(summary)];

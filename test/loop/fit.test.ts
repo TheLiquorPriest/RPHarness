@@ -8,7 +8,7 @@ import { type AssistantMessage, type AssistantMessageEventStream, createAssistan
 import { describe, expect, test } from "bun:test";
 import type { JsonObject } from "../../src/contract";
 import { AgentRunner, fit, type LoopTool, RunTrace } from "../../src/loop";
-import { FakeClock, said, scope, scriptedModel, texts, textOf, TraceRecorder, user } from "./support";
+import { FakeClock, said, scope, scriptedModel, terms, texts, textOf, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
 
@@ -95,7 +95,7 @@ describe("what the model is told, in the file's words", () => {
   test("a call whose arguments do not fit: each argument that did not fit, and whether it was left out", async () => {
     const clock = new FakeClock();
     const scripted = scriptedModel([{ pieces: [{ call: "tide_set", args: { day: "three", state: "fog" } }] }, { pieces: [{ text: "Noted." }] }], { clock });
-    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", clock), model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: "session-a", texts: { ...texts, invalid }, tools: [TIDE_SET] });
+    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", clock), model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: "session-a", texts: { ...texts, invalid }, terms, tools: [TIDE_SET] });
 
     await clock.settle(runner.start({ messages: [user("Set the tide.")] }).done);
 
@@ -113,7 +113,7 @@ describe("what the model is told, in the file's words", () => {
       first = false;
       return callWith(model, BROKEN);
     };
-    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", clock), model: scripted.model, streamFn, connection: "connection-a", session: "session-a", texts: { ...texts, invalid }, tools: [TIDE_SET] });
+    const runner = new AgentRunner({ agent: author, trace: new RunTrace(new TraceRecorder(), scope, "run-1", clock), model: scripted.model, streamFn, connection: "connection-a", session: "session-a", texts: { ...texts, invalid }, terms, tools: [TIDE_SET] });
 
     const outcome = await clock.settle(runner.start({ messages: [user("Set the tide.")] }).done);
 

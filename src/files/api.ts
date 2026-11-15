@@ -128,6 +128,12 @@ export interface DefinitionLimits {
   tokensOut?: number;
   /** Wall time, in milliseconds. The header gives it in seconds (`time: 90`). */
   time?: number;
+  /** The prompt of one call, as estimated before it is sent. */
+  callTokensIn?: number;
+  /** The answer of one call. */
+  callTokensOut?: number;
+  /** One call's wall time, in milliseconds, apart from the model layer's silent wait. The header gives it in seconds. */
+  callTime?: number;
 }
 
 /** An agent definition (§5.4): the nearest file of its name. */

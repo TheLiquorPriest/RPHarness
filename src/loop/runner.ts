@@ -26,15 +26,15 @@
 // the call is answered with the runner's texts or the gate's instead, which the harness reads from
 // files. A text the file does not have leaves the answer empty.
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, CallPermission, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
-import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../model/tokens";
-import { addUsage, Budget, emptyUsage } from "./budget";
+import { type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
+import { addUsage, Budget, emptyUsage, type Room } from "./budget";
 import type { TextChannel } from "./channel";
 import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
 import { fit, type Misfit } from "./fit";
 import type { ParentCall, RunTrace } from "./trace";
-import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, PendingRequest, RequestPoint, RequestSpan, RunHold, ToolGate } from "./types";
+import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, CallTerms, GateAfter, GateBefore, GateCall, KeepRequest, LoopClock, LoopTool, LoopToolResult, PendingRequest, RequestPoint, RequestSpan, RunHold, ToolGate } from "./types";
 
 /** The argument RPH adds to every tool (§10.7, Appendix A): the agent marks a call that needs no answer. */
 export const CLOSING = "closing";
@@ -101,8 +101,10 @@ export interface RunnerOptions {
   point?: RequestPoint;
   /** Its own limits, over all its work in the run. `time` holds for each stretch of work. */
   limits?: AgentLimits;
-  /** Limits shared with the other agents of its turn. */
+  /** The budget it counts against besides its own: its turn's or its job's, with every budget above that one. */
   turn?: Budget;
+  /** How its calls' tokens are estimated, the least room an answer is given, and its definition's own sampling. */
+  terms: CallTerms;
   stream?: StreamRules;
   runEnd?: RunEndRules;
   /** The `question:` rules, put to a judging model about each message it finishes. */
@@ -150,6 +152,12 @@ interface Stint {
   callText: string;
   callThinking: string;
   callStartedAt: number;
+  /** What the call under way was sent: the request a provider's count of it is a count of. */
+  callSent: readonly Message[];
+  /** The limit on one call's time, while the call is under way. */
+  callTimer?: unknown;
+  /** Tokens of what the model reads of this batch's calls, not yet in the transcript, by call id. */
+  readonly reading: Map<string, number>;
   /** The transcript's length when the call under way began: a message a rule stops is cut back to it. */
   callFrom: number;
   /**
@@ -227,6 +235,8 @@ export class AgentRunner {
   readonly #context: AgentMessage[];
   /** The settings decided for the request being prepared, which its call goes out with. */
   #settings: CallSettings = {};
+  /** The provider's count of the last request it counted: an estimate of a later request starts from it. */
+  #counted: ProviderCount | undefined;
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -236,7 +246,7 @@ export class AgentRunner {
     this.agent = options.agent;
     this.#o = options;
     this.#clock = options.trace.clock;
-    this.#budget = new Budget("agent", options.limits ?? {});
+    this.#budget = new Budget("agent", options.limits ?? {}, options.turn);
     for (const tool of options.tools ?? []) {
       if (Object.hasOwn(argumentsOf(tool), CLOSING)) this.leftOut.push(tool.name);
       else {
@@ -318,6 +328,8 @@ export class AgentRunner {
       callText: "",
       callThinking: "",
       callStartedAt: 0,
+      callSent: [],
+      reading: new Map(),
       callFrom: 0,
       calling: false,
       writing: new Map(),
@@ -393,6 +405,7 @@ export class AgentRunner {
 
   #finish(stint: Stint, failure: string | undefined): void {
     if (stint.timer !== undefined) this.#clock.clearTimeout(stint.timer);
+    if (stint.callTimer !== undefined) this.#clock.clearTimeout(stint.callTimer);
     const last = stint.last;
     const failed = stint.halt === undefined && (failure !== undefined || last === undefined || last.stopReason === "error");
     if (stint.halt !== undefined || failed) this.#settle(stint);
@@ -486,7 +499,7 @@ export class AgentRunner {
       window: point.window,
       reserve: point.reserve,
       // The model layer's own estimate of a whole request, the tools its opening block declares included.
-      tokens: promptTokens(messages, DEFAULT_CHARS_PER_TOKEN),
+      tokens: requestTokens(messages, this.#o.terms.charsPerToken, this.#counted),
       ...(refused !== undefined ? { refused } : {}),
       signal: stint.stopped.signal,
     };
@@ -546,14 +559,29 @@ export class AgentRunner {
     return this.#pi.state.messages.length === 0 ? () => this.#pi.prompt([]) : () => this.#pi.continue();
   }
 
+  /**
+   * Whether a call may go out, and the room its answer has: a limit reached here or above it, the
+   * call's prompt past its own limit, or less room left under a limit than the floor stops it.
+   */
+  #limitsBefore(model: Model<Api>, messages: readonly Message[]): Room {
+    const reached = this.#budget.reached(this.agent)[0];
+    if (reached !== undefined) return { hit: reached };
+    const limits = this.#o.limits ?? {};
+    const prompt = requestTokens(messages, this.#o.terms.charsPerToken, this.#counted);
+    if (limits.callTokensIn !== undefined && prompt > limits.callTokensIn) return { hit: { limit: "callTokensIn", per: "agent", max: limits.callTokensIn, value: prompt, agent: this.agent } };
+    return this.#budget.room(this.agent, { floor: this.#o.terms.answerFloor, bounds: [model.maxTokens > 0 ? model.maxTokens : undefined, this.#settings.maxTokens, limits.callTokensOut] });
+  }
+
   /** The model call pi's loop makes, wrapped: limits first, then the settings decided for its request, then a stream that ends the moment the work stops. */
   #call(model: Model<Api>, context: TranscriptContext, options: SimpleStreamOptions | undefined): AssistantMessageEventStream {
     const out = createAssistantMessageEventStream();
     const stint = this.#stint;
     const signal = options?.signal;
+    let room: number | undefined;
     if (stint !== undefined && stint.halt === undefined) {
-      const hit = this.#budget.reached(this.agent) ?? this.#o.turn?.reached(this.agent);
-      if (hit !== undefined) this.#halt(stint, { status: "limit", hit });
+      const before = this.#limitsBefore(model, context.messages);
+      if ("hit" in before) this.#halt(stint, { status: "limit", hit: before.hit });
+      else room = before.room;
     }
     const now = (): number => this.#clock.now();
     if (stint === undefined || stint.halt !== undefined || signal?.aborted === true) {
@@ -564,11 +592,14 @@ export class AgentRunner {
     const counted: Usage = { ...emptyUsage(), calls: 1 };
     addUsage(stint.usage, counted);
     this.#budget.count(counted);
-    this.#o.turn?.count(counted);
-    const settings = this.#settings;
+    const sampling = this.#settings.sampling ?? this.#o.terms.sampling;
+    const settings: CallSettings = { ...this.#settings, ...(sampling !== undefined ? { sampling } : {}), ...(room !== undefined ? { maxTokens: room } : {}) };
     stint.callText = "";
     stint.callThinking = "";
     stint.callStartedAt = now();
+    stint.callSent = context.messages;
+    const callTime = this.#o.limits?.callTime;
+    if (callTime !== undefined) stint.callTimer = this.#clock.setTimeout(() => this.#halt(stint, { status: "limit", hit: { limit: "callTime", per: "agent", max: callTime, value: this.#clock.now() - stint.callStartedAt, agent: this.agent } }), callTime);
     stint.callFrom = this.#pi.state.messages.length;
     stint.calling = true;
     stint.writing.clear();
@@ -585,8 +616,8 @@ export class AgentRunner {
       tools: this.#tools.size,
       ...(request !== undefined ? { request } : {}),
       // The model layer's own estimate, so these weigh as its counts of a whole request do.
-      toolTokens: tokensOf(JSON.stringify(getCurrentTools(context.messages)), DEFAULT_CHARS_PER_TOKEN),
-      openingTokens: tokensOf(this.#o.instructions ?? "", DEFAULT_CHARS_PER_TOKEN),
+      toolTokens: tokensOf(JSON.stringify(getCurrentTools(context.messages)), this.#o.terms.charsPerToken),
+      openingTokens: tokensOf(this.#o.instructions ?? "", this.#o.terms.charsPerToken),
     });
     let source: Promise<AssistantMessageEventStream>;
     try {
@@ -613,12 +644,21 @@ export class AgentRunner {
       }
       case "message_end": {
         const message = event.message;
+        if (message.role === "toolResult") {
+          stint.reading.delete(message.toolCallId);
+          return;
+        }
         if (message.role !== "assistant" || !stint.calling) return;
         stint.calling = false;
+        if (stint.callTimer !== undefined) {
+          this.#clock.clearTimeout(stint.callTimer);
+          stint.callTimer = undefined;
+        }
         const used = usageOf(message);
         addUsage(stint.usage, used);
         this.#budget.count(used);
-        this.#o.turn?.count(used);
+        // A provider's count of the request: the next estimate starts from it. An answer with none leaves the last count standing.
+        if (message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite > 0) this.#counted = { messages: stint.callSent, tokens: used.input };
         if (stint.halt !== undefined) return;
         if (stint.cut === undefined) {
           stint.last = message;
@@ -766,8 +806,8 @@ export class AgentRunner {
     const stint = this.#stint;
     if (stint === undefined || stint.halt !== undefined || stint.cut !== undefined) return { block: true };
     const { id, name } = context.toolCall;
-    // A limit the work has spent past (tokens) holds the tool. A calls limit is reached by the very call that asked for it, which was within the limit: it holds the next call (`#call`), not this call's tools.
-    const hit = [this.#budget.reached(this.agent), this.#o.turn?.reached(this.agent)].find((reached) => reached !== undefined && reached.limit !== "calls");
+    // A limit the work has spent past (tokens), here or above it, holds the tool and is named. A calls limit is reached by the very call that asked for it, which was within the limit: it holds the next call (`#call`), not this call's tools (R-194).
+    const hit = this.#budget.reached(this.agent).find((reached) => reached.limit !== "calls");
     if (hit !== undefined) {
       this.#halt(stint, { status: "limit", hit });
       const carried = this.#carriers.has(name) ? stint.carried.get(id) : undefined;
@@ -811,26 +851,42 @@ export class AgentRunner {
    * model reads of it replaces pi's words for it when the call ends.
    */
   async #blocked(stint: Stint, call: GateCall, answer: LoopToolResult, added: string[]): Promise<BeforeToolCallResult> {
-    const { kept, read } = await this.#bounded(call, answer, added);
+    const { kept, read } = await this.#bounded(stint, call, answer, added);
     if (stint.halt !== undefined) return { block: true };
     stint.results.set(call.callId, { ...kept, error: true });
     stint.read.set(call.callId, read);
-    return { block: true, reason: read.map((part) => (part.type === "text" ? part.text : "")).join("") };
+    const text = read.map((part) => (part.type === "text" ? part.text : "")).join("");
+    stint.reading.set(call.callId, tokensOf(text, this.#o.terms.charsPerToken));
+    return { block: true, reason: text };
   }
 
-  /** What the model reads of a call, held to the gate's bound; where the bound itself fails, the runner's failure line, as it is. */
-  async #bounded(call: GateCall, answer: LoopToolResult, added: readonly string[]): Promise<{ kept: LoopToolResult; read: ToolContent[] }> {
+  /** What the model reads of a call, held to the gate's bound and to the room left of its prompt per call; where the bound itself fails, the runner's failure line, as it is. */
+  async #bounded(stint: Stint, call: GateCall, answer: LoopToolResult, added: readonly string[]): Promise<{ kept: LoopToolResult; read: ToolContent[] }> {
     const gate = this.#o.gate;
     let bounded: Bounded = { result: answer, read: readOf(answer, added) };
     if (gate !== undefined && gate.bound !== undefined) {
       try {
-        bounded = await gate.bound(call, answer, added);
+        bounded = await gate.bound(call, answer, added, this.#promptRoom(stint));
       } catch (error) {
         const failed = this.#failed(call.tool, error);
         bounded = { result: failed, read: failed.content };
       }
     }
     return { kept: bounded.result, read: bounded.read };
+  }
+
+  /**
+   * Characters left of the agent's prompt per call (`limits.callTokensIn`) for what the model reads
+   * of a call: the limit less the request as it stands and what it reads of this batch's other calls.
+   * Undefined with no such limit.
+   */
+  #promptRoom(stint: Stint): number | undefined {
+    const most = this.#o.limits?.callTokensIn;
+    if (most === undefined) return undefined;
+    const ratio = this.#o.terms.charsPerToken;
+    let taken = requestTokens(this.#request(), ratio, this.#counted);
+    for (const tokens of stint.reading.values()) taken += tokens;
+    return Math.max(0, Math.floor((most - taken) * ratio));
   }
 
   /**
@@ -852,7 +908,7 @@ export class AgentRunner {
     const call: GateCall = { agent: this.agent, callId: id, tool: name, args: found ? (context.args as JsonValue) : withoutClosing(context.args as JsonValue) };
     let taken: { kept: LoopToolResult; read: ToolContent[] } | undefined;
     if (carrier && stint.ranAs.has(id)) taken = { kept: stint.results.get(id) ?? ran, read: ran.content };
-    else if (carrier) taken = await this.#bounded(call, ran, []);
+    else if (carrier) taken = await this.#bounded(stint, call, ran, []);
     else {
       const argued = stint.argued.get(id) ?? [];
       stint.argued.delete(id);
@@ -860,6 +916,7 @@ export class AgentRunner {
     }
     if (taken === undefined || stint.halt !== undefined) return undefined;
     stint.results.set(id, taken.kept);
+    stint.reading.set(id, tokensOf(taken.read.map((part) => (part.type === "text" ? part.text : "")).join(""), this.#o.terms.charsPerToken));
     const answer: AfterToolCallResult = { content: taken.read, ...(taken.kept.details !== undefined ? { details: taken.kept.details } : {}), isError: taken.kept.error === true };
     // A found tool's answer goes back through its carrier's call, which decides whether the work ends.
     if (found) return answer;
@@ -876,11 +933,11 @@ export class AgentRunner {
     const texts = argued.map((fired) => fired.text.trimEnd());
     let after: GateAfter | undefined;
     try {
-      after = gate === undefined ? { result: ran, remind: [] } : await untilAborted(gate.after(call, ran, signal ?? new AbortController().signal, texts), signal);
+      after = gate === undefined ? { result: ran, remind: [] } : await untilAborted(gate.after(call, ran, signal ?? new AbortController().signal, texts, this.#promptRoom(stint)), signal);
     } catch (error) {
       if (stint.halt !== undefined) return undefined;
       // What fails around the tool (a rule that could not be asked, a whole answer that could not be kept) is answered as a tool that failed, never in pi's words.
-      return this.#bounded(call, this.#failed(call.tool, error), []);
+      return this.#bounded(stint, call, this.#failed(call.tool, error), []);
     }
     if (after === undefined || stint.halt !== undefined) return undefined;
     // Whether an answer is clean is the tool's own: what it reported counts though the model reads none of it.

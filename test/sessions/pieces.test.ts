@@ -4,7 +4,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { JsonObject } from "../../src/contract";
-import { DEFAULT_CHARS_PER_TOKEN, promptTokens, tokensOf } from "../../src/model/tokens";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
+import { promptTokens, tokensOf } from "../../src/model/tokens";
 import { nextPiece } from "../../src/sessions/carry";
 import { type RecordedRequest, type Stage, stage } from "../harness/support";
 import { carried, inOrder, material, play, said } from "./support";
@@ -21,7 +22,8 @@ const TOO_LONG = { pieces: [], end: { error: "prompt is too long: the request is
 
 /** What a request weighs, by the model layer's estimate: its messages and the tools it declares. */
 function weight(req: RecordedRequest): number {
-  return promptTokens(req.messages, DEFAULT_CHARS_PER_TOKEN) + tokensOf(JSON.stringify(req.tools), DEFAULT_CHARS_PER_TOKEN);
+  const ratio = DEFAULT_SETTINGS.tokens.charsPerToken;
+  return promptTokens(req.messages, ratio) + tokensOf(JSON.stringify(req.tools), ratio);
 }
 
 test("a session that grew under a larger window compacts on a smaller one: each summary call is sent what fits, the older turns first, and the next is handed the summary before it", async () => {

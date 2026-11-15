@@ -184,16 +184,17 @@ describe("before a tool runs, in pi's beforeToolCall", () => {
     const ran: string[] = [];
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD },
-      config: "limits:\n  turn:\n    tokensOut: 50\n",
+      // Above the least room an answer is given (256 by default), so the first call is made; its answer spends past it.
+      config: "limits:\n  turn:\n    tokensOut: 300\n",
       tools: hostTools(ran),
-      answers: [{ pieces: [{ text: "Checking the tide." }, { call: "tide_table", args: { day: 2 }, id: "r-1" }], usage: { input: 400, output: 60 } }, REPLY],
+      answers: [{ pieces: [{ text: "Checking the tide." }, { call: "tide_table", args: { day: 2 }, id: "r-1" }], usage: { input: 400, output: 320 } }, REPLY],
     }));
 
     const { outcome } = await s.turn(request("t1", { lead: "lead" }));
 
     const lines = await notices(s);
     expect(outcome.status).toBe("limit");
-    expect(outcome.limit).toMatchObject({ limit: "tokensOut", per: "turn", max: 50, value: 60 });
+    expect(outcome.limit).toMatchObject({ limit: "tokensOut", per: "turn", max: 300, value: 320 });
     expect(ran).toEqual([]);
     expect(s.model.requests).toHaveLength(1);
     const kinds = s.trace.records.map((record) => (record.event.kind === "tool_started" || record.event.kind === "tool_ended" ? `${record.event.kind}:${record.event.callId}` : record.event.kind));

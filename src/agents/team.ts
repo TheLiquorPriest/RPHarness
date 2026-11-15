@@ -16,7 +16,7 @@ import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun,
 import { userMessage } from "../harness/prompt";
 import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
-import { type AgentOutcome, AgentRunner, type Budget, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
@@ -66,6 +66,8 @@ export interface TeamDeps {
   settings(): AgentSettings;
   /** The most one call takes (the user's `tools.perCall`), which a stretch of the chat an agent is given is held to. */
   perCall(): number;
+  /** What every model call of an agent of that definition is made on: the estimate's ratio, the answer's floor, its own sampling. */
+  terms(definition: string): CallTerms;
   /** A sub-agent's work began: the turn stops it with the rest, and its time reaches it. The answer forgets the work once it ends. */
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A sub-agent's model's room, for its window gauge. */
@@ -264,6 +266,7 @@ export class Team implements TeamWork {
       connection: connection.label,
       session: d.ids(),
       thinkingLevel: model.thinkingLevel,
+      terms: d.terms(definition.name),
       ...(instructions !== "" ? { instructions } : {}),
       // Its brief and what it was given go with each of its requests from pi's request hook, after its opening block (§10.2).
       context: [placed(userMessage(joined([brief]), d.trace.clock.now()), "brief")],

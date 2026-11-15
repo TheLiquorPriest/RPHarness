@@ -19,8 +19,8 @@ import { parseTemplate } from "./template";
 const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 const TOOLS_AS: readonly ToolsAs[] = ["auto", "native", "text"];
 
-/** The limits a definition can set; `time` is in seconds there. */
-const LIMITS = ["calls", "tokensIn", "tokensOut", "time"] as const;
+/** The limits a definition can set; `time` and `callTime` are in seconds there. */
+const LIMITS = ["calls", "tokensIn", "tokensOut", "time", "callTokensIn", "callTokensOut", "callTime"] as const;
 
 /** The header's fields that hold lists of names. */
 const LISTS = ["tools", "out_of_reach", "reads", "given", "opening"] as const;
@@ -182,19 +182,19 @@ export function parseDefinition(file: FileText, name: string, replaces: Replaced
 
   const limits: DefinitionLimits = {};
   if (h.limits !== undefined && h.limits !== null) {
-    if (!isMapping(h.limits)) problems.push(problemAt(at, line("limits"), `\`limits:\` is \`{ calls: 12 }\`, with any of ${LIMITS.join(", ")} (time in seconds).`));
+    if (!isMapping(h.limits)) problems.push(problemAt(at, line("limits"), `\`limits:\` is \`{ calls: 12 }\`, with any of ${LIMITS.join(", ")} (time and callTime in seconds).`));
     else {
       for (const [key, value] of Object.entries(h.limits)) {
         const limit = LIMITS.find((l) => l === key);
         if (limit === undefined) {
-          problems.push(problemAt(at, line("limits"), `\`${key}\` is not a limit a definition can set; those are ${LIMITS.join(", ")} (time in seconds).`));
+          problems.push(problemAt(at, line("limits"), `\`${key}\` is not a limit a definition can set; those are ${LIMITS.join(", ")} (time and callTime in seconds).`));
           continue;
         }
         if (typeof value !== "number" || !Number.isInteger(value) || value <= 0) {
           problems.push(problemAt(at, line("limits"), `The limit \`${key}\` must be a whole number above 0; ${JSON.stringify(value)} is left out.`));
           continue;
         }
-        limits[limit] = limit === "time" ? value * 1000 : value;
+        limits[limit] = limit === "time" || limit === "callTime" ? value * 1000 : value;
       }
     }
   }

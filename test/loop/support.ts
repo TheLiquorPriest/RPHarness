@@ -2,6 +2,7 @@
 // (invented here; shipped ones are files), and a runner for an agent on a scripted model.
 import type { UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, JsonValue, ReplyError, ReplySink, RuleMoment, Scope, ToolCtx, ToolResult, TraceDelta, TracePort, TraceRecord, Usage } from "../../src/contract";
+import { DEFAULT_SETTINGS, callTerms } from "../../src/harness/settings";
 import { AgentRunner, type Fired, type LoopTool, type LoopToolResult, type RunEndRules, type RunnerOptions, RunTrace } from "../../src/loop";
 import { type Answer, FakeClock, scriptedModel, type ScriptedModel } from "../../src/testing/rig";
 
@@ -19,6 +20,9 @@ export const texts = {
   failed: ({ tool }: { tool: string }) => `Fixture: ${tool} failed.`,
   unfinished: ({ tool }: { tool: string }) => `Fixture: ${tool} did not finish.`,
 };
+
+/** How a test's agent measures and samples its calls: the shipped defaults. */
+export const terms = callTerms(DEFAULT_SETTINGS);
 
 export class TraceRecorder implements TracePort {
   readonly records: TraceRecord[] = [];
@@ -93,7 +97,7 @@ export function rigAgent(agent: AgentRef, answers: readonly Answer[], options: P
   const recorder = givenRecorder ?? new TraceRecorder();
   const trace = givenTrace ?? new RunTrace(recorder, scope, "run-1", clock);
   const scripted = scriptedModel(answers, { clock, id: `model-of-${agent.id}` });
-  const runner = new AgentRunner({ agent, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${agent.id}`, texts, ...rest });
+  const runner = new AgentRunner({ agent, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${agent.id}`, texts, terms, ...rest });
   return { runner, scripted, recorder, trace, clock };
 }
 

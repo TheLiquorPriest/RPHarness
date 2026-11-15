@@ -1,4 +1,3 @@
-// The settings of the tools agents call, as the Settings page names each and says what it is for.
 export const TOOLS_WORDS = {
   "results.clip": { name: "Length of a tool's answer", about: "Characters of a tool's answer, its reports with it, that the model reads; the whole answer is kept in a file." },
   "tools.search": { name: "Tools a search gives", about: "Tools one tool_search gives when the agent asks for no number." },

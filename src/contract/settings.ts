@@ -18,7 +18,7 @@ export type SettingTakes =
   | { readonly type: "yesNo" }
   /** A line of text that is not blank, read without the space at its ends. */
   | { readonly type: "text" }
-  /** A list of names; as read, an item that is no text is passed over, and written, refused. */
+  /** A list of names; as read, an item that is not a name (not text, or blank) is passed over, and written, refused. */
   | { readonly type: "texts" };
 
 /** A setting as the code that reads it declares it: what a page needs to show it, to check a value before writing it, and to say what it is for. */

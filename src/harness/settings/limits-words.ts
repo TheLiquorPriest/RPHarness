@@ -1,4 +1,3 @@
-// The limits on one turn, as the Settings page names each and says what it is for.
 export const LIMITS_WORDS = {
   "limits.turn.calls": { name: "Calls in a turn", about: "Model calls all the agents of one turn may make between them." },
   "limits.turn.tokensIn": { name: "Tokens sent in a turn", about: "Tokens sent to models across all the agents of one turn." },

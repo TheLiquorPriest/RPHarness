@@ -1,4 +1,3 @@
-// The settings of when a session's earlier turns are summarized, as the Settings page names each and says what it is for.
 export const COMPACTION_WORDS = {
   "compaction.reserve": { name: "Room kept for the answer", about: "Tokens kept free for the answer: a session's earlier turns are summarized when the lead's first call of a turn would not fit its model's window less this." },
   "compaction.keepTurns": { name: "Turns kept whole", about: "The newest of a session's earlier turns that a summary never stands for." },

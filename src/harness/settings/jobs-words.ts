@@ -1,4 +1,3 @@
-// The limits on jobs, as the Settings page names each and says what it is for.
 export const JOBS_WORDS = {
   "jobs.atOnce": { name: "Jobs at once", about: "Jobs that run at the same time, across all your chats; a job started past it waits for a place." },
   "jobs.perDay": { name: "Jobs in a day", about: "Jobs that may be started in a day." },

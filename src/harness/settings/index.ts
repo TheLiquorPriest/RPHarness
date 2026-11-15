@@ -12,12 +12,13 @@
 // value over the farther one's, mapping by mapping. Every value is checked by the one check of a
 // value (`checkSettingValue`, which `rp-harness/helpers` gives a host). A value passed over is logged
 // once with its key, the file that set it and why, and never stops a turn: one a setting does not
-// take leaves its default; an item of a list that is not text is dropped and the rest read; and a value
-// set in the file of a level the setting is not read from is not read.
+// take leaves its default; an item of a list that is not a name (not text, or blank) is dropped and the rest read; and a value
+// set in the file of a level the setting is not read from is not read, nor is a key in one of the
+// harness's own sections that names no setting.
 
 import type { Effort, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes } from "../../contract";
 import type { Guidance } from "../../files/api";
-import { checkSettingValue } from "./check";
+import { checkSettingValue, valueWords } from "./check";
 import { COMPACTION } from "./compaction";
 import { CONNECTION, frozen, type Group, type ListedSetting, type SettingEntry } from "./entry";
 import { JOBS } from "./jobs";
@@ -164,7 +165,7 @@ function valuesAt(config: JsonValue, parts: readonly string[], path: readonly st
  * A scope's settings, each read through its entry, from the merged config of the levels it is read
  * from, every value checked by the one check (`checkSettingValue`). Each value passed over is logged
  * once, with its key, the file that set it, and why: a value the setting does not take, an item of a
- * list that is not text, and a value set in the file of a level the setting is not read from.
+ * list that is not a name (not text, or blank), and a value set in the file of a level the setting is not read from.
  * Exported for the tests, which read an entry no group declares yet: one read from some levels alone.
  */
 export class SettingsRead {
@@ -267,7 +268,7 @@ export class SettingsRead {
   /** A value that is no mapping where the settings under its key are read: they are all at their defaults. */
   #notMapping(path: readonly string[], value: JsonValue, levels: readonly LevelConfig[]): void {
     const key = path.join(".");
-    this.#pass(key, "A setting has a value it does not take; its default holds.", { setting: key, value, file: this.#fileOf(levels, path), why: `${key} holds the settings under it as a mapping of keys, not ${JSON.stringify(value)}.` });
+    this.#pass(key, "A setting has a value it does not take; its default holds.", { setting: key, value, file: this.#fileOf(levels, path), why: `${key} holds the settings under it as a mapping of keys, not ${valueWords(value)}.` });
   }
 
   /** Each value set for a setting read from some levels alone, in the file of a level it is not read from: passed over, as its entry says, and logged. */
@@ -279,7 +280,41 @@ export class SettingsRead {
       if (read.includes(level.level)) continue;
       for (const { path, value } of valuesAt(level.config, def.key.split("."))) {
         const key = path.join(".");
-        this.#pass(`${key}\n${level.path}`, "A setting is set in a file it is not read from; the value there is passed over.", { setting: key, value, file: level.path, why: `${def.key} is read from the ${read.join(" and ")} levels' files alone, not the ${level.level} level's.` });
+        this.#pass(`${key}\n${level.path}`, "A setting is set in a file it is not read from; the value there is passed over.", { setting: key, value, file: level.path, why: `${key} is read from ${read.length === 1 ? `the ${read[0]} file` : `the ${read.join(" and ")} files`} alone, not from the ${level.level} file.` });
+      }
+    }
+  }
+
+  /**
+   * Each key a file sets in a section the entries live in that names none of them (`limits.turn.cals`):
+   * passed over, and logged once with its file. A section holds its entries' keys and its
+   * subsections; one whose keys are connections' names takes any name. A section no entry lives in
+   * (`limits` itself) is another reader's, and nothing in it is the harness's to name.
+   */
+  unnamed(entries: readonly SettingEntry[]): void {
+    const sections = new Map<string, Set<string>>();
+    const anyName = new Set<string>();
+    for (const entry of entries) {
+      const parts = entry.key.split(".");
+      const parent = parts.slice(0, -1).join(".");
+      if (parts.at(-1) === CONNECTION) anyName.add(parent);
+      else sections.set(parent, (sections.get(parent) ?? new Set<string>()).add(parts.at(-1)!));
+    }
+    for (const entry of entries) {
+      const parts = entry.key.split(".");
+      for (let end = 1; end < parts.length - 1; end += 1) sections.get(parts.slice(0, end).join("."))?.add(parts[end]!);
+    }
+    for (const [section, keys] of sections) {
+      if (anyName.has(section)) continue;
+      for (const level of this.#levels) {
+        for (const { path, value } of valuesAt(level.config, section.split("."))) {
+          if (!isMapping(value)) continue;
+          for (const [name, held] of Object.entries(value)) {
+            if (keys.has(name)) continue;
+            const key = [...path, name].join(".");
+            this.#pass(`unnamed\n${key}\n${level.path}`, "A key among the harness's settings names none of them; it is passed over.", { setting: key, value: held, file: level.path, why: `${key} is no setting the harness reads: ${path.join(".")} holds ${[...keys].join(", ")}.` });
+          }
+        }
       }
     }
   }
@@ -327,7 +362,10 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
         continue;
       }
       // The connections' own mapping is there with no connection set; a connection the files name with a mapping is kept, a limit set or not.
-      holder(path.slice(0, named));
+      // It holds connections' names alone, with nothing inherited, so a connection named `constructor` or `toString` finds its own value or none.
+      const connections = path.slice(0, named);
+      const parent = holder(connections.slice(0, -1));
+      if (!Object.hasOwn(parent, connections.at(-1)!)) own(parent, connections.at(-1)!, Object.create(null));
       for (const connection of read.named(entry)) {
         const to = [...path.slice(0, named), connection, ...path.slice(named + 1)];
         holder(to.slice(0, -1));
@@ -336,6 +374,7 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
       }
     }
   }
+  read.unnamed(groups.flatMap((group) => Object.values(group)));
   return out as SettingsOf<G>;
 }
 
@@ -355,7 +394,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
 /** The form a connection's reply takes, and whether a two-step connection streams anyway, by the connection's name or id. */
 export function formFor(settings: Settings, connection: { id: string | null; name: string | null }): { form: ReplyFormSetting; stream: boolean } {
   const keys = [connection.id, connection.name].filter((key): key is string => key !== null);
-  const named = keys.map((key) => settings.forms[key]).find((form) => form !== undefined);
+  const named = keys.map((key) => (Object.hasOwn(settings.forms, key) ? settings.forms[key] : undefined)).find((form) => form !== undefined);
   return { form: named ?? settings.form, stream: keys.some((key) => settings.streamAnyway.includes(key)) };
 }
 
@@ -374,7 +413,7 @@ export interface ConnectionCounts {
 /** The user's counts for the jobs on a connection, each by the setting's key that names it. */
 export function jobCountsFor(settings: Settings, connection: { id: string | null; name: string | null }): ConnectionCounts[] {
   return [...new Set([connection.id, connection.name].filter((key): key is string => key !== null))].flatMap((key) => {
-    const counts = settings.jobs.connections[key];
+    const counts = Object.hasOwn(settings.jobs.connections, key) ? settings.jobs.connections[key] : undefined;
     return counts === undefined ? [] : [{ key, counts }];
   });
 }

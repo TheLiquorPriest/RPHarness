@@ -1,4 +1,3 @@
-// The settings of the reply and of the progress lines, as the Settings page names each and says what it is for.
 export const REPLY_WORDS = {
   "reply.form": { name: "Reply form", about: "How a connection marks its reply: with tags, or in two steps for a connection that does not keep them." },
   "reply.forms.<connection>": { name: "Reply form of a connection", about: "The reply form of this connection, in place of the one every connection takes." },

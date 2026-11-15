@@ -155,21 +155,21 @@ export class Tree {
       layers.map(async (layer): Promise<{ ref: FileRef; yours: boolean }[]> => {
         const path = base(layer, listing);
         if (path === undefined) return [];
-        let hits;
+        let found;
         try {
           // Every file in the folder (§5.2 "everything loaded", R-183): a find that names no limit stops
           // at the host's own cap, which is for an agent's search, not for loading the owner's guidance.
-          hits = await this.files.find(this.scope, { by: "list", path, depth: listing === "skills" ? 2 : 1, limit: Number.POSITIVE_INFINITY });
+          found = await this.files.find(this.scope, { by: "list", path, depth: listing === "skills" ? 2 : 1, limit: Number.POSITIVE_INFINITY });
         } catch (error) {
           this.problems.push({ path, level: layer.level, message: `The folder could not be listed: ${error instanceof Error ? error.message : String(error)}` });
           return [];
         }
-        if (!Array.isArray(hits)) {
-          this.problems.push({ path, level: layer.level, message: `The host refused to list this folder (${hits.reason}).` });
+        if (found.status === "refused") {
+          this.problems.push({ path, level: layer.level, message: `The host refused to list this folder (${found.reason}).` });
           return [];
         }
         const prefix = path === "" || path.endsWith("/") ? path : `${path}/`;
-        return hits.flatMap((hit) => {
+        return found.hits.flatMap((hit) => {
           if (hit.type !== "file" || !hit.path.startsWith(prefix)) return [];
           const name = nameOf(listing, hit.path.slice(prefix.length));
           return name === undefined ? [] : [{ ref: { name, path: hit.path, level: layer.level }, yours: hit.kind === "yours" }];

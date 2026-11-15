@@ -109,9 +109,9 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
       const { files } = d;
       const folder = (await files.places(scope)).session.replace(/[^/]+\/$/, "");
       // Every session the chat has: a host's own cap on one find would cut the list short with no sign of it.
-      const hits = await files.find(scope, { by: "glob", pattern: "*/*.jsonl", limit: Number.MAX_SAFE_INTEGER, ...(folder !== "" ? { path: folder } : {}) });
-      if (!Array.isArray(hits)) return [];
-      const ids = hits.flatMap((hit) => {
+      const found = await files.find(scope, { by: "glob", pattern: "*/*.jsonl", limit: Number.MAX_SAFE_INTEGER, ...(folder !== "" ? { path: folder } : {}) });
+      if (found.status === "refused") return [];
+      const ids = found.hits.flatMap((hit) => {
         const [session, name] = hit.path.slice(folder.length).split("/");
         return hit.type === "file" && session !== undefined && name === `${session}.jsonl` ? [session] : [];
       });

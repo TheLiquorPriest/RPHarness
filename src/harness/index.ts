@@ -11,14 +11,14 @@
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Template } from "../files/api";
-import { createModelLayer } from "../model";
+import { createModelLayer, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { Jobs } from "../jobs";
 import { sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { Sessions } from "./sessions";
-import { readSettings } from "./settings";
+import { readModelSettings, readSettings } from "./settings";
 import { shippedTemplate } from "./shipped";
 import { Turn, type TurnCore } from "./turn";
 import { UsageBook } from "./usage";
@@ -62,6 +62,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     appName: options.appName ?? env.id,
     testPrompt: async () => (await shippedTemplate("connection-test")).render().text,
     markNote: (text) => (mark === undefined ? text : mark.render({ text }).text),
+    settings: (scope) => readModelSettings(env.files, scope, env.log),
   });
   const hub = new LiveHub({ log: env.log });
   const usage = new UsageBook(env.store, env.clock, env.log);
@@ -130,7 +131,11 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     jobs,
 
     definitions: {
-      list: (scope) => loadGuidance(env.files, scope).definitions(),
+      list: async (scope) => {
+        const views = await loadGuidance(env.files, scope).definitions();
+        const connections = await layer.api.list(scope.user);
+        return views.map((view) => ({ ...view, runsOn: runOf(connections, view) }));
+      },
       stack: (scope, agent) => loadGuidance(env.files, scope).stackParts(agent),
     },
 

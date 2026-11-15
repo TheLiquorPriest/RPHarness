@@ -758,9 +758,9 @@ export class Turn {
     return joined([part.render({ ...(given.blocks.length > 0 ? { attachments: given.blocks.map((block) => ({ name: block.name, text: block.text })) } : {}), ...(given.missing.length > 0 ? { missing: given.missing } : {}) }).text]);
   }
 
-  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
+  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the definition's alone. */
   #connection(definition: AgentDefinition): Promise<Connection> {
-    return connectionOf(this.#c.connections, this.scope.user, this.#settings, definition, this.#c.env.log);
+    return connectionOf(this.#c.connections, this.scope, definition, this.#c.env.log);
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {

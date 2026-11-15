@@ -2,12 +2,12 @@
 // format, a tool's file as the tool takes it, the texts the runners send a model from the tool
 // answers' file, and the connection a definition names.
 import { joined } from "../agents/attachments";
-import type { Log, ModelsApi } from "../contract";
+import type { Log, ModelsApi, Scope } from "../contract";
 import type { AgentDefinition, LinesPart, PromptPart, TemplatePart } from "../files/api";
 import type { RunnerTexts } from "../loop";
+import { connectionNamed } from "../model/runs-on";
 import type { UserChoice } from "../model/source";
 import { invalidFields, type ToolText, type Words } from "../tools";
-import { effortFor, type Settings } from "./settings";
 
 export function template(part: PromptPart | undefined): TemplatePart | undefined {
   return part?.format === "template" ? part : undefined;
@@ -56,19 +56,18 @@ export interface Connection {
   label: string;
 }
 
-/** The connection a definition (or a rule's `judge:`) names among `user`'s connections: `default` (or none) is his default connection; any other name is a connection's name or id. The effort is the setting's for that connection where it names one, else the definition's. */
-export async function connectionOf(connections: ModelsApi, user: string, settings: Settings, definition: Pick<AgentDefinition, "model" | "effort">, log: Log): Promise<Connection> {
+/** The connection a definition (or a rule's `judge:`) names among the scope's user's connections (`connectionNamed`): `default` (or none) is his default connection; any other name is a connection's name or id. The choice carries the run's scope, so its calls read the model layer's settings at its chat's levels. The effort is the definition's alone (READINGS N-7): where it names none, the connection's own. */
+export async function connectionOf(connections: ModelsApi, scope: Scope, definition: Pick<AgentDefinition, "model" | "effort">, log: Log): Promise<Connection> {
   const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
-  const list = await connections.list(user).catch((error: unknown) => {
+  const list = await connections.list(scope.user).catch((error: unknown) => {
     log.warn("The connections could not be listed.", { error: error instanceof Error ? error.message : String(error) });
     return undefined;
   });
-  const view = named === null ? list?.connections.find((c) => c.id === list.default) : list?.connections.find((c) => c.name === named || c.id === named);
+  const view = list === undefined ? undefined : connectionNamed(list, definition.model);
   const id = view?.id ?? named;
   const name = view?.name ?? named;
-  const effort = effortFor(settings, { id: id ?? null, name }) ?? definition.effort;
   return {
-    choice: { user, connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}) },
+    choice: { user: scope.user, scope, connectionId: named === null ? null : id, model: null, ...(definition.effort !== undefined ? { effort: definition.effort } : {}) },
     id: id ?? null,
     name,
     label: name ?? "default",

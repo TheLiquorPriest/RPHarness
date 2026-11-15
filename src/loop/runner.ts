@@ -28,6 +28,7 @@
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, CallPermission, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import type { LayerOptions } from "../model/source";
 import { type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, emptyUsage, type Room } from "./budget";
 import type { TextChannel } from "./channel";
@@ -621,7 +622,8 @@ export class AgentRunner {
     });
     let source: Promise<AssistantMessageEventStream>;
     try {
-      source = Promise.resolve(this.#o.streamFn(model, context, { ...options, ...streamSettings(settings) }));
+      const layered: SimpleStreamOptions & LayerOptions = { ...options, ...streamSettings(settings), heard: (event) => (event.kind === "limit" ? this.#halt(stint, { status: "limit", hit: event.hit }) : this.#emit(stint, event)) };
+      source = Promise.resolve(this.#o.streamFn(model, context, layered));
     } catch (error) {
       source = Promise.reject(error);
     }

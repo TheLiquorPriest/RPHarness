@@ -52,3 +52,24 @@ test("a document that no longer reads: the turns run on the connections last rea
   expect(s.logged.filter((line) => line.message.includes("saved connections"))).toEqual([{ level: "info", message: words }]);
   expect(sent.filter((one) => one.text.includes("saved connections"))).toEqual([]);
 });
+
+test("a call held by its connection's throttle shows the wait in the trace", async () => {
+  const { fetch, sent } = scriptedFetch(() => eventStream(chatStream([chunk({ role: "assistant", content: "<reply>No boat tonight.</reply>" }), chunk({}, "stop")])));
+  const s = (open = await stage({ fetch, answers: [], config: "throttles:\n  connections:\n    Harbour:\n      requestsPerMinute: 1\n" }));
+  const saved = await s.harness.models.save(USER, { name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "first-model" });
+  await s.harness.models.setDefault(USER, saved.id);
+
+  expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+  // One request a minute: the second turn's call waits for the connection's minute, and its run's trace says so, then how long.
+  const second = s.turn(request("t2", { lead: "lead" }));
+  await s.trace.seen((record) => record.event.kind === "connection_wait");
+  expect(sent).toHaveLength(1);
+  s.clock.advance(60_000);
+  expect((await second).outcome.status).toBe("released");
+  const waits = s.trace.records.filter((record) => record.event.kind === "connection_wait");
+  expect(waits.map((record) => [record.scope.turn, record.agent.definition, record.event])).toEqual([
+    ["t2", "lead", { kind: "connection_wait", connection: "Harbour", for: "minute" }],
+    ["t2", "lead", { kind: "connection_wait", connection: "Harbour", for: "minute", ms: 60_000 }],
+  ]);
+  expect(sent).toHaveLength(2);
+});

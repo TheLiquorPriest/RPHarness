@@ -12,7 +12,7 @@ Working, and young. One host embeds it today: [LumiRPEngine](https://github.com/
 
 What it has:
 
-- **A turn for a lead agent** on pi's loop: limits, stop codes, throttles, a trace of every call.
+- **A turn for a lead agent** on pi's loop: limits, stop codes, a trace of every call, and each connection's throttle (its requests and tokens a minute and its calls at once, across every agent, turn and job, each wait in the trace).
 - **The reply in three forms,** set per connection: tagged in the lead's message, written in two steps, or the whole message. One reply per turn, released once.
 - **Guidance from files:** definitions, the instruction stack by level (shipped, the user's, a character's, a chat's), skills, prompt parts, and rules that fire on events, on facts the host gives, at a run's end, or on a yes-or-no question judged by a model.
 - **Sub-agents** (`delegate`, `ask_author`, `agent_message`, `agent_drop`) that own what they wrote.
@@ -31,7 +31,7 @@ What it does not have yet: tools that run a command or call an address (command 
 |---|---|
 | `src/contract/` | What a host implements and what RPH offers it. The only thing a host imports besides `createHarness`. |
 | `src/harness/` | `createHarness`: a whole turn for the lead; the gate; settings; the judge. |
-| `src/loop/` | The agent runner on pi: limits, stop codes, throttles, rules in the loop, trace. |
+| `src/loop/` | The agent runner on pi: limits, stop codes, rules in the loop, trace. |
 | `src/reply/` | The reply and its forms. |
 | `src/files/` | File tools; definitions, skills, rules and prompt parts loaded from files; the rule engine. |
 | `src/agents/` | Sub-agents and what each owns. |
@@ -39,7 +39,7 @@ What it does not have yet: tools that run a command or call an address (command 
 | `src/sessions/` | Sessions as files, what is carried, compaction. |
 | `src/jobs/` | Background runs. |
 | `src/prompt/` | The prompt map. |
-| `src/model/` | The model layer on `pi-ai`: connections, limits read from pi, token counts. |
+| `src/model/` | The model layer on `pi-ai`: connections, limits read from pi, token counts, each connection's throttle, a key held to the place it was given for, requests passed through. |
 | `src/hosts/folder/` | A second host: point it at a directory and a tools manifest and it runs. |
 | `src/testing/` | The scripted-model rig and the kit any host must pass. |
 | `guidance/` | The files RPH ships: its tools' descriptions, its prompt parts, one rule. A host's own files replace any of them by name. |

@@ -428,7 +428,7 @@ export class Jobs implements JobsApi, JobsWork {
     const prepared = await prepareJob({ ...core, jobs: this }, { ...ask, id, spent: spend.used });
     if (!("run" in prepared)) return prepared;
     const own = jobCountsFor(prepared.settings, prepared.connection);
-    const hit = prepared.day.reached(prepared.agent) ?? (await this.#count(scope.user, prepared.settings, own));
+    const hit = prepared.day.reached(prepared.agent)[0] ?? (await this.#count(scope.user, prepared.settings, own));
     if (hit !== undefined) {
       prepared.trace.event(by ?? prepared.agent, parent, { kind: "limit", hit });
       return { hit };
@@ -603,7 +603,7 @@ export class Jobs implements JobsApi, JobsWork {
   #asks(live: Live, usage: Usage): void {
     const { askAt } = live;
     if (askAt === undefined || live.view.state !== "running") return;
-    const reached = new Budget("job", { tokens: askAt }, undefined, { used: usage, cachedWeight: live.prepared.settings.jobs.cachedWeight }).reached(live.prepared.agent);
+    const reached = new Budget("job", { tokens: askAt }, undefined, { used: usage, cachedWeight: live.prepared.settings.jobs.cachedWeight }).reached(live.prepared.agent)[0];
     if (reached === undefined) return;
     live.view = { ...live.view, state: "asking", asks: { at: askAt, tokens: reached.value } };
     this.#core.hub.holds.add(live.view.id, "asking");

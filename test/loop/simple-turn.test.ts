@@ -2,7 +2,8 @@
 // one model call; the reply reaches the sink as it streams, within 50 ms of the model's piece.
 import { describe, expect, test } from "bun:test";
 import type { JsonValue } from "../../src/contract";
-import { REPLY_DEFAULTS, TagReply } from "../../src/reply";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
+import { TagReply } from "../../src/reply";
 import { type Reply, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
@@ -10,7 +11,7 @@ const tags = { reply: "reply", intent: "intent" };
 
 function writer(): { sink: SinkRecorder; reply: TagReply } {
   const sink = new SinkRecorder();
-  return { sink, reply: new TagReply({ tags, sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences }) };
+  return { sink, reply: new TagReply({ tags, sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences }) };
 }
 
 /** The intent's closing tag is split mid-name on purpose. Pieces come 20 ms apart on the fake clock, as a provider's do. */

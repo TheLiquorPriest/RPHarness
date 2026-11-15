@@ -3,8 +3,9 @@
 // transcript it can be continued from. Then the limits (§10.11), which end work the same way.
 import type { Message } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import { Budget, type GateAfter, type GateBefore, type LoopToolResult, type ToolGate } from "../../src/loop";
-import { REPLY_DEFAULTS, TagReply } from "../../src/reply";
+import { TagReply } from "../../src/reply";
 import { FakeClock, gate, rigAgent, said, SinkRecorder, textOf, tool, TraceRecorder, user } from "./support";
 
 const author = { id: "author", definition: "author" };
@@ -19,7 +20,7 @@ function consistent(messages: readonly Message[]): boolean {
 describe("stop", () => {
   test("in the middle of a stream: nothing further is emitted, even from a provider that keeps going", async () => {
     const sink = new SinkRecorder();
-    const reply = new TagReply({ tags, sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences });
+    const reply = new TagReply({ tags, sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences });
     const later = gate();
     const { runner, scripted, recorder, clock } = rigAgent(
       author,

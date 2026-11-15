@@ -4,8 +4,9 @@
 // With such a rule in force the reply is held back by one sentence; without one, not at all.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import type { StreamRules, TextChannel, Written } from "../../src/loop";
-import { heldSentences, REPLY_DEFAULTS, sentenceEnds, TagReply } from "../../src/reply";
+import { heldSentences, sentenceEnds, TagReply } from "../../src/reply";
 import { fired, type Reply, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
@@ -67,7 +68,7 @@ function setUp(inForce: boolean) {
   const sink = new SinkRecorder();
   const rules = bannedPhrase(inForce);
   const released: string[] = [];
-  const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, REPLY_DEFAULTS.heldSentences), tailSentences: REPLY_DEFAULTS.tailSentences, onReleased: (text) => released.push(text) });
+  const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, DEFAULT_SETTINGS.heldSentences), tailSentences: DEFAULT_SETTINGS.tailSentences, onReleased: (text) => released.push(text) });
   const { channel, held } = watched(reply);
   const notes: string[] = [];
   const note = tool("scene_note", async () => (notes.push("noted"), said("noted")));
@@ -132,7 +133,7 @@ describe("a rule on the stream", () => {
   test("a message the provider had already finished leaves no trace when a rule stops it: not its words, nor its calls, nor answers to them", async () => {
     const sink = new SinkRecorder();
     const rules = bannedPhrase(true);
-    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, REPLY_DEFAULTS.heldSentences), tailSentences: REPLY_DEFAULTS.tailSentences });
+    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, DEFAULT_SETTINGS.heldSentences), tailSentences: DEFAULT_SETTINGS.tailSentences });
     const notes: string[] = [];
     const note = tool("scene_note", async () => (notes.push("noted"), said("noted")));
     const { runner, scripted, recorder, clock } = rigAgent(author, [burst(true), secondCall], { tools: [note], channel: reply, stream: rules });
@@ -157,7 +158,7 @@ describe("a rule on the stream", () => {
   test("a message the provider had already finished is no run's end when a rule stops it: the rules due then do not fire on it", async () => {
     const sink = new SinkRecorder();
     const rules = bannedPhrase(true);
-    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, REPLY_DEFAULTS.heldSentences), tailSentences: REPLY_DEFAULTS.tailSentences });
+    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, DEFAULT_SETTINGS.heldSentences), tailSentences: DEFAULT_SETTINGS.tailSentences });
     const missing = replyMissing(() => reply.released, "Fixture rule: the turn is ending with no reply. Write it now.");
     const rewritten: Reply = { pieces: [{ text: "<reply>Something moves; the cold reaches her first. She runs.</reply>" }] };
     const { runner, scripted, recorder, clock } = rigAgent(author, [burst(false), rewritten], { channel: reply, stream: rules, runEnd: missing });

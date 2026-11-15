@@ -1,7 +1,8 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import type { StreamRules } from "../../src/loop";
-import { heldSentences, REPLY_DEFAULTS, ReplyDesk, TagReply } from "../../src/reply";
+import { heldSentences, ReplyDesk, TagReply } from "../../src/reply";
 
 const tags = { reply: "reply", intent: "intent" };
 const anyMessage = {} as AssistantMessage;
@@ -80,9 +81,9 @@ describe("the reply in the tag form", () => {
   test("held back by one sentence only while a rule that interrupts covers the reply", () => {
     const covering: StreamRules = { coverReply: true, check: () => undefined };
     const elsewhere: StreamRules = { coverReply: false, check: () => undefined };
-    expect(heldSentences(covering, REPLY_DEFAULTS.heldSentences)).toBe(1);
-    expect(heldSentences(elsewhere, REPLY_DEFAULTS.heldSentences)).toBe(0);
-    expect(heldSentences(undefined, REPLY_DEFAULTS.heldSentences)).toBe(0);
+    expect(heldSentences(covering, DEFAULT_SETTINGS.heldSentences)).toBe(1);
+    expect(heldSentences(elsewhere, DEFAULT_SETTINGS.heldSentences)).toBe(0);
+    expect(heldSentences(undefined, DEFAULT_SETTINGS.heldSentences)).toBe(0);
   });
 
   test("the reply is taken only as its first text goes out: one cut before anything of it showed leaves it free for another way", () => {

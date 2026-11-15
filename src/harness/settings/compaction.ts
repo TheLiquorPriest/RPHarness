@@ -11,10 +11,10 @@ export const COMPACTION = worded(
     // Appendix D.1: the reserve pi's coding agent keeps (16,384 tokens), the newest 3 turns kept as they
     // are, and records folded once they pass 6,000 tokens. §11: the lead gets one call with the rule's
     // text before anything is summarized.
-    reserve: { key: "compaction.reserve", takes: { type: "whole", least: 0 }, default: 16_384, perConnection: false },
-    keepTurns: { key: "compaction.keepTurns", takes: { type: "whole", least: 0 }, default: 3, perConnection: false },
-    records: { key: "compaction.records", takes: { type: "whole", least: 1 }, default: 6_000, perConnection: false },
-    saveCalls: { key: "compaction.saveCalls", takes: { type: "whole", least: 1 }, default: 1, perConnection: false },
+    reserve: { key: "compaction.reserve", takes: { type: "whole", least: 0 }, default: 16_384, perConnection: false, at: "compaction.reserve" },
+    keepTurns: { key: "compaction.keepTurns", takes: { type: "whole", least: 0 }, default: 3, perConnection: false, at: "compaction.keepTurns" },
+    records: { key: "compaction.records", takes: { type: "whole", least: 1 }, default: 6_000, perConnection: false, at: "compaction.records" },
+    saveCalls: { key: "compaction.saveCalls", takes: { type: "whole", least: 1 }, default: 1, perConnection: false, at: "compaction.saveCalls" },
   },
   COMPACTION_WORDS,
 );

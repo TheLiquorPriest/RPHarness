@@ -3,8 +3,9 @@
 // calls or with no calls left. After the reply went out: a reply tag is answered once, never in a
 // loop; plain text is no reply at all, and a message of it alone ends the run with nothing said.
 import { describe, expect, test } from "bun:test";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import type { Fired, RunEndRules } from "../../src/loop";
-import { MessageReply, REPLY_DEFAULTS, ReplyDesk, TagReply } from "../../src/reply";
+import { MessageReply, ReplyDesk, TagReply } from "../../src/reply";
 import { fired, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
@@ -13,7 +14,7 @@ const RULE = "Fixture rule: the turn is ending with no reply. Write it now.";
 
 function writer(): { sink: SinkRecorder; reply: TagReply } {
   const sink = new SinkRecorder();
-  return { sink, reply: new TagReply({ tags, sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences }) };
+  return { sink, reply: new TagReply({ tags, sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences }) };
 }
 
 const tools = () => [tool("scene_note", async () => said("noted")), tool("todo", async () => said("listed"))];
@@ -105,7 +106,7 @@ describe("after the reply went out", () => {
 
   /** The two-step form, handed the second-reply line too (a host may give every form the same options): it never says it. */
   function twoStep(sink: SinkRecorder, stream: boolean, claim?: () => boolean): MessageReply {
-    const options = { sink, stream, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences, second: SECOND, ...(claim !== undefined ? { claim } : {}) };
+    const options = { sink, stream, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, second: SECOND, ...(claim !== undefined ? { claim } : {}) };
     return new MessageReply(options);
   }
 
@@ -180,7 +181,7 @@ describe("after the reply went out", () => {
 
   test("in the tag form, a reply tag after the reply is told once that the reply went out, and the run ends", async () => {
     const sink = new SinkRecorder();
-    const reply = new TagReply({ tags, sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences, second: SECOND });
+    const reply = new TagReply({ tags, sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, second: SECOND });
     // More answers than the work may take, every one of them a reply tag.
     const texts = ["<reply>The lamp flares.</reply>", "<reply>It flares again.</reply>", "<reply>And again.</reply>", "<reply>Once more.</reply>", "<reply>More.</reply>", "<reply>Done.</reply>"];
     const { runner, scripted, clock } = rigAgent(author, texts.map((text) => ({ pieces: [{ text }] })), { channel: reply, runEnd: onceAtEnd(), limits: { calls: texts.length } });

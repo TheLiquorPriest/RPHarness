@@ -13,7 +13,6 @@ import { archiveSearch, webSearch } from "./searches";
 // The contract carries the web searcher; the base tools' own tests name it from here.
 export type { WebSearchPort } from "../../contract";
 export { BASE_PART, type BaseToolsDeps } from "./deps";
-export { GAP_HITS } from "./gap";
 export { SKILL_LOAD, SKILLS_PART, skillsIndex } from "./other";
 
 /** The names of these tools, whose files the harness reads with its other tools' (`.tools/<name>.md`). */

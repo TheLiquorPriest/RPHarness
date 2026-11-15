@@ -8,13 +8,6 @@ import type { GapCheck, GapSearch, SearchHit } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole } from "../kit";
 import { type BaseToolsDeps, linesAnswer, textsOf, wordsOf } from "./deps";
 
-/**
- * The hits a check takes from each place when the agent names no limit. At about 200 characters a
- * hit, a check of three places then comes to about the 12,000 characters of a result the model
- * reads whole by default.
- */
-export const GAP_HITS = 20;
-
 /** Where a check's evidence is kept, inside the turn's own `queries/` folder. */
 const EVIDENCE = "queries/gap-check-";
 
@@ -35,7 +28,7 @@ export function gapCheck(deps: BaseToolsDeps): OwnTool {
       // A check of nothing would come back empty everywhere, which reads as a gap proven.
       if (topic === "") return answer(words("gap_no_topic"), true);
       const terms = [...new Set(textsOf(given["terms"]).map((term) => term.trim()))].filter((term) => term !== "" && term !== topic);
-      const limit = Math.min(whole(given, "limit") ?? deps.gapHits ?? GAP_HITS, deps.perCall);
+      const limit = Math.min(whole(given, "limit") ?? deps.gapHits, deps.perCall);
       const looked = [topic, ...terms].join(" ");
       const searches: { where: string; search(): Promise<SearchHit[]> }[] = [
         { where: "chat", search: async () => (await env.chat.search(scope, { text: looked, limit })).map((hit) => ({ ref: hit.id, title: hit.name, snippet: hit.snippet, how: hit.how })) },

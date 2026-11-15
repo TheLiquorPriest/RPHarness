@@ -12,7 +12,7 @@ const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, med
 export const MODELS = worded(
   {
     // Not under `models`: a host keeps the model layer's connections there, and saving one rewrites that key whole.
-    effort: { key: "effort.connections.<connection>", takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, none: "as each agent's definition says", perConnection: true },
+    effort: { key: "effort.connections.<connection>", takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, orNone: true, none: "as each agent's definition says", perConnection: true, at: "efforts.<connection>" },
   },
   MODELS_WORDS,
 );

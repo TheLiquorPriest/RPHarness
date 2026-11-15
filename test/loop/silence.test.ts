@@ -1,7 +1,8 @@
 // Claim i (§18.1 row 0.2, §10.7): when nothing has been shown for a set interval, a progress line
 // is emitted, so a long silent turn stays alive. The interval is a setting.
 import { describe, expect, test } from "bun:test";
-import { KeepAlive, REPLY_DEFAULTS, TagReply } from "../../src/reply";
+import { DEFAULT_SETTINGS } from "../../src/harness/settings";
+import { KeepAlive, TagReply } from "../../src/reply";
 import { FakeClock, rigAgent, said, SinkRecorder, tool, user } from "./support";
 
 const MINUTE = 60_000;
@@ -13,7 +14,7 @@ async function silentTurn(silenceMs: number): Promise<{ sink: SinkRecorder; star
   const clock = new FakeClock();
   const sink = new SinkRecorder(clock);
   const alive = new KeepAlive({ sink, clock, silenceMs, still: ({ elapsed }) => `Fixture: still working (${elapsed}).` });
-  const reply = new TagReply({ tags, sink: alive.sink, heldSentences: 0, tailSentences: REPLY_DEFAULTS.tailSentences, onReleased: () => alive.sink.finish({ calls: 2, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }) });
+  const reply = new TagReply({ tags, sink: alive.sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, onReleased: () => alive.sink.finish({ calls: 2, input: 0, cacheRead: 0, cacheWrite: 0, output: 0 }) });
   const consult = tool("consult", async (_args, ctx) => (await clock.sleep(12 * MINUTE, ctx.signal), said("consulted")));
   const { runner } = rigAgent(author, [{ pieces: [{ text: "<intent>Consult first.</intent>" }, { call: "consult" }] }, { pieces: [{ text: "<reply>At last, the answer.</reply>" }] }], { clock, tools: [consult], channel: reply });
   const startedAt = clock.now();

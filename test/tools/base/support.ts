@@ -49,7 +49,7 @@ export async function bench(files: Readonly<Record<string, string>> = {}): Promi
   const host = await makeFolderHost(KIT_SEED, place);
   const guidance = loadGuidance(host.files, SCOPE);
   let made = 0;
-  const tools = (extra: Extra = {}) => baseTools({ env: host, guidance, texts: new Map(), ids: () => `check-${++made}`, perCall: DEFAULT_SETTINGS.perCall, ...extra });
+  const tools = (extra: Extra = {}) => baseTools({ env: host, guidance, texts: new Map(), ids: () => `check-${++made}`, gapHits: DEFAULT_SETTINGS.gapHits, perCall: DEFAULT_SETTINGS.perCall, ...extra });
   return {
     host,
     guidance,

@@ -22,8 +22,14 @@
 // header the loop passes in its options is sent. Google's calls are the one kind that can't go out
 // through the layer's own fetch, so a Google connection takes no address but Google's own (book.ts).
 // A stream that goes silent once its answer has begun is ended after `calls.silentAfter`
-// (`silenceWatch`), in words that say so and name that setting. A call's settings are read as it is
-// made, at its agent's chat's levels, or, with no chat in view, at the levels every chat shares.
+// (`silenceWatch`), in words that say so and name that setting. A call is made under its terms, read
+// as it is made at its agent's chat's levels, or, with no chat in view, at the levels every chat
+// shares: the layer's settings, and its texts (texts.ts). On an Anthropic sign-in the line pi-ai puts
+// at the head of the system prompt is replaced by the file's, or taken out where the file gives none;
+// a tool answer with no text is given the file's words for it. The session a call names to pi-ai, and
+// so to the provider's cache, is the user's session alone (`sessionKey`).
+
+import { createHash } from "node:crypto";
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { AnthropicMessagesCompat, Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, CacheRetention, Model, ModelThinkingLevel, MutableModels, OpenAICompletionsCompat, OpenAIResponsesCompat, SimpleStreamOptions, ThinkingBudgets, ThinkingLevel, ToolChoice, TranscriptContext } from "@earendil-works/pi-ai";
@@ -40,7 +46,8 @@ import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
 import { limitsOf } from "./limits";
 import type { AgentChoice, ModelEffort, UserChoice } from "./source";
-import { compatSays, inPlace, keepsSystemInPlace } from "./transcript";
+import type { ModelTexts } from "./texts";
+import { answered, compatSays, inPlace, keepsSystemInPlace } from "./transcript";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export interface CallDeps {
@@ -55,8 +62,25 @@ export interface CallDeps {
   clearTimeout(handle: unknown): void;
   /** The model layer's settings at a scope's levels, read as each call is made. */
   settings(scope: Scope | UserScope): Promise<ModelSettings>;
-  /** The text a system message is sent as where its model takes none mid-conversation, from the system message's text; absent: its text, unmarked. */
-  markNote?(text: string): string;
+  /** The model layer's texts at a scope's levels, read as each call is made. */
+  texts(scope: Scope | UserScope): Promise<ModelTexts>;
+}
+
+/** What a call is made under, read at its scope's levels as it is made: the layer's settings and its texts. */
+export interface CallTerms {
+  settings: ModelSettings;
+  texts: ModelTexts;
+}
+
+/** A call's terms at a scope's levels, as they stand now. */
+export async function termsOf(deps: Pick<CallDeps, "settings" | "texts">, scope: Scope | UserScope): Promise<CallTerms> {
+  const [settings, texts] = await Promise.all([deps.settings(scope), deps.texts(scope)]);
+  return { settings, texts };
+}
+
+/** The session a call names to pi-ai and the provider's cache: the user's session, never another user's of the same id, and never his name. */
+export function sessionKey(user: string, session: string): string {
+  return createHash("sha256").update(JSON.stringify([user, session])).digest("hex");
 }
 
 /** What a call goes to and how its model is asked to think, known before anything is sent. */
@@ -167,7 +191,7 @@ function setAll(payload: Record<string, unknown>, values: Partial<Record<string,
   for (const [ours, theirs] of Object.entries(names)) if (values[ours] !== undefined) payload[theirs] = values[ours];
 }
 
-/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, and the fields a passed request sent. */
+/** What a call does to the request pi-ai built before it is sent: the sampling parameters its API names its own way, one tool per answer, the fields a passed request sent, and the sign-in line. */
 interface PayloadChanges {
   sampling: Partial<Record<SamplingName, unknown>>;
   serial: boolean;
@@ -177,11 +201,13 @@ interface PayloadChanges {
   extras: JsonObject | undefined;
   /** Nobody knows how long a reply the model can write and the call asked for no room: the cap pi-ai fills in on its own (one token, for a model with no limit) is taken out, so the provider's own default stands. */
   uncapped: boolean;
+  /** A call on an Anthropic sign-in: the line pi-ai puts first in the system prompt is this one, or none where it is undefined. */
+  signin?: { line: string | undefined };
 }
 
 function changePayload(api: string, payload: unknown, changes: PayloadChanges): unknown {
   if (!isRecord(payload)) return undefined;
-  const { sampling, serial, providerDefault, thinking, extras, uncapped } = changes;
+  const { sampling, serial, providerDefault, thinking, extras, uncapped, signin } = changes;
   const hasTools = Array.isArray(payload.tools) && payload.tools.length > 0;
   switch (api) {
     case "anthropic-messages":
@@ -189,6 +215,12 @@ function changePayload(api: string, payload: unknown, changes: PayloadChanges): 
       if (!thinking) setAll(payload, sampling, { top_p: "top_p", top_k: "top_k" });
       setAll(payload, sampling, { stop: "stop_sequences" });
       if (serial && hasTools) payload.tool_choice = { ...(isRecord(payload.tool_choice) ? payload.tool_choice : { type: "auto" }), disable_parallel_tool_use: true };
+      // pi-ai puts its own line first on a sign-in's request (it signs the request as Claude Code's): the file's stands in its place.
+      if (signin !== undefined && Array.isArray(payload.system) && isRecord(payload.system[0])) {
+        if (signin.line !== undefined) payload.system[0] = { ...payload.system[0], text: signin.line };
+        else payload.system.shift();
+        if (payload.system.length === 0) delete payload.system;
+      }
       break;
     case "openai-completions":
     case "openai-responses":
@@ -325,11 +357,11 @@ function stopWords(signal: AbortSignal | undefined): string {
 const STOPPED = Symbol("stopped");
 
 /**
- * Makes one call (see the head of this file) under the model layer's settings as its caller read
- * them, its events pushed to `out` as they come: whatever happens, `out` ends with a `done` or an
- * `error` event.
+ * Makes one call (see the head of this file) under its terms as its caller read them, its events
+ * pushed to `out` as they come: whatever happens, `out` ends with a `done` or an `error` event.
  */
-export async function makeCall(deps: CallDeps, shape: CallShape, context: TranscriptContext, ask: CallAsk, settings: ModelSettings, signal: AbortSignal | undefined, out: AssistantMessageEventStream): Promise<void> {
+export async function makeCall(deps: CallDeps, shape: CallShape, context: TranscriptContext, ask: CallAsk, terms: CallTerms, signal: AbortSignal | undefined, out: AssistantMessageEventStream): Promise<void> {
+  const { settings, texts } = terms;
   const { connection, kind, model, limits } = shape;
   // Ends a call that went silent, beside the caller's own signal, with words that say so.
   const quiet = new AbortController();
@@ -370,9 +402,17 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       delete taken.top_p;
     }
     const { temperature, ...rest } = taken;
-    const messages = inPlace(context.messages, keepsSystemInPlace(model), deps.markNote);
+    const messages = inPlace(answered(context.messages, texts.emptyAnswer, texts.picturesAnswer), keepsSystemInPlace(model), texts.markNote);
     // Under the provider's own default its model may think, so what thinking refuses is left out then too.
-    const changes: PayloadChanges = { sampling: openAI ? {} : rest, serial: ask.serialTools, providerDefault: leftToProvider, thinking: reasoning !== undefined || leftToProvider, extras: ask.extras, uncapped: room === undefined };
+    const changes: PayloadChanges = {
+      sampling: openAI ? {} : rest,
+      serial: ask.serialTools,
+      providerDefault: leftToProvider,
+      thinking: reasoning !== undefined || leftToProvider,
+      extras: ask.extras,
+      uncapped: room === undefined,
+      ...(connection.auth === "signin" && model.api === "anthropic-messages" ? { signin: { line: texts.signinLine } } : {}),
+    };
     const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
     watch = watching;
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
@@ -392,7 +432,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       ...(headers !== undefined ? { headers } : {}),
       ...(ask.toolChoice !== undefined ? { toolChoice: ask.toolChoice } : {}),
       cacheRetention: ask.cacheRetention,
-      ...(ask.sessionId !== undefined ? { sessionId: ask.sessionId } : {}),
+      ...(ask.sessionId !== undefined ? { sessionId: sessionKey(deps.user, ask.sessionId) } : {}),
       maxRetries: 0,
       // The caller sees the request as it is sent, after the changes, and may replace it.
       onPayload: async (payload, sent) => {
@@ -520,7 +560,7 @@ function askOf(options: SimpleStreamOptions, shape: CallShape, settings: ModelSe
  * pi's stream function over the layer's calls (see the head of this file). The model it is handed
  * must be one the layer made for an agent (`choiceOf`): the call is shaped from that agent's choice
  * as the connection stands at the time of the call, so a key, a model or a limit changed since takes
- * effect at once, and made under the settings at its agent's chat's levels as they stand then.
+ * effect at once, and made under the terms at its agent's chat's levels as they stand then.
  */
 export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => UserChoice | undefined): StreamFn {
   return (model, context, options = {}) => {
@@ -530,8 +570,8 @@ export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => 
       try {
         if (choice === undefined) throw new Error("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
         const shape = await shapeOf(deps, choice);
-        const settings = await deps.settings(choice.scope ?? { user: choice.user });
-        await makeCall(deps, shape, context, askOf(options, shape, settings), settings, options.signal, out);
+        const terms = await termsOf(deps, choice.scope ?? { user: choice.user });
+        await makeCall(deps, shape, context, askOf(options, shape, terms.settings), terms, options.signal, out);
       } catch (error) {
         endWith(out, emptyAnswer(model, options.signal?.aborted === true ? "aborted" : "error", errorWords(error), deps.now()));
       }

@@ -10,18 +10,19 @@
 // - the host's way in (the contract's `ModelsApi`): the connections as the Connections page keeps
 //   them, a connection's test call and its models, each model's limits, the sign-ins to Anthropic
 //   and OpenAI, and requests passed through, each for the user it names;
-// - the end of an agent session's prompt cache (`ended`);
+// - the end of an agent session's prompt cache (`ended`), the user's session alone;
 // - a turn's start (`turnStarting`): the user's connections are read again through the host, so that
 //   a hand edit made since holds from the turn's first call.
 //
 // What the layer is handed (`ModelLayerDeps`) is everything it reaches the world through: where the
 // host keeps each user's connections and their secrets, the clock, ids, timers, `fetch`, the log, the
 // environment it takes the SDKs' own settings out of, its settings (`calls.*`: its waits, its sizes,
-// its retries and the prompt cache's retention), read as each is used so a change holds from the
-// next call, and the text a connection's test sends, which comes from a shipped file like every text
-// sent to a model. What has no chat in view (a connection's test, its list of models, a sign-in, a
-// request passed through) reads the settings at the levels every chat shares; an agent's call reads
-// them at its chat's levels.
+// its retries and the prompt cache's retention) and its texts (texts.ts: the sign-in line, the mark
+// of a system message sent in place, a connection's test, a tool answer with no text), each read as
+// it is used so a change holds from the next call. What has no chat in view (a connection's test,
+// its list of models, a sign-in, a request passed through) reads them at the levels every chat
+// shares; an agent's call reads them at its chat's levels. A desk is kept only for a user the host
+// answered for: one whose documents the host refused leaves none.
 
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Provider } from "@earendil-works/pi-ai";
@@ -34,13 +35,14 @@ import { MODELS } from "../harness/settings/models";
 import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
-import { makeCall, shapeOf, streamFunction } from "./call";
+import { makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
 import { isRecord } from "./json";
 import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
 import { passRequest } from "./pass";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
+import type { ModelTexts } from "./texts";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
@@ -49,6 +51,8 @@ export type { CallUsage, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
 export { limitsOf } from "./limits";
 export { connectionNamed, runOf } from "./runs-on";
+export { sessionKey } from "./call";
+export { modelTexts, type ModelTexts } from "./texts";
 
 export interface ModelLayerDeps {
   /** Where the host keeps each user's connections and their secrets. */
@@ -65,8 +69,6 @@ export interface ModelLayerDeps {
   clearTimeout(handle: unknown): void;
   /** The name the app goes by where a sign-in shows one (OpenAI's page). */
   appName: string;
-  /** The text a connection's test call sends: read from a shipped file. */
-  testPrompt(): Promise<string>;
   /** pi-ai providers that stand in for the built-in ones of the same id: tests give pi-ai's faux provider. */
   providers?: readonly Provider[];
   /** The process's environment, `process.env` when not given: what the SDKs under pi-ai would read in it for themselves (`STEERING`) is taken out as the layer is made. */
@@ -76,15 +78,15 @@ export interface ModelLayerDeps {
    * them at its chat's levels, and what has no chat in view with a scope that names only the user.
    */
   settings(scope: Scope | UserScope): Promise<ModelSettings>;
-  /** The text a system message is sent as, in its place, where its model takes no system message mid-conversation: from a shipped file's mark. Absent: its own text, unmarked. Never applied to a request passed through. */
-  markNote?(text: string): string;
+  /** The layer's texts at a scope's levels, read as each is used, at the same levels as its settings. A request passed through goes with no mark on a system message in its place. */
+  texts(scope: Scope | UserScope): Promise<ModelTexts>;
 }
 
 export interface ModelLayer extends ModelSource {
   /** The host's way to the layer. */
   api: ModelsApi;
-  /** An agent session ended: what pi-ai keeps for its prompt cache (Anthropic's message threads) is let go. */
-  ended(sessionId: string): void;
+  /** One of the user's agent sessions ended: what pi-ai keeps for its prompt cache (Anthropic's message threads) under that session of his is let go, and no other user's. */
+  ended(user: string, sessionId: string): void;
   /**
    * A turn of `user`'s starts: his connections are read again through the host (book.ts), so that a
    * hand edit made since holds from this turn's first call. Resolves with what that read had to say,
@@ -197,7 +199,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
     const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
     for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, ...(deps.markNote !== undefined ? { markNote: deps.markNote } : {}) };
+    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts };
     // A sign-in has no chat in view: its settings are the levels every chat shares.
     const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: () => deps.settings({ user }), appName: deps.appName });
     // A model made for another user's agent is none of this desk's: its call goes on no connection of his.
@@ -207,6 +209,10 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     });
     const desk: Desk = { book, calls, signIn, streamFn };
     desks.set(user, desk);
+    // A user the host refused, as one it does not serve, keeps no desk: his name holds nothing here.
+    void book.answered.then((answered) => {
+      if (!answered && desks.get(user) === desk) desks.delete(user);
+    });
     return desk;
   };
 
@@ -288,16 +294,16 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       const t0 = deps.now();
       let wait: { signal: AbortSignal; clear(): void } | undefined;
       try {
-        // A test has no chat in view: its settings are the levels every chat shares.
-        const settings = await calls.settings({ user });
-        const timed = deadline(settings, (ms) => `The provider didn't answer within ${ms}.`);
+        // A test has no chat in view: its terms are the levels every chat shares.
+        const terms = await termsOf(calls, { user });
+        const timed = deadline(terms.settings, (ms) => `The provider didn't answer within ${ms}.`);
         wait = timed;
         const ended = signal === undefined ? timed.signal : AbortSignal.any([signal, timed.signal]);
         const shape = await shapeOf(calls, { connectionId: id, model: null, effort: "off" });
-        const context = normalizeContext({ messages: [{ role: "user", content: await deps.testPrompt(), timestamp: deps.now() }] });
+        const context = normalizeContext({ messages: [{ role: "user", content: terms.texts.testPrompt, timestamp: deps.now() }] });
         const out = createAssistantMessageEventStream();
         // A test says how the connection stands now: it is never made again, and keeps nothing in the provider's cache.
-        await makeCall(calls, shape, context, { maxTokens: settings.testRoom, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, settings, ended, out);
+        await makeCall(calls, shape, context, { maxTokens: terms.settings.testRoom, sampling: {}, serialTools: false, cacheRetention: "none", retries: 0, carried: {} }, terms, ended, out);
         const result = await out.result();
         if (result.stopReason !== "error" && result.stopReason !== "aborted") return { ok: true, ms: deps.now() - t0, model: result.responseModel ?? result.model };
         return { ok: false, ms: deps.now() - t0, error: timed.signal.aborted ? errorWords(timed.signal.reason) : (result.errorMessage ?? "") };
@@ -337,8 +343,8 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       return { model, thinkingLevel: shape.reasoning ?? "off", streamFn: desk.streamFn, limits: shape.limits };
     },
     api,
-    ended(sessionId) {
-      cleanupSessionResources(sessionId);
+    ended(user, sessionId) {
+      cleanupSessionResources(sessionKey(user, sessionId));
     },
     turnStarting: (user) => deskOf(user).book.refresh(),
     async close() {

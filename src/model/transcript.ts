@@ -51,3 +51,18 @@ export function inPlace(messages: readonly Message[], systemInPlace: boolean, ma
   }
   return out;
 }
+
+/**
+ * A call's messages with each tool answer that holds no text given words for it (texts.ts): one with
+ * nothing in it `empty`'s, one of pictures alone `pictures`' before them, each by the tool's name. So
+ * pi-ai's own "(no tool output)" and "(see attached image)" never stand in for them. Where no words
+ * are given for the case, the answer goes as it is.
+ */
+export function answered(messages: readonly Message[], empty: ((tool: string) => string) | undefined, pictures: ((tool: string) => string) | undefined): Message[] {
+  return messages.map((m) => {
+    if (m.role !== "toolResult" || m.content.some((part) => part.type === "text" && part.text !== "")) return m;
+    const images = m.content.filter((part) => part.type === "image");
+    const words = images.length === 0 ? empty?.(m.toolName) : pictures?.(m.toolName);
+    return words === undefined ? m : { ...m, content: [{ type: "text" as const, text: words }, ...images] };
+  });
+}

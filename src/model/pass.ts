@@ -30,7 +30,7 @@ import type { AssistantMessage, AssistantMessageEventStream, ImageContent, Messa
 import { createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import type { JsonObject, PassError, PassRequest, PassResult, PassSink } from "../contract";
 import type { CallDeps, CallShape } from "./call";
-import { keyOf, makeCall, shapeOf } from "./call";
+import { keyOf, makeCall, shapeOf, termsOf } from "./call";
 import { isRecord } from "./json";
 import type { Sampling } from "./kinds";
 import type { ModelEffort } from "./source";
@@ -420,13 +420,14 @@ function notPassedWords(what: string): string {
 
 /**
  * Passes a request through (see the head of this file), its answer streamed to `sink`, which hears
- * exactly one `finish` or one `error`. Nothing of the request is sent when it is refused. Its
- * settings are read at the levels every chat shares: a request passed through has no chat in view.
+ * exactly one `finish` or one `error`. Nothing of the request is sent when it is refused. Its terms
+ * are read at the levels every chat shares: a request passed through has no chat in view.
  */
 export async function passRequest(deps: CallDeps, request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void> {
   const fail = (code: PassError["code"], detail: string): void => sink.error({ code, detail });
   const body = request.body;
-  const settings = await deps.settings({ user: deps.user });
+  const terms = await termsOf(deps, { user: deps.user });
+  const { settings } = terms;
   let out: AssistantMessageEventStream;
   try {
     const messages = passedMessages(body.messages, settings.quoted);
@@ -450,9 +451,9 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
     const maxTokens = maxTokensOf(body);
     out = createAssistantMessageEventStream();
     // A request passed through goes as it came: a system message in its middle goes in place unmarked.
-    const { markNote: _unmarked, ...asItCame } = deps;
+    const unmarked = { ...terms, texts: { ...terms.texts, markNote: undefined } };
     void makeCall(
-      asItCame,
+      deps,
       shape,
       context,
       {
@@ -466,7 +467,7 @@ export async function passRequest(deps: CallDeps, request: PassRequest, sink: Pa
         ...(Object.keys(extras).length > 0 ? { extras } : {}),
         carried: {},
       },
-      settings,
+      unmarked,
       signal,
       out,
     );

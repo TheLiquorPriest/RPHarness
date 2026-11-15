@@ -251,6 +251,8 @@ export interface Rig {
 
 /** The text the layer's test call sends: a shipped file's in the harness; a test's own here. */
 export const TEST_PROMPT = "Answer with one word.";
+/** The line at the head of a call on an Anthropic sign-in: RPH's shipped file's. */
+export const SIGNIN_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
 /** The installation id the rig's layers make for OpenAI's sign-in. */
 export const DEVICE = "0f8e6a52-1c3b-4d7a-9e2f-5b6c7d8e9f01";
 
@@ -278,11 +280,11 @@ export function rig(options: RigOptions = {}): Rig {
     setTimeout: clock.setTimeout,
     clearTimeout: clock.clearTimeout,
     appName: "Harbour Tales",
-    testPrompt: async () => TEST_PROMPT,
     env: options.env ?? {},
     settings: (scope) => readModelSettings(files, scope, log),
+    // The texts a host reads from its files; the test's own here: the sign-in line as shipped, the host's mark where a test gives one.
+    texts: async () => ({ signinLine: SIGNIN_LINE, markNote: options.markNote, testPrompt: TEST_PROMPT, emptyAnswer: undefined, picturesAnswer: undefined }),
     ...(options.providers ? { providers: options.providers } : {}),
-    ...(options.markNote ? { markNote: options.markNote } : {}),
   });
   return { layer, store, sent, clock, logs, configs, settingsLog, done: () => layer.close() };
 }

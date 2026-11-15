@@ -350,12 +350,17 @@ export class Book {
   private readonly opened: Promise<void>;
   /** Each provider's sign-in changes, one after another. */
   private readonly signinChanges = new Map<string, Promise<unknown>>();
+  /** How many of the host's reads failed outright, the first two among them. */
+  private failedReads = 0;
+  /** Whether the host answered for the user at the documents' first read: false where it failed both reads, as a host does for a user it does not serve. */
+  readonly answered: Promise<boolean>;
 
   constructor(private readonly deps: BookDeps) {
     this.opened = this.serial(async () => {
       await this.readSecrets();
       await this.readAgain().catch(() => undefined);
     });
+    this.answered = this.opened.then(() => this.failedReads < 2);
   }
 
   /** Runs `step` once every step before it has ended, however it ended. */
@@ -376,6 +381,7 @@ export class Book {
     try {
       raw = await this.deps.store.loadSecrets(this.deps.scope);
     } catch {
+      this.failedReads += 1;
       return;
     }
     if (raw !== null && raw !== undefined && !(isRecord(raw) && raw.v === FORMAT && isRecord(raw.keys) && isRecord(raw.signins) && (raw.headers === undefined || isRecord(raw.headers)) && (raw.places === undefined || isRecord(raw.places)))) {
@@ -416,6 +422,7 @@ export class Book {
     try {
       raw = await this.deps.store.loadConnections(this.deps.scope);
     } catch {
+      this.failedReads += 1;
       this.trouble = NOT_READ;
       throw new Error(NOT_READ);
     }

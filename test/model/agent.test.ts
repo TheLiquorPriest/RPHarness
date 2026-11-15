@@ -91,7 +91,7 @@ describe("a turn on the layer's model, run by pi's Agent", () => {
     expect(bodies[1]?.thread).toEqual({ type: "continue", previous_message_id: "msg_1" });
     expect((bodies[1]?.messages as { role: string; content: { type: string }[] }[]).map((m) => [m.role, m.content.map((b) => b.type)])).toEqual([["user", ["tool_result"]]]);
     // Once the session has ended, what pi-ai kept of it is let go: the same session starts anew.
-    r.layer.ended("agent-session-7");
+    r.layer.ended(USER, "agent-session-7");
     await run.prompt("And the door?");
     expect(bodyOf(r.sent[2]).thread).toEqual({ type: "create" });
   });

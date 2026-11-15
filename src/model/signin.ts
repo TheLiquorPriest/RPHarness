@@ -36,22 +36,27 @@ export interface SignInDeps {
 /** The provider's name in words. */
 const NAMES: Readonly<Record<SignInProvider, string>> = { anthropic: "Anthropic", openai: "OpenAI" };
 
-/** What a user should know before they sign in. Anthropic's says how requests on it are sent, which pi-ai does because the sign-in requires it. */
+/** What a user should know before they sign in. Anthropic's says how requests on it are sent: pi-ai names its tools Claude Code's way because the sign-in requires it, and the layer puts the file's line first in place of pi-ai's own. */
 const NOTES: Readonly<Record<SignInProvider, string>> = {
   anthropic:
-    "Requests on this sign-in go to Anthropic the way Claude Code sends them: Claude Code's own line goes first in the system prompt, and tools that share a name with one of Claude Code's are named the way Claude Code writes them. Open the address, sign in to your Claude account, then paste here the code Anthropic shows you.",
+    "Requests on this sign-in go to Anthropic the way Claude Code sends them: the line of the file .prompts/signin-line.md (as shipped, Claude Code's own line) goes first in the system prompt, and tools that share a name with one of Claude Code's are named the way Claude Code writes them. Open the address, sign in to your Claude account, then paste here the code Anthropic shows you.",
   openai:
     "Open the address and sign in with your ChatGPT account. Your browser then goes to an address starting with http://127.0.0.1:1455/. Where that page doesn't open, copy the whole address from the browser's address bar and paste it here. Where the browser runs on this machine, the sign-in finishes by itself.",
 };
+
+/** pi-ai's report that OpenAI's sign-in could not listen on its port, which OpenAI's sign-in is registered with. */
+const PORT_IN_USE = /\bPort (\d+) is in use\b/;
 
 /** Anthropic's token exchange says what went wrong inside a long report (its address, the request, a stack): its status and body are what a user can act on. */
 const EXCHANGE_FAILURE = /status=(\d{3}); url=[^;]*; body=([\s\S]*?)(?:; stack=|$)/;
 /** A report of an answer pi-ai took but couldn't read quotes that answer, and its parser's words after it quote it again: it may hold the new tokens. */
 const QUOTES_ANSWER = /\bbody=/;
 
-/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `most` characters; of a report that quotes an answer it couldn't read, only its first sentence. */
+/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `most` characters; of a report that quotes an answer it couldn't read, only its first sentence; a port in use, said in the layer's own words. */
 function failure(error: unknown, secrets: Iterable<string>, most: number): string {
   const text = errorWords(error);
+  const port = PORT_IN_USE.exec(text);
+  if (port) return `port ${port[1]} on this machine, where OpenAI's sign-in comes back to, is in use by another sign-in still open or by another program: close that, then start again`;
   const exchange = EXCHANGE_FAILURE.exec(text);
   const report = text.split("; stack=")[0] ?? text;
   const words = exchange ? failureWords(`${exchange[1]}: ${exchange[2]}`) : failureWords(QUOTES_ANSWER.test(report) ? (report.split(" url=")[0] ?? report) : report);

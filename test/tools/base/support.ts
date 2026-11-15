@@ -86,6 +86,7 @@ export async function turnGate(b: Bench, options: { clipChars?: number; approval
     trace: new RunTrace(b.host.trace, SCOPE, "kit-run", b.host.clock),
     clock: b.host.clock,
     files: b.host.files,
+    log: b.host.log,
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
     places: await b.host.files.places(SCOPE),
     rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})) }),

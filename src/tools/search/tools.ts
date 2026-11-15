@@ -113,7 +113,7 @@ export function toolUse(deps: ToolSearchDeps): OwnTool {
       const [words, reach] = await Promise.all([wordsOf(deps.guidance), deps.reach.of(ctx.agent)]);
       const at = await new Reach(reach, deps.switches, ctx.scope.user).named(name);
       if (at.at === "unreached") return answer(words("no_tool", { tool: name }), true);
-      if (at.at === "waiting") return answer(words("not_switched_on", { tool: name, name: at.thing.name }), true);
+      if (at.at === "waiting") return { ...answer(words("not_switched_on", { tool: name, name: at.thing.name }), true), refused: { by: "switch", thing: at.thing, state: "waiting" } };
       const sent = given["args"] ?? {};
       const checked = fit(at.tool, sent, ctx.callId);
       if ("misfits" in checked) return answer(deps.notices("invalid", invalidFields({ tool: name, arguments: JSON.stringify(sent), parameters: JSON.stringify(at.tool.parameters), misfits: checked.misfits }, deps.schemaShown)), true);

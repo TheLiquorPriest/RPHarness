@@ -237,6 +237,7 @@ export async function play(b: Bench, options: { answers: Answer[]; fixed: string
     trace,
     clock,
     files: b.host.files,
+    log: b.host.log,
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
     places: await b.host.files.places(SCOPE),
     rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})) }),

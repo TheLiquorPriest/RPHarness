@@ -186,6 +186,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
           trace,
           clock: env.clock,
           files: env.files,
+          log: env.log,
           ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
           ...(env.switches !== undefined ? { switches: env.switches } : {}),
           places,

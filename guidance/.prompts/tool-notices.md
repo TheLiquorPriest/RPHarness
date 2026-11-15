@@ -1,9 +1,10 @@
 ---
-description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it was not run or its tool failed, and what a tool's answer that holds no words says. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)".
+description: The words an agent is told about its tool calls - what RPH's own tools answer, what a call is answered with when it was not run or its tool failed, what a tool's answer that holds no words says, a search that stopped before it looked everywhere, and what the player said to an agent at work. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words, and is then sent with the line empty_answer. Delete empty_answer or pictures_answer and such an answer goes as it is; on some connections the model is then shown its provider's own note, such as "(no tool output)" or "(see attached image)". Delete said and the player's words go to the agent bare, with nothing to say they are his.
 format: lines
 ---
 failed: {{tool}} failed.
 unfinished: {{tool}} was stopped before it finished. It may have done its work, or not.
+said: The player said to you while you were at work: {{words}}
 not_held: You hold no tool named {{tool}}.
 invalid: {{tool}} was not run: the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}
 cut_short: {{tool}} was not run: your message reached its length limit, so its arguments may be cut short. Call it again.

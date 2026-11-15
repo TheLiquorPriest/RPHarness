@@ -4,7 +4,7 @@ description: How an agent's tools are offered when they go as text - to a model 
 {{#offered}}
 You can use tools. To call one, write a block like this and stop there:
 <tool_call>{"name": "the tool's name", "arguments": {"an argument": "its value"}}</tool_call>
-Write several blocks to call several tools. What they answer comes back in the next message. Once you have what you need, answer with no tool call.
+Write several blocks to call several tools. What they answer comes back in the next message. A message with no block calls nothing.
 
 The tools:
 {{#tools}}

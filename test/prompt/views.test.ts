@@ -85,3 +85,21 @@ test("the views are written in the turn's folder by the harness, and one the fil
   expect(writes[3]?.[1]).toEqual({ op: "write", text: `[persona]\n${A_TEXT.persona}\n` });
   expect(host.logged).toContain("A view of the prompt could not be written in the turn's folder.");
 });
+
+test("each stretch the host says it left out is told in the prompt map's view_left_out line, with whether the story's record covers it; with the line edited, the edited words show", async () => {
+  const { prompt } = await mapped();
+  const left = [{ from: 0, to: 40, covered: true }, { from: 40, to: 60, covered: false }, { from: 70, to: 71 }];
+  const told = async (edits?: Record<string, string>) => (await promptViews(prompt, shippedParts(edits), LEAD, left)).find((view) => view.file === "visible-chat-history.md")?.text.split("\n\n").slice(-3);
+  expect(await told()).toEqual([
+    "Messages #0 to #39 of the chat are not in this prompt; the story's record covers them. chat_read reads them.",
+    "Messages #40 to #59 of the chat are not in this prompt. chat_read reads them.",
+    "Messages #70 to #70 of the chat are not in this prompt. chat_read reads them.",
+  ]);
+  const shipped = await Bun.file(`${import.meta.dir}/../../guidance/.prompts/prompt-map.md`).text();
+  const edited = shipped.replace(/^view_left_out: .*$/m, "view_left_out: Chat messages {{from}} to {{last}} are missing{{#covered}} (in the record){{/covered}}.");
+  expect(edited).not.toBe(shipped);
+  expect(await told({ "prompt-map": edited })).toEqual(["Chat messages 0 to 39 are missing (in the record).", "Chat messages 40 to 59 are missing.", "Chat messages 70 to 70 are missing."]);
+  // With the line taken out, a stretch left out is not told at all.
+  const without = shipped.replace(/^view_left_out: .*\n/m, "");
+  expect((await told({ "prompt-map": without }))?.some((text) => text.includes("not in this prompt"))).toBe(false);
+});

@@ -11,4 +11,8 @@ export const MODELS_WORDS = {
   "calls.retries": { name: "Retries of a failed call", about: "Times a call that failed before any answer came is made again, where its connection sets no number of its own." },
   "calls.cacheRetention": { name: "Prompt cache retention", about: "How long a provider is asked to keep a prompt in its cache: none, short or long." },
   "calls.toolRefusalMinutes": { name: "Native tools tried again after", about: "Minutes a connection's model that refused native tools is offered them as text; then native tools are tried again." },
+  "throttles.connections.<connection>.requestsPerMinute": { name: "Requests a minute on a connection", about: "Calls sent on this connection over any minute, across every agent, turn and job; one past it waits for room." },
+  "throttles.connections.<connection>.tokensPerMinute": { name: "Tokens a minute on a connection", about: "Tokens sent and written on this connection over any minute; a call waits for room, and one bigger than the whole minute is not made." },
+  "throttles.connections.<connection>.atOnce": { name: "Calls at once on a connection", about: "Calls on this connection under way at the same time; one past it waits in line, first come first served." },
+  "throttles.atOnce": { name: "Calls at once on any connection", about: "Calls under way at the same time on each connection that sets no number of its own." },
 };

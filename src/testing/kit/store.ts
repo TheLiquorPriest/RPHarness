@@ -145,6 +145,8 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
     intent: { kind: "intent", text: "Wants: a quiet answer." },
     call_started: { kind: "call_started", call: 1, connection: "kit-connection", model: "kit-model", sampling: { temperature: 0.7 }, maxTokens: 512, messages: 6, tools: 3 },
     call_ended: { kind: "call_ended", call: 1, model: "kit-model", text: "Wren nods.", toolCalls: [{ id: "kit-call-1", name: "kit_tally", args: { numbers: [1, 2] } }], stop: "tool_calls", usage: { ...NO_USAGE, calls: 1, input: 900, output: 40 }, ms: 812 },
+    connection_wait: { kind: "connection_wait", connection: "kit-connection", for: "minute", ms: 1_500 },
+    connection_stand_in: { kind: "connection_stand_in", named: "kit-gone-connection", used: "kit-connection" },
     tool_started: { kind: "tool_started", callId: "kit-call-1", tool: "kit_tally", args: { numbers: [1, 2] }, closing: true },
     tool_update: { kind: "tool_update", callId: "kit-call-1", tool: "kit_tally", partial: { content: [{ type: "text", text: "counting" }] } },
     tool_ended: { kind: "tool_ended", callId: "kit-call-1", tool: "kit_tally", result: { content: [{ type: "text", text: "3" }] }, clean: true, endedRun: true, ms: 2 },

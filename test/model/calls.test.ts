@@ -11,7 +11,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { Message, SimpleStreamOptions, Tool } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai";
 import type { ConnectionInput, UserScope } from "../../src/contract";
-import type { ModelEffort } from "../../src/model";
+import type { LayerEvent, LayerOptions, ModelEffort } from "../../src/model";
 import type { Rig, Script } from "./support";
 import { anthropicStream, anthropicTurn, bodyOf, call, chatStream, chunk, eventStream, failed, MemoryStore, rig, textOf, USER } from "./support";
 
@@ -296,14 +296,30 @@ describe("a call its connection can't make", () => {
     const answer = async (connectionId: string): Promise<string | undefined> => (await call(await made.layer.agentModel({ user: USER, connectionId, model: null, effort: "off" }), ASK)).errorMessage;
     expect(await answer(keyless.id)).toBe('The connection "Claude" has no key: add one on the Connections page.');
     await expect(made.layer.agentModel({ user: USER, connectionId: unnamed.id, model: null })).rejects.toThrow('The connection "No model" names no model');
-    await expect(made.layer.agentModel({ user: USER, connectionId: "gone", model: null })).rejects.toThrow("This call's connection is no longer there");
+    // A connection named that is no longer there: the default stands in, with its own model.
+    expect((await made.layer.agentModel({ user: USER, connectionId: "gone", model: null })).model.id).toBe("claude-sonnet-4-5");
     await made.layer.api.setDefault(USER, null);
     await expect(made.layer.agentModel({ user: USER, connectionId: null, model: null })).rejects.toThrow("There is no default connection");
-    // A connection taken away after its agent's model was made: the call says so.
+    await expect(made.layer.agentModel({ user: USER, connectionId: "gone", model: null })).rejects.toThrow('The connection "gone" this agent runs on is no longer there, and there is no default connection to run it on instead');
+    // A connection taken away after its agent's model was made, with no default to stand in: the call says so.
     const agent = await made.layer.agentModel({ user: USER, connectionId: unnamed.id, model: "claude-sonnet-4-5" });
     await made.layer.api.remove(USER, unnamed.id);
-    expect((await call(agent, ASK)).errorMessage).toBe("This call's connection is no longer there: pick another on the Connections page.");
+    expect((await call(agent, ASK)).errorMessage).toBe(`The connection "${unnamed.id}" this agent runs on is no longer there, and there is no default connection to run it on instead: add one, or pick another for this agent, on the Connections page.`);
     expect(made.sent).toEqual([]);
+  });
+
+  test("a definition naming a removed connection runs on the default's model, and the trace names the stand-in", async () => {
+    r = rig({ script: anthropicAnswer });
+    const standIn = await r.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    await r.layer.api.setDefault(USER, standIn.id);
+    const named = await r.layer.api.save(USER, { name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "harbour-local" });
+    const agent = await r.layer.agentModel({ user: USER, connectionId: named.id, model: null, effort: "off" });
+    await r.layer.api.remove(USER, named.id);
+    const heard: LayerEvent[] = [];
+    const options: SimpleStreamOptions & LayerOptions = { heard: (event) => heard.push(event) };
+    expect((await call(agent, ASK, options)).errorMessage).toBeUndefined();
+    expect(heard).toEqual([{ kind: "connection_stand_in", named: named.id, used: "Claude" }]);
+    expect(r.sent.map((sent) => [new URL(sent.url).host, bodyOf(sent).model])).toEqual([["api.anthropic.com", "claude-sonnet-4-5"]]);
   });
 
   test("stopped before it began ends as stopped, and sends nothing", async () => {

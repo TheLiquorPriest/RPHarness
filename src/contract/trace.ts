@@ -87,6 +87,14 @@ export type TraceEvent =
   | { kind: "call_started"; call: number; connection: string; model: string; sampling?: Sampling; maxTokens?: number; messages: number; tools: number; request?: string; toolTokens?: number; openingTokens?: number }
   /** A model call's answer, whole: its text, its thinking where the provider gave it, its tool calls, why it stopped, its tokens, its time; or its failure. */
   | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string }
+  /**
+   * A call held by its connection's throttle (§13.2): `minute`, its requests or tokens over the last
+   * minute; `place`, its calls at once. Told as the wait begins, and again with `ms`, how long it
+   * waited, as it ends.
+   */
+  | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number }
+  /** The agent's definition names a connection that is no longer there: its call went on the default connection (`used`), with that connection's own model. */
+  | { kind: "connection_stand_in"; named: string; used: string }
   /** A tool call began; `via` when it was reached through `tool_use`, and `closing` when the agent marked it so (§10.7). */
   | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" }
   /** Part of a tool's answer, while it runs. */

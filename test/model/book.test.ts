@@ -480,8 +480,8 @@ describe("the documents by user", () => {
       ["127.0.0.1:8080", "harbour-local", null],
     ]);
 
-    // A connection's id is one user's alone, and a model made for one user's agent goes on no connection of the other's.
-    expect(await wordsOf(r.layer.agentModel({ user: USER, connectionId: theirs.id, model: null }))).toBe("This call's connection is no longer there: pick another on the Connections page.");
+    // A connection's id is one user's alone: the other user's, named by his agent, is no connection of his, and his own default stands in; a model made for one user's agent goes on no connection of the other's.
+    expect((await r.layer.agentModel({ user: USER, connectionId: theirs.id, model: null })).model.id).toBe("claude-sonnet-4-5");
     expect((await call({ ...theirAgent, streamFn: myAgent.streamFn }, ASK)).errorMessage).toBe("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
     expect(r.sent).toHaveLength(2);
   });

@@ -117,15 +117,15 @@ export interface Release {
  */
 export type LimitName = "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs" | "callTokensIn" | "callTokensOut" | "callTime" | "toolRounds" | "repeats" | "tokensPerMinute";
 
-/** A limit reached: which, over what (a turn, one agent, one job's run, or the user's day: the daily caps), the limit and the count. */
+/** A limit reached: which, over what (a turn, one agent, one job's run, the user's day: the daily caps, or one connection: its throttle), the limit and the count. */
 export interface LimitHit {
   limit: LimitName;
-  per: "turn" | "agent" | "job" | "day";
+  per: "turn" | "agent" | "job" | "day" | "connection";
   max: number;
   value: number;
   /** For a limit per agent: whose. */
   agent?: AgentRef;
-  /** For a day's count of jobs on one connection: which, by the name or id its setting gives. */
+  /** For a day's count of jobs on one connection, or a connection's throttle: which, by the name or id its setting gives. */
   connection?: string;
 }
 

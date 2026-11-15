@@ -5,7 +5,7 @@
 
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelLimits, Scope, ToolsAs } from "../contract";
+import type { ModelLimits, Scope, ToolsAs, TraceEvent } from "../contract";
 
 /**
  * How hard an agent's model reasons: `inherit` and `auto` leave it to the connection's own effort
@@ -41,6 +41,18 @@ export interface AgentModel {
   /** The agent's `streamFn`. */
   streamFn: StreamFn;
   limits: ModelLimits;
+}
+
+/**
+ * What the layer tells the run an agent's call is made in, beside the call's answer (§13.2): a wait
+ * for its connection's throttle, a stand-in connection, or the limit a call cannot be made within
+ * (bigger than its connection's whole minute), at which the work ends.
+ */
+export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "limit" }>;
+
+/** What the runner hands an agent's stream function besides pi-ai's options: where the layer tells the agent's run of each such event. Absent: nobody is told. */
+export interface LayerOptions {
+  heard?(event: LayerEvent): void;
 }
 
 export interface ModelSource {

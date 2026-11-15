@@ -4,12 +4,15 @@
 // room, how much of a server's list of models is read, how much of a media address a refusal quotes,
 // how long a failed sign-in's words are kept and how long any failure's words may be; the wait before
 // a failed call is made again, and how many times where its connection says nothing; how long a
-// provider is asked to keep a prompt in its cache; and how long a connection's model that refused
-// native tools is offered them as text. Times are in seconds, that last in minutes, the list in megabytes.
+// provider is asked to keep a prompt in its cache; how long a connection's model that refused
+// native tools is offered them as text; and each connection's throttle (§13.2): its requests and
+// tokens a minute and its calls at once, with the calls at once of a connection that sets none.
+// Times are in seconds, that last in minutes, the list in megabytes.
 //
 // What these govern often has no chat in view (a connection's test, a sign-in, a request passed
 // through), so each is read at the levels every chat shares, shipped and global; the silent wait is
-// read at an agent's chat's levels too. An agent's thinking effort is no setting: it is its
+// read at an agent's chat's levels too. A throttle holds one connection across every agent, turn and
+// job, so it is the same for every chat. An agent's thinking effort is no setting: it is its
 // definition's alone (READINGS N-7).
 
 import { worded } from "./entry";
@@ -17,6 +20,8 @@ import { MODELS_WORDS } from "./models-words";
 
 /** The levels every chat shares. */
 const SHARED = ["shipped", "global"] as const;
+
+const NO_LIMIT = "no limit";
 
 export const MODELS = worded(
   {
@@ -39,6 +44,12 @@ export const MODELS = worded(
     cacheRetention: { key: "calls.cacheRetention", takes: { type: "oneOf", values: ["none", "short", "long"] }, default: "short", perConnection: false, levels: SHARED, at: "calls.cacheRetention" },
     // §13.2 "moved as it is": Build 1's 60 minutes, then native tools are tried again.
     toolRefusalMinutes: { key: "calls.toolRefusalMinutes", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "calls.toolRefusalMinutes" },
+    // Today's `connections.throttles` and `connections.atOnce` (LumiAH provider.ts:606-660, 718-735), each none: a connection is held to nothing until he sets it.
+    // By the connection's name or id, under `connections` as `jobs.connections` is, so `throttles.atOnce` is never taken for a connection's name.
+    requestsPerMinute: { key: "throttles.connections.<connection>.requestsPerMinute", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.requestsPerMinute" },
+    tokensPerMinute: { key: "throttles.connections.<connection>.tokensPerMinute", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.tokensPerMinute" },
+    connectionAtOnce: { key: "throttles.connections.<connection>.atOnce", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "as every connection", perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.atOnce" },
+    atOnce: { key: "throttles.atOnce", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, levels: SHARED, at: "calls.throttles.atOnce" },
   },
   MODELS_WORDS,
 );

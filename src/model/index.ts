@@ -36,19 +36,20 @@ import { promptMessages } from "../harness/prompt";
 import type { Connection } from "./book";
 import { Book, sentHeaders } from "./book";
 import type { CallDeps } from "./call";
-import { makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
+import { agentShapeOf, makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
 import { isRecord } from "./json";
 import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
 import { passRequest } from "./pass";
 import { Refusals } from "./refusals";
+import { Throttles } from "./throttle";
 import { createSignIn } from "./signin";
 import type { ModelSource, UserChoice } from "./source";
 import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
-export type { AgentChoice, AgentModel, ModelEffort, ModelSource, UserChoice } from "./source";
+export type { AgentChoice, AgentModel, LayerEvent, LayerOptions, ModelEffort, ModelSource, UserChoice } from "./source";
 export { callUsage, estimateOf, messageText, promptTokens, requestTokens, tokensOf } from "./tokens";
 export type { CallUsage, ProviderCount, UsageEstimate, UsageField } from "./tokens";
 export { inPlace, keepsSystemInPlace } from "./transcript";
@@ -202,7 +203,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     const book = new Book({ store: deps.store, scope: { user }, log: deps.log });
     const pi = createModels({ credentials: book.credentials, authContext: NOWHERE });
     for (const provider of [...builtInProviders(), ...(deps.providers ?? [])]) pi.setProvider(provider);
-    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, id: deps.id, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts, refusals: new Refusals() };
+    const calls: CallDeps = { pi, book, user, fetch: deps.fetch, now: deps.now, id: deps.id, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: deps.settings, texts: deps.texts, refusals: new Refusals(), throttles: new Throttles({ now: deps.now, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout }) };
     // A sign-in has no chat in view: its settings are the levels every chat shares.
     const signIn = createSignIn({ pi, book, id: deps.id, uuid: deps.uuid, now: deps.now, log: deps.log, setTimeout: deps.setTimeout, clearTimeout: deps.clearTimeout, settings: () => deps.settings({ user }), appName: deps.appName });
     // A model made for another user's agent is none of this desk's: its call goes on no connection of his.
@@ -345,7 +346,8 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   return {
     async agentModel(choice) {
       const desk = deskOf(choice.user);
-      const shape = await shapeOf(desk.calls, choice);
+      // An agent whose connection is gone is made on the default's, as its calls go (`agentShapeOf`).
+      const shape = await agentShapeOf(desk.calls, choice);
       // A model of the agent's own: its user's stream function knows the agent's choice by it.
       const model: Model<Api> = { ...shape.model };
       made.set(model, { ...choice });

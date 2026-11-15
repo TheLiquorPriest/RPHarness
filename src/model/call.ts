@@ -35,6 +35,13 @@
 // model's own message (a preset's prefill) is sent so that its provider continues it: on Anthropic's
 // API that message goes last as it is; on DeepSeek it is marked `prefix: true` and goes to DeepSeek's
 // prefix path, as Lumiverse's own DeepSeek provider sends it; anywhere else it goes as sent.
+//
+// Each call is held to its connection's throttle (throttle.ts) before it is sent: a place among its
+// calls at once, then room in its minute for its estimate (its prompt at `tokens.charsPerToken` and
+// its room), each waited for, the agent's run told of the wait; its spend corrects the estimate once
+// it ends. A call bigger than its connection's whole minute is not made, and the agent's run is told
+// that limit. An agent whose connection is gone runs on the default connection, and its run is told
+// of the stand-in (`agentShapeOf`).
 
 import { createHash } from "node:crypto";
 
@@ -53,7 +60,9 @@ import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
 import { limitsOf } from "./limits";
 import type { Refusals } from "./refusals";
-import type { AgentChoice, ModelEffort, UserChoice } from "./source";
+import type { AgentChoice, LayerEvent, LayerOptions, ModelEffort, UserChoice } from "./source";
+import type { Hold, Throttle, Throttles } from "./throttle";
+import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
 import { answered, compatSays, inPlace, keepsSystemInPlace } from "./transcript";
@@ -77,6 +86,8 @@ export interface CallDeps {
   texts(scope: Scope | UserScope): Promise<ModelTexts>;
   /** Which of the user's connections' models refused native tools, and when. */
   refusals: Refusals;
+  /** The user's connections' throttles: their last minute and their calls at once. */
+  throttles: Throttles;
 }
 
 /** What a call is made under, read at its scope's levels as it is made: the layer's settings and its texts. */
@@ -107,6 +118,8 @@ export interface CallShape {
   reasoning: ThinkingLevel | undefined;
   /** The effort is the provider's own default: no switch is sent, and its model may think. */
   providerDefault: boolean;
+  /** The connection the agent named is no longer there, and the call goes on the default connection (`used`, by name) with that one's own model. */
+  standIn?: { named: string; used: string };
 }
 
 /** What a call asks of its model beyond its messages. */
@@ -131,6 +144,18 @@ export interface CallAsk {
   extras?: JsonObject;
   /** What the loop's options carry to pi-ai as they are. */
   carried: Pick<SimpleStreamOptions, "identity" | "transport" | "maxRetryDelayMs" | "timeoutMs" | "metadata" | "onResponse" | "onProviderStreamEvent" | "onPayload">;
+  /** Where the agent's run is told of a wait for the connection's throttle, or of the limit it cannot be made within; absent: nobody is told. */
+  heard?(event: LayerEvent): void;
+}
+
+/** A connection's throttle as the user's settings give it, each figure by the connection's id, else its name; its calls at once its own, else every connection's. */
+function throttleOf(settings: ModelSettings, connection: Connection): Throttle {
+  const set = settings.throttles.connections;
+  const own = [connection.id, connection.name].flatMap((key) => (Object.hasOwn(set, key) ? [set[key]] : []));
+  const requestsPerMinute = own.find((t) => t?.requestsPerMinute !== undefined)?.requestsPerMinute;
+  const tokensPerMinute = own.find((t) => t?.tokensPerMinute !== undefined)?.tokensPerMinute;
+  const atOnce = own.find((t) => t?.atOnce !== undefined)?.atOnce ?? settings.throttles.atOnce;
+  return { ...(requestsPerMinute !== undefined ? { requestsPerMinute } : {}), ...(tokensPerMinute !== undefined ? { tokensPerMinute } : {}), ...(atOnce !== undefined ? { atOnce } : {}) };
 }
 
 /** What a keyless call carries as its key: pi-ai's OpenAI and Anthropic clients need one, and a server that asks for none ignores it. */
@@ -176,7 +201,7 @@ function askedLevel(effort: ModelEffort | undefined, connection: Connection): Mo
   return effort;
 }
 
-/** The shape of a call on an agent's choice (`CallShape`). Rejects in words that say what to do when its connection can't be used. */
+/** The shape of a call on a choice (`CallShape`). Rejects in words that say what to do when its connection can't be used. */
 export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: AgentChoice): Promise<CallShape> {
   const connection = await deps.book.connection(choice.connectionId);
   if (connection === null) throw new Error(choice.connectionId === null ? "There is no default connection: add one on the Connections page, or pick one for this agent." : "This call's connection is no longer there: pick another on the Connections page.");
@@ -199,6 +224,18 @@ export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: Agent
   }
   const level = clampThinkingLevel(model, asked);
   return { connection, kind, model, limits, reasoning: level === "off" ? undefined : level, providerDefault: false };
+}
+
+/**
+ * The shape of an agent's call. Where the connection its definition names is no longer there, the
+ * default connection stands in, with the default's own model, as today's build ran it (LumiAH
+ * provider.ts:925-957); with no default either, it rejects in words that say so.
+ */
+export async function agentShapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: AgentChoice): Promise<CallShape> {
+  if (choice.connectionId === null || (await deps.book.connection(choice.connectionId)) !== null) return shapeOf(deps, choice);
+  const standIn = await deps.book.connection(null);
+  if (standIn === null) throw new Error(`The connection "${choice.connectionId}" this agent runs on is no longer there, and there is no default connection to run it on instead: add one, or pick another for this agent, on the Connections page.`);
+  return { ...(await shapeOf(deps, { ...choice, connectionId: null, model: null })), standIn: { named: choice.connectionId, used: standIn.name } };
 }
 
 /** The unit `calls.toolRefusalMinutes` is in. */
@@ -402,6 +439,13 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   // Ends a call that went silent, beside the caller's own signal, with words that say so.
   const quiet = new AbortController();
   let watch: SilenceWatch | undefined;
+  /** Its hold on its connection's throttle, and what it spent as its provider reported it, which the hold settles with. */
+  let hold: Hold | undefined;
+  let spent: number | undefined;
+  const spending = (answer: AssistantMessage): void => {
+    const { input, cacheRead, cacheWrite, output } = answer.usage;
+    if (input + cacheRead + cacheWrite + output > 0) spent = input + cacheRead + cacheWrite + output;
+  };
   const secrets = (): Promise<string[]> => deps.book.secretValues().catch(() => []);
   /** How an answer that ended in an error or a stop goes on: in the words of whatever ended it. */
   const failure = async (message: AssistantMessage): Promise<AssistantMessage> => {
@@ -488,6 +532,21 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       },
     };
 
+    // Its connection's throttle: a place among its calls at once, then room in its minute, each waited for; the agent's run is told of each wait. A call bigger than the whole minute is not made, and the run is told that limit.
+    const waited = (wait: "minute" | "place"): (() => void) => {
+      const since = deps.now();
+      ask.heard?.({ kind: "connection_wait", connection: connection.name, for: wait });
+      return () => ask.heard?.({ kind: "connection_wait", connection: connection.name, for: wait, ms: deps.now() - since });
+    };
+    const throttled = await deps.throttles.take(connection.id, throttleOf(settings, connection), promptTokens(messages, settings.charsPerToken) + (budget.maxTokens ?? 0), ended, waited);
+    if (throttled === undefined) return endWith(out, await failure(emptyAnswer(model, "aborted", stopWords(signal), deps.now())));
+    if ("tooBig" in throttled) {
+      const { max, value } = throttled.tooBig;
+      ask.heard?.({ kind: "limit", hit: { limit: "tokensPerMinute", per: "connection", max, value, connection: connection.name } });
+      throw new Error(`This call comes to about ${value} tokens, more than the ${max} a minute the connection "${connection.name}" takes, so it was not made. ${settingWords(MODELS.tokensPerMinute)} says how many it takes.`);
+    }
+    hold = throttled.hold;
+
     // The stream ends the moment the signal or the silence does, whether or not pi-ai's own end has come yet.
     const { promise: stopped, resolve: stop } = Promise.withResolvers<typeof STOPPED>();
     if (ended.aborted) stop(STOPPED);
@@ -495,6 +554,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     /** Ends `out` with `ending`, the silence's wait let go first, so that nothing of the call waits once its answer has ended. */
     const close = (ending: AssistantMessage): void => {
       watching.stop();
+      spending(ending);
       endWith(out, ending);
     };
     /** One go at the call: `out` ended, or the failure of a go that received nothing, which may be made again. */
@@ -538,6 +598,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
           watching.stop();
           // Tools as text: the calls the answer's text holds are made its calls.
           const answer = toolsAsText ? withWrittenCalls(event.message, context.messages, deps.id) : event.message;
+          spending(answer);
           out.push(answer === event.message ? event : { ...event, reason: "toolUse", message: answer });
           return undefined;
         }
@@ -551,6 +612,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       }
       receive();
       watching.stop();
+      spending(result);
       out.end(toolsAsText ? withWrittenCalls(result, context.messages, deps.id) : result);
       return undefined;
     };
@@ -583,6 +645,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets(), settings.wordsMost), deps.now()));
   } finally {
     watch?.stop();
+    hold?.settle(spent);
   }
 }
 
@@ -601,7 +664,7 @@ function samplingOf(options: SimpleStreamOptions): Sampling {
 }
 
 /** What pi's loop asks of a call, from the options it hands its stream function and the agent's choice; the prompt cache is kept as `calls.cacheRetention` says. */
-function askOf(options: SimpleStreamOptions, choice: UserChoice, shape: CallShape, settings: ModelSettings): CallAsk {
+function askOf(options: SimpleStreamOptions & LayerOptions, choice: UserChoice, shape: CallShape, settings: ModelSettings): CallAsk {
   const { identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload } = options;
   const carried = Object.fromEntries(Object.entries({ identity, transport, maxRetryDelayMs, timeoutMs, metadata, onResponse, onProviderStreamEvent, onPayload }).filter(([, v]) => v !== undefined)) as CallAsk["carried"];
   return {
@@ -614,6 +677,7 @@ function askOf(options: SimpleStreamOptions, choice: UserChoice, shape: CallShap
     cacheRetention: settings.cacheRetention,
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     ...(choice.toolsAs !== undefined ? { toolsAs: choice.toolsAs } : {}),
+    ...(options.heard !== undefined ? { heard: options.heard } : {}),
     carried,
   };
 }
@@ -625,13 +689,16 @@ function askOf(options: SimpleStreamOptions, choice: UserChoice, shape: CallShap
  * effect at once, and made under the terms at its agent's chat's levels as they stand then.
  */
 export function streamFunction(deps: CallDeps, choiceOf: (model: Model<Api>) => UserChoice | undefined): StreamFn {
-  return (model, context, options = {}) => {
+  return (model, context, given = {}) => {
+    // The runner's own options ride beside pi-ai's (`LayerOptions`).
+    const options: SimpleStreamOptions & LayerOptions = given;
     const out = createAssistantMessageEventStream();
     const choice = choiceOf(model);
     void (async () => {
       try {
         if (choice === undefined) throw new Error("This model wasn't made by the model layer, so the call has no connection to go on: ask the layer for the agent's model.");
-        const shape = await shapeOf(deps, choice);
+        const shape = await agentShapeOf(deps, choice);
+        if (shape.standIn !== undefined) options.heard?.({ kind: "connection_stand_in", ...shape.standIn });
         const terms = await termsOf(deps, choice.scope ?? { user: choice.user });
         await makeCall(deps, shape, context, askOf(options, choice, shape, terms.settings), terms, options.signal, out);
       } catch (error) {

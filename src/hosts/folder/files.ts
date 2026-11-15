@@ -28,13 +28,6 @@ export const GREP_MAX_BYTES = 1024 * 1024;
 /** A grep hit's line is cut to this many UTF-16 code units. */
 export const GREP_LINE_MAX = 1000;
 
-/** A find's answer: the hits and why it stopped, and, while the callers move to `Found`, the array of the hits too (its own fields not counted among its items). */
-function answered(hits: FileHit[], stopped?: FindStopped): Found & FileHit[] {
-  const answer = [...hits];
-  Object.defineProperties(answer, { status: { value: "found" }, hits: { value: hits }, ...(stopped !== undefined ? { stopped: { value: stopped } } : {}) });
-  return answer as Found & FileHit[];
-}
-
 /** The journal of agents' writes in a turn. */
 export function journalPath(site: Site, chat: string, turn: string): string {
   return join(site.turnRecords(chat, turn), "writes.jsonl");
@@ -173,21 +166,21 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     return { status: "refused", path, reason, writable: writer === undefined ? places.writable : writableFor(places, writer) };
   }
 
-  async function find(scope: Scope | UserScope, query: FileQuery): Promise<(Found & FileHit[]) | Refused> {
+  async function find(scope: Scope | UserScope, query: FileQuery): Promise<Found | Refused> {
     const loc = await locationOf(scope);
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
     const limit = query.limit ?? FIND_LIMIT;
     const hits: FileHit[] = [];
-    if (at.is === "none" || limit <= 0) return answered(hits);
+    if (at.is === "none" || limit <= 0) return { status: "found", hits };
     const top = await topView(loc, at.level);
     // One hit past the limit is looked for, so that a find stopped at its limit knows that more were there and says so.
     const room = limit + 1;
-    const found = (all: FileHit[], stopped: FindStopped = {}) => {
+    const found = (all: FileHit[], stopped: FindStopped = {}): Found => {
       const more = all.length > limit;
       const why: FindStopped = { ...stopped, ...(more ? { limit: { max: limit } } : {}) };
-      return answered(more ? all.slice(0, limit) : all, Object.keys(why).length > 0 ? why : undefined);
+      return { status: "found", hits: more ? all.slice(0, limit) : all, ...(Object.keys(why).length > 0 ? { stopped: why } : {}) };
     };
 
     if (query.by === "list") {

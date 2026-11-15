@@ -259,11 +259,8 @@ export interface FilesPort {
    * a chat's level, the root among them. An invalid `pattern` rejects with a `SyntaxError`. The answer
    * gives the hits, and, when the host stopped before it had looked everywhere, why (`FindStopped`):
    * a host never gives a part as if it were the whole.
-   *
-   * Until the callers have moved to `Found`, the answer is also the array of its hits (`Found &
-   * FileHit[]`), so a caller written either way compiles; that second form goes with the last caller.
    */
-  find(scope: Scope | UserScope, query: FileQuery): Promise<(Found & FileHit[]) | Refused>;
+  find(scope: Scope | UserScope, query: FileQuery): Promise<Found | Refused>;
   /**
    * Changes one file. A place this writer may not write is `Refused`, and nothing changes (§5.1).
    * Every write of an agent is recorded against `scope.turn` where there is one (§5.1: "notes

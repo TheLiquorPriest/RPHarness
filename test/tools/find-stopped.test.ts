@@ -75,4 +75,11 @@ describe("file_find", () => {
     // Each kind is told its own way to narrow: a listing has no pattern.
     expect(worded("stopped_limit", { list: true, max: 2 })).not.toContain("pattern");
   });
+
+  test("a host that ran out of time says how long it had, and the hits it found stay", async () => {
+    const hit = { path: `${notes}a.md`, type: "file", level: "chat", kind: "notes", line: 1, text: MARK } as const;
+    const timed = fileFind({ files: { ...b.host.files, find: async () => ({ status: "found", hits: [hit], stopped: { time: { ms: 50 } } }) }, words, texts: new Map() });
+    const ctx: ToolCtx = { scope: SCOPE, agent: LEAD, run: "kit-run", callId: "call-1", signal: new AbortController().signal, onUpdate: () => {} };
+    expect(textOf(await timed.run({ by: "grep", pattern: MARK }, ctx))).toBe([`${notes}a.md:1: ${MARK}`, worded("stopped_time", { grep: true, ms: 50 })].join("\n"));
+  });
 });

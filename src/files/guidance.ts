@@ -3,7 +3,7 @@
 // agent's definition and stack, the skills' index, prompt parts, tool descriptions, the rules as the
 // Rules page lists them, and one run's rule engine. Each file is read and parsed once.
 
-import type { DefinitionView, FileText, FilesPort, RuleView, Scope, StackLeft, StackPart } from "../contract/index";
+import type { DefinitionView, FileHit, FileText, FilesPort, Refused, RuleView, Scope, StackLeft, StackPart } from "../contract/index";
 import type { AgentDefinition, Guidance, LoadGuidance, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
@@ -13,17 +13,30 @@ import type { ReadRule } from "./rules";
 import { parseRule } from "./rules";
 import { parseSkill } from "./skills";
 import { holdsNothing } from "./stack";
-import type { FileRef, Listing } from "./tree";
+import type { FileRef, InstructionsList, Listing } from "./tree";
 import { itemKey, LEVEL_ORDER, Tree, writtenKey } from "./tree";
 
 /** The name a definition's `reads:` gives the always-on rules it is named in (§5.2 part 2): `reads: [ALL-AGENTS, rules, …]`. */
 const RULES = "rules";
 
 /**
+ * The parts of a stack a definition's `reads:` names that come before the definition, in §5.2's
+ * order: 1 `ALL-AGENTS`; 2 the always-on rules; 3 `AGENTS`; 4 `WORLD`, `SIMULATION`, `WRITING`.
+ * `reads:` chooses among the parts; it does not order them.
+ */
+const BEFORE_DEFINITION: readonly string[] = ["ALL-AGENTS", RULES, "AGENTS", "WORLD", "SIMULATION", "WRITING"];
+
+/** The parts that come after the definition (§5.2 part 6), in that order. */
+const AFTER_DEFINITION: readonly string[] = ["TURN", "PRESET"];
+
+/**
  * The name a definition's `given:` gives the briefing by. The files added for the turn (§5.2 part
  * 7) come with the briefing, so they are in the stack of an agent that is given it.
  */
 const BRIEFING = "briefing";
+
+/** How `given:` names a file (`file:scratch/scene.md`, §5.4): a pinned file is handed as one. */
+const FILE = "file:";
 
 /** The nearest file of a name, the farther files it replaces, whether its name is switched off, the file as read, and what it was read as. */
 interface Found<T> {
@@ -45,6 +58,12 @@ interface Instruction extends Found<string> {
 function withLeft(found: Found<string>): Instruction {
   const left: StackLeft | undefined = found.off ? "off" : found.file === undefined ? "broken" : holdsNothing(found.file.text) ? "empty" : undefined;
   return { ...found, ...(left !== undefined ? { left } : {}) };
+}
+
+/** What an `instructions:` entry adds to the stacks it reaches, and what is wrong with it. */
+interface Added {
+  entries: StackEntry[];
+  problems: Problem[];
 }
 
 interface RuleState {
@@ -96,9 +115,11 @@ class TreeGuidance implements Guidance {
     });
   }
 
-  #definition(name: string): Promise<Found<AgentDefinition> | undefined> {
+  async #definition(name: string): Promise<Found<AgentDefinition> | undefined> {
+    // Every definition's name, at any level, against which the reader checks what a `writer:` names (§10.6).
+    const agents = await this.#tree.found("agents");
     return this.#found("agents", name, (file, replaces) => {
-      const { definition, problems } = parseDefinition(file, name, replaces);
+      const { definition, problems } = parseDefinition(file, name, replaces, agents);
       return { item: definition, problems };
     });
   }
@@ -210,8 +231,8 @@ class TreeGuidance implements Guidance {
   }
 
   async problems(): Promise<Problem[]> {
-    const lists = await Promise.all((["instructions", "agents", "skills", "prompts", "tools", "examples"] as const).map(async (l) => [l, [...(await this.#tree.found(l)).keys()]] as const));
-    const loads: Promise<unknown>[] = [this.#ruleStates(), this.#tree.config()];
+    const [lists, config] = await Promise.all([Promise.all((["instructions", "agents", "skills", "prompts", "tools", "examples"] as const).map(async (l) => [l, [...(await this.#tree.found(l)).keys()]] as const)), this.#tree.config()]);
+    const loads: Promise<unknown>[] = [this.#ruleStates(), this.#mappedToNobody(), this.#pinned()];
     for (const [listing, names] of lists) {
       for (const name of names) {
         if (listing === "instructions") loads.push(this.#instructions(name));
@@ -221,13 +242,56 @@ class TreeGuidance implements Guidance {
         else loads.push(this.#part(listing, name));
       }
     }
+    for (const list of config.instructions) for (const entry of list.entries) loads.push(this.#listed(list, entry));
     await Promise.all(loads);
     return [...this.#tree.problems, ...this.#problems];
   }
 
   async definition(name: string): Promise<AgentDefinition | undefined> {
     const found = await this.#definition(name);
-    return found === undefined || found.off ? undefined : found.item;
+    if (found === undefined || found.off || found.item === undefined) return undefined;
+    const def = found.item;
+    return this.#once(`pinned for ${name}`, async () => {
+      // Each file pinned for it, both levels' pins, the farther's first, after its own `given:` items
+      // (R-174): a run hands a `file:` item whole when it starts, as it hands the definition's own.
+      const given = [...def.given];
+      for (const pin of (await this.#tree.config()).pins) {
+        const ref = `${FILE}${pin.file}`;
+        if (pin.agent === name && !given.includes(ref)) given.push(ref);
+      }
+      return given.length === def.given.length ? def : { ...def, given };
+    });
+  }
+
+  /**
+   * What is wrong with the levels' pins, each with the agent it is for: a pin for an agent no
+   * definition has, or a pinned file that is not there. Neither stops a run: the agent is handed what
+   * is there, and the Files page and the run's log say what is not. Checked once.
+   */
+  #pinned(): Promise<{ agent: string; problem: Problem }[]> {
+    return this.#once("pins", async () => {
+      const [agents, config] = await Promise.all([this.#tree.found("agents"), this.#tree.config()]);
+      const checked = await Promise.all(
+        config.pins.map(async (pin): Promise<string | undefined> => {
+          if (!agents.has(pin.agent)) return `\`pins:\` pins ${pin.file} for ${pin.agent}, and no agent definition has that name, so nobody is handed it.`;
+          try {
+            // Its first line is enough to know it is there; the run reads it whole.
+            const read = await this.#tree.files.read(this.scope, pin.file, { start: 1, end: 1 });
+            if (read.status === "read") return undefined;
+            if (read.status === "refused") return `The host refused to read the file pinned for ${pin.agent}, ${pin.file} (${read.reason}), so ${pin.agent} is handed nothing for it.`;
+            return `The file pinned for ${pin.agent}, ${pin.file}, is not there, so ${pin.agent} is handed nothing for it.`;
+          } catch (error) {
+            return `The file pinned for ${pin.agent}, ${pin.file}, could not be read (${error instanceof Error ? error.message : String(error)}), so ${pin.agent} is handed nothing for it.`;
+          }
+        }),
+      );
+      const found = config.pins.flatMap((pin, i) => {
+        const message = checked[i];
+        return message === undefined ? [] : [{ agent: pin.agent, problem: problemAt(pin.at, pin.line, message) }];
+      });
+      this.#problems.push(...found.map((f) => f.problem));
+      return found;
+    });
   }
 
   async definitions(): Promise<DefinitionView[]> {
@@ -248,6 +312,7 @@ class TreeGuidance implements Guidance {
         tools: [...d.tools],
         reads: [...d.reads],
         given: [...d.given],
+        ...(d.writer !== undefined ? { writer: d.writer } : {}),
       });
     }
     return out;
@@ -283,6 +348,76 @@ class TreeGuidance implements Guidance {
     }));
   }
 
+  /**
+   * What one entry of an `instructions:` list adds, read once for its config file: an instruction
+   * file by name, found as `reads:` finds one (`STYLE`, `STYLE.md`); or the owner's files a path or a
+   * glob in the agents' view finds, in path order. An entry that finds only agents' notes or generated
+   * files is a problem and adds nothing: they are not instructions (§5.1, Y5).
+   */
+  #listed(list: InstructionsList, entry: string): Promise<Added> {
+    return this.#once(`instructions ${list.at.path}\n${entry}`, async () => {
+      const nothing = (message: string): Added => {
+        const problem = problemAt(list.at, list.line, message);
+        this.#problems.push(problem);
+        return { entries: [], problems: [problem] };
+      };
+      const notInstructions = `\`instructions:\` names ${entry}, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.`;
+      if (!/[/*?[{]/.test(entry)) {
+        const name = entry.replace(/\.md$/, "");
+        if ((await this.#instructions(name)).length === 0 && (await this.#tree.notYours("instructions")).has(name)) return nothing(notInstructions);
+        return { entries: await this.#instructionEntries(name, "opening"), problems: [] };
+      }
+      const path = entry.replace(/^(?:\.\/|\/)+/, "");
+      const wild = path.search(/[*?[{]/);
+      if (wild === -1) {
+        const file = await this.#tree.read(path);
+        if (file !== undefined && file.kind !== "yours") return nothing(notInstructions);
+        return { entries: [await this.#fileEntry(path, file, "missing")], problems: [] };
+      }
+      // A glob looks below the folders it names before its first wildcard: under a mount, in that level alone (`FilesPort.find`).
+      const slash = path.lastIndexOf("/", wild);
+      const where = slash === -1 ? { pattern: path } : { path: path.slice(0, slash), pattern: path.slice(slash + 1) };
+      let hits: FileHit[] | Refused;
+      try {
+        // Every file it matches: the owner's own list, not an agent's search, so no find limit cuts it.
+        hits = await this.#tree.files.find(this.scope, { by: "glob", ...where, limit: Number.POSITIVE_INFINITY });
+      } catch (error) {
+        return nothing(`\`instructions:\` names ${entry}, which could not be looked for (${error instanceof Error ? error.message : String(error)}), so it adds nothing.`);
+      }
+      if (!Array.isArray(hits)) return nothing(`The host refused to look for ${entry} (${hits.reason}), so \`instructions:\` adds nothing for it.`);
+      const files = hits.filter((hit) => hit.type === "file");
+      const yours = files.filter((hit) => hit.kind === "yours");
+      if (yours.length === 0) return nothing(files.length === 0 ? `\`instructions:\` names ${entry}, and no file matches it, so it adds nothing.` : notInstructions);
+      return { entries: await Promise.all(yours.map(async (hit) => this.#fileEntry(hit.path, await this.#tree.read(hit.path), "broken"))), problems: [] };
+    });
+  }
+
+  /** An owner's file `instructions:` names by path, as a part of a stack; `unread` says why it is left out when it could not be read. */
+  async #fileEntry(path: string, file: FileText | undefined, unread: "missing" | "broken"): Promise<StackEntry> {
+    const layers = await this.layers();
+    if (file === undefined) return { part: path, kind: "instruction", where: "opening", path, level: layers.find((l) => l.mount !== "" && path.startsWith(l.mount))?.level ?? "chat", replaces: [], left: unread };
+    const off = (await this.#tree.config()).off.has(writtenKey(file.path, layers));
+    const f = withLeft({ ref: { name: file.path, path: file.path, level: file.level }, replaces: [], off, file, item: file.text });
+    return { part: file.path, kind: "instruction", where: "opening", path: file.path, level: file.level, hash: file.hash, replaces: [], ...(f.left !== undefined ? { left: f.left } : { text: file.text }) };
+  }
+
+  /** What the levels' `instructions:` add to `agent`'s stack, the farther level's lists first, each in its order: the lists for every agent when its definition reads an instruction file, and those for it by name. */
+  async #addedFor(agent: string, readsInstructions: boolean): Promise<Added> {
+    const lists = (await this.#tree.config()).instructions.filter((list) => (list.agent === undefined ? readsInstructions : list.agent === agent));
+    const added = await Promise.all(lists.flatMap((list) => list.entries.map((entry) => this.#listed(list, entry))));
+    return { entries: added.flatMap((a) => a.entries), problems: added.flatMap((a) => a.problems) };
+  }
+
+  /** Each agent an `instructions:` mapping gives a list to that no definition has: that list reaches no stack. Checked once. */
+  #mappedToNobody(): Promise<void> {
+    return this.#once("instructions for nobody", async () => {
+      const [agents, config] = await Promise.all([this.#tree.found("agents"), this.#tree.config()]);
+      for (const list of config.instructions) {
+        if (list.agent !== undefined && !agents.has(list.agent)) this.#problems.push(problemAt(list.at, list.line, `\`instructions:\` gives a list to ${list.agent}, and no agent definition has that name, so the list reaches no stack.`));
+      }
+    });
+  }
+
   /** The always-on rules naming `agent`, in force or not: those for every turn in the opening block, or those whose `turns:` name the situations at hand for the briefing. Shipped first, then global, character, chat; by name within a level. */
   async #ruleEntries(agent: string, where: StackEntry["where"], situations?: readonly string[]): Promise<StackEntry[]> {
     const out: StackEntry[] = [];
@@ -312,17 +447,35 @@ class TreeGuidance implements Guidance {
 
   async stack(agent: string, options: { situations?: readonly string[] } = {}): Promise<Stack> {
     const entries: StackEntry[] = [];
+    // The problems of the `instructions:` entries that reach this stack, and of the pins for its agent: a run's start logs them.
+    const reached: Problem[] = [];
     const found = await this.#definition(agent);
     const def = found?.item;
     if (found === undefined || def === undefined || found.off) {
       const where = found === undefined ? await this.#wouldBe(agent) : { path: found.ref.path, level: found.ref.level, ...(found.file !== undefined ? { hash: found.file.hash } : {}) };
       entries.push({ part: itemKey("agents", agent), kind: "definition", where: "opening", ...where, replaces: found?.replaces ?? [], left: found === undefined ? "missing" : found.off ? "off" : "broken" });
     } else {
+      // `reads:` chooses the parts and §5.2 orders them, whatever order `reads:` names them in. A file
+      // is given once however often it is named, and the definition's own file only as part 5 (R-105).
+      const reads = [...new Set(def.reads.map((read) => read.replace(/\.md$/, "")))];
+      const given = new Set([def.source.path]);
+      const add = (list: readonly StackEntry[]): void => {
+        for (const entry of list) {
+          if (given.has(entry.path)) continue;
+          given.add(entry.path);
+          entries.push(entry);
+        }
+      };
+      const part = (name: string): Promise<StackEntry[]> => (name === RULES ? this.#ruleEntries(agent, "opening") : this.#instructionEntries(name, "opening"));
+      for (const name of BEFORE_DEFINITION) if (reads.includes(name)) add(await part(name));
+      // The files the levels' `instructions:` add, then each instruction file `reads:` names that §5.2
+      // does not number, in `reads:`'s order: after part 4, before the definition.
+      const listed = await this.#addedFor(agent, reads.some((read) => read !== RULES));
+      add(listed.entries);
+      reached.push(...listed.problems);
+      for (const name of reads) if (!BEFORE_DEFINITION.includes(name) && !AFTER_DEFINITION.includes(name)) add(await part(name));
       entries.push({ part: itemKey("agents", agent), kind: "definition", where: "opening", path: def.source.path, level: def.source.level, hash: def.source.hash, replaces: def.replaces, text: def.instructions.text });
-      for (const read of def.reads) {
-        if (read === RULES) entries.push(...(await this.#ruleEntries(agent, "opening")));
-        else entries.push(...(await this.#instructionEntries(read.replace(/\.md$/, ""), "opening")));
-      }
+      for (const name of AFTER_DEFINITION) if (reads.includes(name)) add(await part(name));
       if (def.given.includes(BRIEFING)) {
         const wanted = options.situations;
         const added = new Map<string, string[]>();
@@ -334,8 +487,10 @@ class TreeGuidance implements Guidance {
         entries.push(...(await this.#ruleEntries(agent, "briefing", wanted)));
       }
     }
+    for (const pinned of await this.#pinned()) if (pinned.agent === agent) reached.push(pinned.problem);
     const paths = new Set(entries.map((e) => e.path));
-    return { agent, entries, problems: [...this.#tree.problems, ...this.#problems].filter((p) => paths.has(p.path)) };
+    const own = [...this.#tree.problems, ...this.#problems].filter((p) => paths.has(p.path));
+    return { agent, entries, problems: [...own, ...reached.filter((p) => !own.includes(p))] };
   }
 
   async stackParts(agent: string): Promise<StackPart[]> {

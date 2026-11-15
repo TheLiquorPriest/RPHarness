@@ -8,5 +8,10 @@
 //   adds reaches the page with nothing copied by hand.
 // - `mergedConfig`: the merge of levels RPH reads every setting by (the contract's `MergeLevels`), so
 //   a host reading the same config files reads what RPH reads.
+// - `parseDefinition` and `DEFINITION_FIELDS`: the reader of an agent definition's file and the
+//   fields its header has (§5.4, C8), so a host that writes or imports a definition (the migration's
+//   imported agents) reads its header exactly as RPH does.
 
 export { mergedConfig, SETTINGS } from "./harness/settings";
+export { DEFINITION_FIELDS } from "./files/api";
+export { parseDefinition } from "./files/definitions";

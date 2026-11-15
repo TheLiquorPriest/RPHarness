@@ -76,12 +76,12 @@ describe("the narrator", () => {
     // Sent whole, once the lead released it.
     expect(sink.pieces.map((piece) => piece.text)).toEqual([" has not come, Wren says, and turns back to the brass."]);
     const narrator = s.model.requests[1]!;
-    // The prompt exactly as it was sent, then the narrator's own definition and what it reads, then the brief, then the prefilled start to go on from.
+    // The prompt exactly as it was sent, then what the narrator reads and then its own definition (§5.2: `WRITING.md` is part 4, the definition part 5), then the brief, then the prefilled start to go on from.
     expect(narrator.messages.slice(0, PROMPT.length).map((message) => [message.role, textOf(message)])).toEqual(PROMPT.map((message) => [message.role, message.content as string]));
     const after = narrator.messages.slice(PROMPT.length);
     expect(after.map((message) => message.role)).toEqual(["system", "user", "assistant"]);
-    expect(textOf(after[0]!)).toStartWith("The prompt above is the one the chat application assembled for this reply.");
-    expect(textOf(after[0]!)).toContain("# Writing the reply");
+    expect(textOf(after[0]!)).toStartWith("# Writing the reply");
+    expect(textOf(after[0]!)).toContain("The prompt above is the one the chat application assembled for this reply.");
     expect(textOf(after[1]!)).toBe(BRIEF);
     expect(textOf(after[2]!)).toBe("The boat");
     expect(narrator.tools).toEqual([]);

@@ -1,10 +1,11 @@
 // The levels of the tree as the host gives them (`FilesPort`): which files of each kind each level
-// holds, their texts, and what the levels' config files switch off and add. The names of the levels,
-// their folders and their config files are the host's; nothing here names one.
+// holds, their texts, and what the levels' config files switch off, add, add to stacks and pin. The
+// names of the levels, their folders and their config files are the host's; nothing here names one.
 
 import type { FileText, FilesPort, GuidanceKind, Layer, LayerLevel, Scope } from "../contract/index";
 import type { Problem } from "./api";
 import { CONFIG_KEYS } from "./api";
+import type { At } from "./header";
 import { fieldLine, isMapping, nameList, normalized, parseYaml, problemAt } from "./header";
 
 /** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`). */
@@ -17,6 +18,28 @@ export interface FileRef {
   level: LayerLevel;
 }
 
+/** One level's `instructions:` list, or one agent's list in a level's mapping, and where it is written. */
+export interface InstructionsList {
+  /** The agent it is for; absent: every agent whose definition reads at least one instruction file. */
+  agent?: string;
+  /** As written: instruction files by name (`STYLE`), or paths or globs in the agents' view (`house/*.md`). */
+  entries: string[];
+  /** The config file it is in, and the line of its key. */
+  at: At;
+  line?: number;
+}
+
+/** A file pinned for an agent (`pins:`, R-174), and where the pin is written. */
+export interface Pin {
+  /** Its path in the chat's view (`persistent-workspace/plan.md`, `@global/persistent-workspace/x.md`). */
+  file: string;
+  /** The definition it is pinned for. */
+  agent: string;
+  /** The config file it is in, and the line of its key. */
+  at: At;
+  line?: number;
+}
+
 /** What the levels' config files say, farthest first, nearest last. */
 export interface Config {
   /** Names switched off, as `itemKey` gives them. */
@@ -25,6 +48,16 @@ export interface Config {
   layered: Set<string>;
   /** For each situation, the instruction files the nearest config that names it adds to the briefing. */
   added: Map<string, string[]>;
+  /** What each level's `instructions:` adds to stacks, the farthest level's first. */
+  instructions: InstructionsList[];
+  /** Every level's pins, the farthest level's first, each in its list's order. */
+  pins: Pin[];
+}
+
+/** A listing's files: the owner's, which are guidance, and those that are not (agents' notes, generated files), each by name, each name's files farthest first. */
+interface Listed {
+  yours: Map<string, FileRef[]>;
+  others: Map<string, FileRef[]>;
 }
 
 const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "prompts", "tools"];
@@ -83,7 +116,7 @@ export class Tree {
   /** What went wrong reading: a refusal, or a port that failed. */
   readonly problems: Problem[] = [];
   #layers: Promise<Layer[]> | undefined;
-  readonly #found = new Map<Listing, Promise<Map<string, FileRef[]>>>();
+  readonly #listed = new Map<Listing, Promise<Listed>>();
   readonly #reads = new Map<string, Promise<FileText | undefined>>();
   #config: Promise<Config> | undefined;
 
@@ -98,24 +131,35 @@ export class Tree {
   }
 
   /** The files of a listing, by name, each name's files farthest first. */
-  found(listing: Listing): Promise<Map<string, FileRef[]>> {
-    let found = this.#found.get(listing);
-    if (found === undefined) {
-      found = this.#list(listing);
-      this.#found.set(listing, found);
-    }
-    return found;
+  async found(listing: Listing): Promise<Map<string, FileRef[]>> {
+    return (await this.#listing(listing)).yours;
   }
 
-  async #list(listing: Listing): Promise<Map<string, FileRef[]>> {
+  /** The files a listing finds that are not the owner's (agents' notes, generated files), by name: never guidance, though a name the user wrote may find only them. */
+  async notYours(listing: Listing): Promise<Map<string, FileRef[]>> {
+    return (await this.#listing(listing)).others;
+  }
+
+  #listing(listing: Listing): Promise<Listed> {
+    let listed = this.#listed.get(listing);
+    if (listed === undefined) {
+      listed = this.#list(listing);
+      this.#listed.set(listing, listed);
+    }
+    return listed;
+  }
+
+  async #list(listing: Listing): Promise<Listed> {
     const layers = await this.layers();
     const perLevel = await Promise.all(
-      layers.map(async (layer): Promise<FileRef[]> => {
+      layers.map(async (layer): Promise<{ ref: FileRef; yours: boolean }[]> => {
         const path = base(layer, listing);
         if (path === undefined) return [];
         let hits;
         try {
-          hits = await this.files.find(this.scope, { by: "list", path, depth: listing === "skills" ? 2 : 1 });
+          // Every file in the folder (§5.2 "everything loaded", R-183): a find that names no limit stops
+          // at the host's own cap, which is for an agent's search, not for loading the owner's guidance.
+          hits = await this.files.find(this.scope, { by: "list", path, depth: listing === "skills" ? 2 : 1, limit: Number.POSITIVE_INFINITY });
         } catch (error) {
           this.problems.push({ path, level: layer.level, message: `The folder could not be listed: ${error instanceof Error ? error.message : String(error)}` });
           return [];
@@ -126,17 +170,20 @@ export class Tree {
         }
         const prefix = path === "" || path.endsWith("/") ? path : `${path}/`;
         return hits.flatMap((hit) => {
-          if (hit.type !== "file" || hit.kind !== "yours" || !hit.path.startsWith(prefix)) return [];
+          if (hit.type !== "file" || !hit.path.startsWith(prefix)) return [];
           const name = nameOf(listing, hit.path.slice(prefix.length));
-          return name === undefined ? [] : [{ name, path: hit.path, level: layer.level }];
+          return name === undefined ? [] : [{ ref: { name, path: hit.path, level: layer.level }, yours: hit.kind === "yours" }];
         });
       }),
     );
-    const byName = new Map<string, FileRef[]>();
+    const listed: Listed = { yours: new Map(), others: new Map() };
     for (const refs of perLevel) {
-      for (const ref of refs) byName.set(ref.name, [...(byName.get(ref.name) ?? []), ref]);
+      for (const { ref, yours } of refs) {
+        const byName = yours ? listed.yours : listed.others;
+        byName.set(ref.name, [...(byName.get(ref.name) ?? []), ref]);
+      }
     }
-    return byName;
+    return listed;
   }
 
   /** A file's text; undefined when it is gone, or could not be read (a problem says why). */
@@ -161,7 +208,7 @@ export class Tree {
     }
   }
 
-  /** What the levels' config files switch off and add. */
+  /** What the levels' config files switch off, add, add to stacks and pin. */
   config(): Promise<Config> {
     this.#config ??= this.#readConfig();
     return this.#config;
@@ -169,7 +216,7 @@ export class Tree {
 
   async #readConfig(): Promise<Config> {
     const layers = await this.layers();
-    const config: Config = { off: new Set(), layered: new Set(), added: new Map() };
+    const config: Config = { off: new Set(), layered: new Set(), added: new Map(), instructions: [], pins: [] };
     const files = await Promise.all(layers.map((layer) => (layer.config === undefined ? undefined : this.read(`${layer.mount}${layer.config}`))));
     for (const file of files) {
       if (file === undefined) continue;
@@ -193,6 +240,38 @@ export class Tree {
       const layered = nameList(parsed.value[CONFIG_KEYS.layered]);
       if (layered === undefined) this.problems.push(problemAt(at, fieldLine(lines, CONFIG_KEYS.layered, 1), "`layered:` is a list of instruction files read at every level that has one, farther first: `layered: [AGENTS]`."));
       else for (const name of layered) config.layered.add(writtenKey(name, layers));
+
+      const instructions = parsed.value[CONFIG_KEYS.instructions];
+      if (instructions !== undefined && instructions !== null) {
+        const line = fieldLine(lines, CONFIG_KEYS.instructions, 1);
+        const where = { at, ...(line !== undefined ? { line } : {}) };
+        if (isMapping(instructions)) {
+          for (const [agent, value] of Object.entries(instructions)) {
+            const entries = nameList(value);
+            if (entries === undefined) this.problems.push(problemAt(at, line, `\`instructions:\` gives \`${agent}\` something other than a list of files: \`${agent}: [STYLE, house/canon.md]\`.`));
+            else config.instructions.push({ agent, entries, ...where });
+          }
+        } else {
+          const entries = nameList(instructions);
+          if (entries === undefined) this.problems.push(problemAt(at, line, "`instructions:` is a list of files added to the stack of every agent that reads instruction files, `instructions: [STYLE, house/canon.md]`, or such a list for each agent by name: `instructions: { gm: [house/rules.md] }`."));
+          else config.instructions.push({ entries, ...where });
+        }
+      }
+
+      const pins = parsed.value[CONFIG_KEYS.pins];
+      if (pins !== undefined && pins !== null) {
+        const line = fieldLine(lines, CONFIG_KEYS.pins, 1);
+        const where = { at, ...(line !== undefined ? { line } : {}) };
+        if (!Array.isArray(pins)) this.problems.push(problemAt(at, line, "`pins:` is a list of files, each pinned for an agent: `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`."));
+        else {
+          for (const [i, pin] of pins.entries()) {
+            const file = isMapping(pin) && typeof pin.file === "string" ? pin.file.trim() : "";
+            const agent = isMapping(pin) && typeof pin.agent === "string" ? pin.agent.trim() : "";
+            if (file === "" || agent === "") this.problems.push(problemAt(at, line, `Pin ${i + 1} of \`pins:\` needs a \`file\` and an \`agent\`, as in \`{ file: persistent-workspace/plan.md, agent: keeper }\`, so it is left out.`));
+            else config.pins.push({ file, agent, ...where });
+          }
+        }
+      }
 
       const added = parsed.value[CONFIG_KEYS.added];
       if (added === undefined || added === null) continue;

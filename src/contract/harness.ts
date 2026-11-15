@@ -231,6 +231,8 @@ export interface DefinitionView {
   tools: string[];
   reads: string[];
   given: string[];
+  /** The definition its `write_reply` hands the prose to, as its header names it (§10.6, C8). Absent when it names none: code names no writer of its own. */
+  writer?: string;
 }
 
 /**

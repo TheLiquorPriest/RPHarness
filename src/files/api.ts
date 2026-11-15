@@ -23,7 +23,7 @@
 //   listed and never in force.
 // - Prompt parts, `<prompts>/<name>.md`, and tool descriptions, `<tools>/<name>.md`: an optional
 //   header (any fields; `description` and `format` are read) and a body that is a template.
-// - Config, the file each level names (`Layer.config`): `off:`, `layered:` and `added:` are read (CONFIG_KEYS).
+// - Config, the file each level names (`Layer.config`): `off:`, `layered:`, `added:`, `instructions:` and `pins:` are read (CONFIG_KEYS).
 //
 // Levels. Files are read through the host's `FilesPort`: shipped, then global, then character, then
 // chat. A file of the same name at a nearer level replaces the farther one, of every kind, but for an
@@ -114,8 +114,8 @@ export interface Template {
 
 // ---------------------------------------------------------------- agent definitions
 
-/** The header fields of an agent definition. Anything else in its header is reported. */
-export const DEFINITION_FIELDS = ["name", "description", "model", "effort", "tools", "out_of_reach", "reads", "given", "limits"] as const;
+/** The header fields of an agent definition. Anything else in its header is reported. Frozen: a host reads a definition by this same list (`rp-harness/helpers`). */
+export const DEFINITION_FIELDS = Object.freeze(["name", "description", "model", "effort", "tools", "out_of_reach", "reads", "given", "limits", "writer"] as const);
 
 /** The fields a definition's body may name, each a field of the contract's `BodyFields`. Anything else it names is reported. */
 export const BODY_FIELDS = ["agent", "definition", "plays"] as const satisfies readonly (keyof BodyFields)[];
@@ -141,11 +141,13 @@ export interface AgentDefinition {
   tools: string[];
   /** Families of tools it does not reach by searching (`out_of_reach:`, §6.8); a tool of one that `tools` names it still holds. */
   outOfReach: string[];
-  /** The instruction files of its stack, in order; `rules` stands for the always-on rules it is named in. */
+  /** The instruction files of its stack; `rules` stands for the always-on rules it is named in. They choose the stack's parts and §5.2 orders them; a file that is none of §5.2's numbered parts goes with the `instructions:` files, in the order written here. */
   reads: string[];
   /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */
   given: string[];
   limits: DefinitionLimits;
+  /** The definition `write_reply` hands the prose to when this agent calls it (§10.6), by name as its header writes it. Absent when its header names none: code names no writer of its own. */
+  writer?: string;
   /** Its body: the agent's instructions, a template a sub-agent's run fills with `BODY_FIELDS` (`You are {{plays}}.`). */
   instructions: Template;
   source: Source;
@@ -227,12 +229,17 @@ export interface StackEntry extends StackPart {
 }
 
 /**
- * An agent's stack: its definition first, then each file its `reads` names in that order (`rules`:
- * the always-on rules it is named in, the shipped level's first, then global, character, chat, by
- * name within a level; a `layered:` instruction file: one entry per level that has it, farther
- * first), then what the briefing is handed, when its definition is given `briefing`: the files the
- * config's `added:` table names for the situations at hand, and the always-on rules whose `turns:`
- * name one of them. Every entry its definition names is here, given or left out.
+ * An agent's stack, in §5.2's order whatever order its `reads` names the parts in: 1 `ALL-AGENTS`;
+ * 2 the always-on rules it is named in (`rules`: the shipped level's first, then global, character,
+ * chat, by name within a level); 3 `AGENTS`; 4 `WORLD`, `SIMULATION`, `WRITING`; then the files the
+ * levels' `instructions:` add to it, and each instruction file its `reads` names that §5.2 does not
+ * number, in its order; 5 its definition; 6 `TURN`, `PRESET`. Of the numbered parts only those its
+ * `reads` names are there; a `layered:` instruction file is one entry per level that has it, farther
+ * first; a file is given once however often it is named, and the definition only as part 5. Then
+ * what the briefing is handed, when its definition is given `briefing`: the files the config's
+ * `added:` table names for the situations at hand, and the always-on rules whose `turns:` name one
+ * of them. Every entry its definition or a config names is here, given or left out. `problems`: those
+ * of its entries' files, of the `instructions:` entries that reach it, and of the pins for its agent.
  */
 export interface Stack {
   agent: string;
@@ -406,6 +413,24 @@ export const CONFIG_KEYS = {
   layered: "layered",
   /** Which situation adds which instruction files to the briefing: `swipe: [SWIPE]`. A nearer level's entry for a situation replaces a farther one's. */
   added: "added",
+  /**
+   * Files added to stacks (§5.2, as OpenCode's config adds them): a list, added to the stack of every
+   * agent whose definition reads at least one instruction file; or a mapping from an agent's name to
+   * a list, for that agent alone. Each entry is an instruction file's name as `reads` writes it
+   * (`STYLE`, `STYLE.md`), found as `reads` finds one, or a path or glob in the agents' view to the
+   * owner's own files (`house/canon.md`, `@global/house/*.md`), read in path order. An entry that
+   * finds only agents' notes or generated files adds nothing. They come after part 4 and before the
+   * definition, the farther level's lists first, each in its order.
+   */
+  instructions: "instructions",
+  /**
+   * Files pinned for agents (R-174): a list of `{ file, agent }`, the file by its path in the chat's
+   * view (`persistent-workspace/plan.md`, `@global/persistent-workspace/x.md`), the agent by its
+   * definition's name. Every level's list applies. At the start of each of its runs the agent is
+   * handed each file pinned for it whole, as a `given` file after its definition's own. A pinned file
+   * is data handed to an agent, not an instruction; one that is not there is a problem, not a stop.
+   */
+  pins: "pins",
 } as const;
 
 // ---------------------------------------------------------------- the whole
@@ -414,10 +439,13 @@ export const CONFIG_KEYS = {
 export interface Guidance {
   readonly scope: Scope;
   layers(): Promise<Layer[]>;
-  /** Every problem found in every file of the tree. Loads everything. */
+  /** Every problem found in every file of the tree, and in what its configs name. Loads everything. */
   problems(): Promise<Problem[]>;
 
-  /** The definition in force of that name; undefined when there is none, it is off, or it is broken (see `problems`). */
+  /**
+   * The definition in force of that name, with each file pinned for it (`pins:`) after its own `given`
+   * items, as `file:<path>`, once; undefined when there is none, it is off, or it is broken (see `problems`).
+   */
   definition(name: string): Promise<AgentDefinition | undefined>;
   /** Every definition in force, for the Files page. */
   definitions(): Promise<DefinitionView[]>;

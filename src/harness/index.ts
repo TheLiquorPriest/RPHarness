@@ -63,7 +63,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     testPrompt: async () => (await shippedTemplate("connection-test")).render().text,
     markNote: (text) => (mark === undefined ? text : mark.render({ text }).text),
   });
-  const hub = new LiveHub();
+  const hub = new LiveHub({ log: env.log });
   const usage = new UsageBook(env.store, env.clock, env.log);
   const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now() });
   const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage });

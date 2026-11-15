@@ -1,6 +1,6 @@
 // What the agent runner takes and gives, beyond the contract's own types.
 import type { Message } from "@earendil-works/pi-ai";
-import type { AgentRef, AgentStatus, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolCtx, ToolResult, Usage } from "../contract";
+import type { AgentRef, AgentStatus, CallPermission, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
 import type { Fired } from "./rules";
 
 /** What the loop needs of the host's clock: the time, and timers. */
@@ -45,30 +45,56 @@ export interface GateCall {
 }
 
 /**
- * Before a call runs. `refuse`: it does not run, and this is its answer (the user's permission said
- * no, in a file's words). `hold`: a rule on its arguments holds it, and the rule's text is its answer.
- * `remind`: rules on its arguments whose texts come back with its result.
+ * Before a call runs. `refuse`: it does not run, and this is its answer (the host's switches or the
+ * user's permission said no, in a file's words). `hold`: a rule on its arguments holds it, and the
+ * rule's text is its answer. `remind`: rules on its arguments whose texts come back with its answer.
+ * `permission`: for a write or external tool, the permission it runs (or was refused) under.
  */
 export interface GateBefore {
   refuse?: LoopToolResult;
   hold?: Fired;
   remind: Fired[];
+  permission?: CallPermission;
 }
 
-/** After a call ran: its result as the model reads it (a long one clipped), and the rules on that result. */
+/**
+ * One call held to the user's bound on what the model reads of a call (`results.clip`): `result`, its
+ * answer as it is kept (cut to the bound where it is longer, with the file's line on what was left
+ * out and where the whole is, among its reports where it has any); `read`, what the model reads of
+ * the call, in order: the answer's text, its reports and the texts that go after it, as far as the
+ * bound left them, then that line.
+ */
+export interface Bounded {
+  result: LoopToolResult;
+  read: ToolContent[];
+}
+
+/**
+ * After a call ran: its answer as it is kept, what the model reads of the call (absent: the answer,
+ * then its reports and the rules' texts, as they are), and the rules on its result.
+ */
 export interface GateAfter {
   result: LoopToolResult;
+  read?: ToolContent[];
   remind: Fired[];
 }
 
 /**
- * What runs around every tool call besides the tool (§13.3): before it, the user's permissions and
- * the rules on its arguments; after it, long results clipped and the rules on its result. It says
- * what is so; the runner traces the firings and puts their texts in front of the agent.
+ * What is asked around every tool call besides the tool (§13.3), from pi's own hooks: before it
+ * (`beforeToolCall`), the host's switches, the user's permissions and the rules on its arguments;
+ * after it (`afterToolCall`), the rules on its result and the bound on what the model reads of it.
+ * A tool found through `tool_use` is asked about as itself. The gate says what is so; the runner
+ * traces the firings, and puts their texts and the answer in front of the agent.
  */
 export interface ToolGate {
   before(call: GateCall, signal: AbortSignal): Promise<GateBefore>;
-  after(call: GateCall, result: LoopToolResult, signal: AbortSignal): Promise<GateAfter>;
+  /** `added`: texts already due after the answer (the rules on its arguments), held to the bound with it. */
+  after(call: GateCall, result: LoopToolResult, signal: AbortSignal, added?: readonly string[]): Promise<GateAfter>;
+  /**
+   * The bound on what the model reads of a call answered without running its tool (a refusal, a
+   * hold, a failure around it), as `after` holds an answer to it. Absent: such an answer goes as it is.
+   */
+  bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[]): Promise<Bounded>;
 }
 
 /** What one model call is sent with besides its messages, decided per request. */

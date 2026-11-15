@@ -83,6 +83,8 @@ export interface Settings {
   requests: RequestsSetting;
   /** Turns of a chat whose prompts are kept, so the next turn's is compared with the turn it follows (§4.8). */
   promptKept: number;
+  /** Items of one run a page following it live may have yet to take before it is cut off (§5.6). */
+  liveBacklog: number;
   /**
    * When a session's earlier turns are summarized (§11): the tokens kept free for the answer, how
    * many of the newest turns are kept as they were, the tokens of carried records past which the
@@ -397,6 +399,7 @@ function settingsFrom(levels: readonly LevelConfig[], log?: Log): Settings {
     efforts: byConnection(MODELS.effort),
     requests: read.value(TRACE.requests),
     promptKept: read.value(TRACE.promptKept),
+    liveBacklog: read.value(TRACE.liveBacklog),
     compaction: {
       reserve: read.value(COMPACTION.reserve),
       keepTurns: read.value(COMPACTION.keepTurns),

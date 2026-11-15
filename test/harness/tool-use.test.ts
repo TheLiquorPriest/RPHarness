@@ -77,8 +77,10 @@ describe("a call through tool_use", () => {
     expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
 
     const lines = await notices(s);
-    expect(answerTo(s, "never-1")).toBe(lines.line("never", { tool: "ledger_open", lane: "engine" }) ?? "");
-    expect(answerTo(s, "hold-1")).toContain("Fixture rule: the bell stays silent at night.");
+    const never = lines.line("never", { tool: "ledger_open", lane: "engine" }) ?? "";
+    expect(answerTo(s, "never-1")).toBe(`${never.slice(0, 40)}${lines.line("clipped", { shown: 40, length: never.length, left: never.length - 40, path: "sessions/s1/turns/t1/cache/results/never-1.md" }) ?? ""}`);
+    const hold = "Fixture rule: the bell stays silent at night.";
+    expect(answerTo(s, "hold-1")).toBe(`${hold.slice(0, 40)}${lines.line("clipped", { shown: 40, length: hold.length, left: hold.length - 40, path: "sessions/s1/turns/t1/cache/results/hold-1.md" }) ?? ""}`);
     const kept = `sessions/s1/turns/t1/cache/results/clip-1.md`;
     expect(answerTo(s, "clip-1")).toBe(`${TIDES.slice(0, 40)}${lines.line("clipped", { shown: 40, length: TIDES.length, left: TIDES.length - 40, path: kept }) ?? ""}`);
     const whole = await s.env.files.read(request("t1").scope, kept);

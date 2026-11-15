@@ -81,7 +81,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);
   const texts = runnerTexts(words, template(goOn), template(closing)?.render().text.trimEnd(), settings.schemaShown);
-  const trace = new RunTrace(core.hub.tee(env.trace, scope), scope, ask.id, env.clock);
+  const trace = new RunTrace(core.hub.tee(env.trace, scope, () => settings.liveBacklog), scope, ask.id, env.clock);
   const todos = new TodoLists();
   const rules = await guidance.ruleRun({
     facts: createFacts(env.facts, (_scope, agent) => {

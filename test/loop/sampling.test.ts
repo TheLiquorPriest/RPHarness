@@ -25,8 +25,8 @@ describe("sampling per request", () => {
     await clock.settle(runner.start({ messages: [user("Look around.")] }).done);
 
     expect(scripted.requests.map((request) => request.options)).toEqual([
-      {},
-      { temperature: 1.05, maxTokens: 700, samplingParams: { top_p: 0.92, top_k: 40, min_p: 0.05, frequency_penalty: 0.2, presence_penalty: 0.1, repetition_penalty: 1.07, seed: 7, stop: ["\n\nPlayer:"] } },
+      { sessionId: "session-of-author" },
+      { temperature: 1.05, maxTokens: 700, samplingParams: { top_p: 0.92, top_k: 40, min_p: 0.05, frequency_penalty: 0.2, presence_penalty: 0.1, repetition_penalty: 1.07, seed: 7, stop: ["\n\nPlayer:"] }, sessionId: "session-of-author" },
     ]);
     expect(recorder.of("call_started").map((record) => [record.event.call, record.event.sampling, record.event.maxTokens])).toEqual([
       [1, undefined, undefined],

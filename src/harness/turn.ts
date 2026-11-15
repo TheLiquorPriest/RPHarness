@@ -198,7 +198,7 @@ export class Turn {
     this.#sink = sink;
     this.run = req.scope.turn;
     this.scope = req.scope;
-    this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope), req.scope, this.run, core.env.clock);
+    this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock);
     this.#trace.watch((record) => this.#watch(record));
     this.#lead = { id: core.ids(), definition: req.lead };
     this.#intentWait = new IntentWait(core.env.clock, () => this.#settings.intentWaitMs);

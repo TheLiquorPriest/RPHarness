@@ -118,6 +118,7 @@ const SHOWN: Readonly<Record<string, (settings: Settings) => JsonValue>> = {
   "rules.judge": (s) => s.judge ?? null,
   "trace.requests": (s) => s.requests,
   "prompt.kept": (s) => s.promptKept,
+  "live.backlog": (s) => s.liveBacklog,
   "compaction.reserve": (s) => s.compaction.reserve,
   "compaction.keepTurns": (s) => s.compaction.keepTurns,
   "compaction.records": (s) => s.compaction.records,

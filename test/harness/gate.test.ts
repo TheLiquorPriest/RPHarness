@@ -66,6 +66,38 @@ describe("permissions", () => {
     expect(s.trace.of("approval_answered").map((record) => record.event.answer)).toEqual([{ go: false, reason: "Not tonight." }]);
     expect(answered(s.model.requests[1]!.messages, "call_1_1")).toBe("world_apply was not run: the player said no. Their reason: Not tonight.");
   });
+
+  test("each write is traced with its lane and the permission it ran under: Auto, Confirm with the player's word, and Never, three records; a read carries none", async () => {
+    const ran: string[] = [];
+    const lanes: Record<string, LanePermission> = { engine: "auto", story: "confirm", cast: "never" };
+    const port: ApprovalsPort = { permission: async (_scope, lane) => lanes[lane] ?? "auto", ask: async () => ({ go: true }) };
+    const write = (name: string, lane: string) => ({ tier: "write" as const, lane, description: `Fixture: writes to ${lane}.`, run: async () => (ran.push(name), said(`${name} recorded`)) });
+    const s = (open = await stage({
+      drafted: true,
+      approvals: port,
+      tools: {
+        world_apply: write("world_apply", "engine"),
+        story_record: write("story_record", "story"),
+        cast_update: write("cast_update", "cast"),
+        world_query: { tier: "read", description: "Fixture: reads the world.", run: async () => (ran.push("world_query"), said("the boat is late")) },
+      },
+      answers: [
+        { pieces: [{ call: "world_apply", args: {}, id: "a-1" }, { call: "story_record", args: {}, id: "c-1" }, { call: "cast_update", args: {}, id: "n-1" }, { call: "world_query", args: {}, id: "r-1" }] },
+        { pieces: [{ text: "<reply>The boat is late.</reply>" }] },
+      ],
+    }));
+
+    await s.turn(request("t1"));
+
+    expect(ran).toEqual(["world_apply", "story_record", "world_query"]);
+    // By call, whatever order they ended in: the Never was settled before any of the others ran.
+    expect(Object.fromEntries(s.trace.of("tool_ended").map((record) => [record.event.callId, record.event.permission ?? null]))).toEqual({
+      "a-1": { lane: "engine", setting: "auto" },
+      "c-1": { lane: "story", setting: "confirm", answer: { go: true } },
+      "n-1": { lane: "cast", setting: "never" },
+      "r-1": null,
+    });
+  });
 });
 
 describe("rules on a tool call", () => {

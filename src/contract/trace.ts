@@ -10,13 +10,33 @@ import type { JsonValue } from "./json";
 import type { PromptNotice } from "./prompt";
 import type { ToolResult } from "./tools";
 import type { LimitHit, Release, RunOutcome, Sampling, TurnKind } from "./turn";
-import type { ApprovalAnswer } from "./approvals";
+import type { ApprovalAnswer, LanePermission } from "./approvals";
 
-/** A tool call a model made: the model's id for it, the tool, and its arguments. */
+/**
+ * A tool call a model made: the model's id for it, the tool, and its arguments. `began`: when the
+ * model began writing it (pi's `toolcall_start`), by the host's clock, so the floor can take the
+ * intent record's own time out of "first words" on a two-step connection (§17.1); absent where the
+ * provider gave the call whole, with no start of its own.
+ */
 export interface ToolCallView {
   id: string;
   name: string;
   args: JsonValue;
+  began?: number;
+}
+
+/**
+ * The permission a call of a write or external tool ran under (§6.8: each lane is Auto, Confirm or
+ * Never per chat): the lane its tier puts it under (`external` for a tool of the external tier,
+ * whatever lane it names), the user's setting for that lane (Auto where the host has no approvals
+ * port), and under Confirm the user's word on this call. So the host keeps, per turn, what ran under
+ * which setting (Appendix B `approval`; the review card, one per turn).
+ */
+export interface CallPermission {
+  lane: string;
+  setting: LanePermission;
+  /** Under Confirm: the user's word. */
+  answer?: ApprovalAnswer;
 }
 
 /**
@@ -66,8 +86,12 @@ export type TraceEvent =
   | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" }
   /** Part of a tool's answer, while it runs. */
   | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult }
-  /** A tool's answer: whether it was clean, and whether it ended the batch's run (§10.7). */
-  | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number }
+  /**
+   * A tool's answer: whether it was clean, and whether it ended the batch's run (§10.7). For a write
+   * or external tool, the permission it ran under, Auto included (`never`: refused; `confirm`: with
+   * the user's word); a call refused before its permission was read (a tool switched off) has none.
+   */
+  | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission }
   /** A rule fired (§5.4), as it fired: its `then` comes later, in `TurnEvents.ruleFired`. */
   | { kind: "rule_fired"; firing: RuleFiring }
   /** A hook ran (§5.4 "Hooks"): what it did, and how long it took. */

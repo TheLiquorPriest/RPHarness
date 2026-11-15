@@ -22,7 +22,7 @@ import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
-import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
+import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
@@ -263,7 +263,7 @@ export class Turn {
     }
     // What the turn's runs have spent, this run's added: a later run of the turn counts on from it (N-22).
     const begun = this.#file?.log.turn(this.scope.turn);
-    if (begun !== undefined) this.#file?.add({ type: "spent", parent: begun.id, turn: begun.turn, usage: { ...this.#budget.used }, ms: (this.#earlier?.ms ?? 0) + env.clock.now() - this.#startedAt });
+    if (begun !== undefined) this.#file?.add({ type: "spent", parent: begun.id, turn: begun.turn, usage: { ...this.#budget.used }, rounds: this.#budget.rounds, ms: (this.#earlier?.ms ?? 0) + env.clock.now() - this.#startedAt });
     this.#keep?.stop();
     if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
     await this.#settled();
@@ -353,7 +353,8 @@ export class Turn {
     const earlier = file.log.spent(scope.turn);
     this.#earlier = earlier;
     const day = await this.#c.usage.spend(scope.user);
-    this.#budget = new Budget("turn", counted, new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: day.all, cachedWeight: settings.jobs.cachedWeight }), earlier !== undefined ? { used: { ...earlier.usage } } : {});
+    const weighed = { cachedWeight: settings.cachedWeight };
+    this.#budget = new Budget("turn", counted, new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: day.all, ...weighed }), { ...weighed, ...(earlier !== undefined ? { used: { ...earlier.usage }, rounds: earlier.rounds ?? 0 } : {}) });
     if (time !== undefined) {
       const left = time - (earlier?.ms ?? 0);
       if (left <= 0) this.#outOfTime(time);
@@ -918,6 +919,9 @@ export class Turn {
   /** RPH's own facts for an agent, now (§5.4 "Facts"). */
   #ownFacts(agent: AgentRef): OwnFactValues {
     const open = this.#todos.get(agent.id).filter((item) => !item.done);
+    // What is left to the agent at work under its own limits and the turn's.
+    const runner = [...this.#working].find((entry) => entry.runner.agent.id === agent.id)?.runner;
+    const left = leftFact(runner?.left() ?? {}, this.#budget.left());
     return {
       "reply.released": { count: this.#desk.released ? 1 : 0 },
       // What the request says (§10.7) less what was released: a fact for the rules, which changes nothing of how a run ends.
@@ -925,6 +929,7 @@ export class Turn {
       "todo.open": { count: open.length, names: open.map((item) => item.text) },
       "prompt.notices": { count: this.#notices },
       "session.turns": { count: this.#sessionTurns },
+      ...(left !== undefined ? { "limits.left": left } : {}),
     };
   }
 

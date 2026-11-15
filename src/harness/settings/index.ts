@@ -441,13 +441,22 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
 /**
  * How each model call of an agent is measured and sampled (§10.2 l.1165; Appendix D.1 l.2419,
  * l.2421): the characters per token every estimate before a provider counts is made at, the least
- * room an answer is given, and, for an agent of a definition, that definition's own sampling, on
- * each call whose own settings give none. An agent of no definition (a judging call, the writer of
- * a narrator's reply, which takes the preset's) has no sampling of its own.
+ * room an answer is given, the weight of a token read again from the cache, the tool calls an answer
+ * runs at once where the definition sets none, the loop's count of the same call in a row, and, for
+ * an agent of a definition, that definition's own sampling, on each call whose own settings give
+ * none. An agent of no definition (a judging call, the writer of a narrator's reply, which takes the
+ * preset's) has no sampling of its own.
  */
 export function callTerms(settings: Settings, definition?: string): CallTerms {
   const own = definition !== undefined && Object.hasOwn(settings.sampling, definition) ? settings.sampling[definition] : undefined;
-  return { charsPerToken: settings.tokens.charsPerToken, answerFloor: settings.answerFloor, ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}) };
+  return {
+    charsPerToken: settings.tokens.charsPerToken,
+    answerFloor: settings.answerFloor,
+    cachedWeight: settings.cachedWeight,
+    toolsAtOnce: settings.toolsAtOnce,
+    ...(settings.repeats !== undefined ? { repeats: settings.repeats } : {}),
+    ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}),
+  };
 }
 
 /** The user's counts for the jobs on one connection, under the setting's key that names it (its name or its id). */

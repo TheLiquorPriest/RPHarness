@@ -45,6 +45,8 @@ export function runnerTexts(words: Words, goOn: TemplatePart | undefined, closin
     failed: (fields) => words("failed", fields),
     unfinished: (fields) => words("unfinished", fields),
     notStarted: (fields) => words("not_started", fields),
+    pastAnswerCount: (fields) => words("past_answer_count", fields),
+    pastMessageCount: (fields) => words("past_message_count", fields),
     said: (fields) => words("said", fields),
   };
 }

@@ -20,7 +20,7 @@ const EFFORTS: readonly Effort[] = ["off", "minimal", "low", "medium", "high", "
 const TOOLS_AS: readonly ToolsAs[] = ["auto", "native", "text"];
 
 /** The limits a definition can set; `time` and `callTime` are in seconds there. */
-const LIMITS = ["calls", "tokensIn", "tokensOut", "time", "callTokensIn", "callTokensOut", "callTime"] as const;
+const LIMITS = ["calls", "tokensIn", "tokensOut", "time", "callTokensIn", "callTokensOut", "callTime", "toolRounds", "toolsPerAnswer", "toolsAtOnce", "messages"] as const;
 
 /** The header's fields that hold lists of names. */
 const LISTS = ["tools", "out_of_reach", "reads", "given", "opening"] as const;

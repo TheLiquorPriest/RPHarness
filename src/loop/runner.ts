@@ -30,7 +30,8 @@ import { createAssistantMessageEventStream, createInitialSystemMessage, getCurre
 import type { AgentRef, CallPermission, CallRefusal, JsonObject, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import type { LayerOptions } from "../model/source";
 import { type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
-import { addUsage, Budget, emptyUsage, type Room } from "./budget";
+import { addUsage, Budget, countLimit, emptyUsage, type Left, type Room } from "./budget";
+import { PlaceLine } from "./line";
 import type { TextChannel } from "./channel";
 import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
 import { fit, type Misfit } from "./fit";
@@ -66,6 +67,10 @@ export interface RunnerTexts {
   unfinished?(fields: { tool: string }): string | undefined;
   /** The answer to a call a spent limit kept from starting (R-194): it never started. */
   notStarted?(fields: { tool: string }): string | undefined;
+  /** The answer to a call past the count of tool calls one answer may make (`limits.toolsPerAnswer`): it is not run. */
+  pastAnswerCount?(fields: { tool: string; max: number }): string | undefined;
+  /** The answer to an `agent_message` past the sub-agent's count of messages after its first answer (`limits.messages`): it is not run. */
+  pastMessageCount?(fields: { agent: string; max: number }): string | undefined;
   /** What the owner said to the run's main agent, as the agent is given it: his words marked as his. Absent, the words go in bare. */
   said?(fields: { words: string }): string | undefined;
 }
@@ -199,6 +204,8 @@ interface Stint {
    * left out.
    */
   readonly unclean: Set<string>;
+  /** The calls of the answer under way so far, its found tools left out: the count `limits.toolsPerAnswer` holds. */
+  answerCalls: number;
   /** Calls whose result ended their batch. */
   readonly ended: Set<string>;
   /** Calls that finished before any stop. */
@@ -235,6 +242,10 @@ export class AgentRunner {
   readonly #pi: Agent;
   readonly #clock: LoopClock;
   readonly #budget: Budget;
+  /** Where an answer's tool calls wait for a place past its tool calls at once (`limits.toolsAtOnce`); none: all run at once. */
+  readonly #line: PlaceLine | undefined;
+  /** The last tool call it made and how many times in a row, with the run's writes when it was made: the loop's count (`limits.repeats`). */
+  #last: { key: string; writes: number; count: number } | undefined;
   /** Its tools by name, as the model was told them. */
   readonly #tools = new Map<string, AgentTool<JsonSchema, JsonValue | undefined>>();
   /**
@@ -263,7 +274,9 @@ export class AgentRunner {
     this.agent = options.agent;
     this.#o = options;
     this.#clock = options.trace.clock;
-    this.#budget = new Budget("agent", options.limits ?? {}, options.turn);
+    this.#budget = new Budget("agent", options.limits ?? {}, options.turn, options.terms.cachedWeight !== undefined ? { cachedWeight: options.terms.cachedWeight } : {});
+    const atOnce = options.limits?.toolsAtOnce ?? options.terms.toolsAtOnce;
+    this.#line = atOnce !== undefined ? new PlaceLine(atOnce) : undefined;
     for (const tool of options.tools ?? []) {
       if (Object.hasOwn(argumentsOf(tool), CLOSING)) this.leftOut.push(tool.name);
       else {
@@ -295,6 +308,11 @@ export class AgentRunner {
       identity: { attribution: null },
     });
     this.#pi.subscribe((event) => this.#onEvent(event));
+  }
+
+  /** What is left under its own limits on calls, tool rounds and tokens (the fact `limits.left`): none where it has none. */
+  left(): Left {
+    return this.#budget.left();
   }
 
   /** Whether it is working now. */
@@ -358,6 +376,7 @@ export class AgentRunner {
       results: new Map(),
       read: new Map(),
       unclean: new Set(),
+      answerCalls: 0,
       ended: new Set(),
       finished: new Set(),
       reminders: [],
@@ -687,6 +706,7 @@ export class AgentRunner {
         }
         if (message.role !== "assistant" || !stint.calling) return;
         stint.calling = false;
+        stint.answerCalls = 0;
         if (stint.callTimer !== undefined) {
           this.#clock.clearTimeout(stint.callTimer);
           stint.callTimer = undefined;
@@ -694,6 +714,8 @@ export class AgentRunner {
         const used = usageOf(message);
         addUsage(stint.usage, used);
         this.#budget.count(used);
+        // An answer that calls tools is a tool round, the agent's and every budget's above it.
+        if (stint.halt === undefined && stint.cut === undefined && message.stopReason !== "error" && message.stopReason !== "aborted" && message.content.some((part) => part.type === "toolCall")) this.#budget.round();
         // A provider's count of the request: the next estimate starts from it. An answer with none leaves the last count standing.
         if (message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite > 0) this.#counted = { messages: stint.callSent, tokens: used.input };
         if (stint.halt !== undefined) return;
@@ -873,8 +895,9 @@ export class AgentRunner {
     const stint = this.#stint;
     if (stint === undefined || stint.halt !== undefined || stint.cut !== undefined) return { block: true };
     const { id, name } = context.toolCall;
-    // A limit the work has spent past (tokens), here or above it, holds the tool and is named. A calls limit is reached by the very call that asked for it, which was within the limit: it holds the next call (`#call`), not this call's tools (R-194).
-    const hit = this.#budget.reached(this.agent).find((reached) => reached.limit !== "calls");
+    // A limit the work has spent past (tokens), here or above it, holds the tool and is named. A count of calls or of tool rounds is reached by the very call that asked for it, which was within the limit: it holds the next call (`#call`), not this call's tools (R-194).
+    // The same call again, nothing written since, as many times in a row as `limits.repeats` says, ends the work at the loop's count, as a limit spent does.
+    const hit = this.#budget.reached(this.agent).find((reached) => !countLimit(reached)) ?? this.#looped(name, context.args as JsonValue, stint.carried.has(id));
     if (hit !== undefined) {
       this.#halt(stint, { status: "limit", hit });
       // A found tool is recorded as itself, whether its carrier had begun or not.
@@ -891,6 +914,13 @@ export class AgentRunner {
       const line = this.#o.texts.notStarted?.({ tool });
       this.#emit(stint, { kind: "tool_ended", callId: id, tool, result: { content: line === undefined ? [] : [{ type: "text", text: line }], error: true }, clean: false, endedRun: false, ms: 0, ...(permission !== undefined ? { permission } : {}), refused });
       return { block: true };
+    }
+    // A call of the answer past its count of tool calls (`limits.toolsPerAnswer`) is answered, not run: a carrier's call counts, the tool it carries does not count again.
+    const most = this.#o.limits?.toolsPerAnswer;
+    if (most !== undefined && (this.#carriers.has(name) || !stint.carried.has(id)) && ++stint.answerCalls > most) {
+      stint.refusals.set(id, { by: "answer", max: most });
+      const line = this.#o.texts.pastAnswerCount?.({ tool: name, max: most });
+      return this.#blocked(stint, { agent: this.agent, callId: id, tool: name, args: withoutClosing(context.args as JsonValue) }, { content: line === undefined ? [] : [{ type: "text", text: line }] }, []);
     }
     if (this.#carriers.has(name)) return undefined;
     const found = stint.carried.has(id);
@@ -923,6 +953,22 @@ export class AgentRunner {
     }
     if (before.remind.length > 0) stint.argued.set(id, before.remind);
     return undefined;
+  }
+
+  /**
+   * The loop's count (`limits.repeats`): a call of the same tool with the same arguments as its last,
+   * with no write by any agent of the run since, counts one more in a row; at the count, the limit it
+   * ends the work at. A carrier's call is not counted: the tool it carries is, as itself.
+   */
+  #looped(name: string, args: JsonValue, found: boolean): LimitHit | undefined {
+    const most = this.#o.terms.repeats;
+    if (most === undefined || this.#carriers.has(name)) return undefined;
+    const key = JSON.stringify([name, found ? args : withoutClosing(args)]);
+    const writes = this.#o.gate?.writes?.() ?? 0;
+    const last = this.#last;
+    const count = last !== undefined && last.key === key && last.writes === writes ? last.count + 1 : 1;
+    this.#last = { key, writes, count };
+    return count >= most ? { limit: "repeats", per: "agent", max: most, value: count, agent: this.agent } : undefined;
   }
 
   /**
@@ -1181,14 +1227,35 @@ export class AgentRunner {
             this.#emit(stint, { kind: "tool_update", callId, tool: tool.name, partial });
           },
         };
-        // pi waits on a tool until it settles; a stop does not.
-        const ran = await untilAborted(this.#run(tool, own ? withoutClosing(params as JsonValue) : (params as JsonValue), ctx), signal);
-        answered = true;
-        if (ran === undefined) return { content: [], details: undefined };
-        stint.ran.set(callId, ran);
-        return { content: ran.content, details: ran.details, ...(ran.error === true ? { isError: true } : {}) };
+        // One past the agent's tool calls at once waits for a place, in line; a found tool runs in its carrier's place.
+        const free = own ? await this.#place(stint, callId, tool.name, signal) : () => {};
+        if (free === undefined) return { content: [], details: undefined };
+        try {
+          // pi waits on a tool until it settles; a stop does not.
+          const ran = await untilAborted(this.#run(tool, own ? withoutClosing(params as JsonValue) : (params as JsonValue), ctx), signal);
+          answered = true;
+          if (ran === undefined) return { content: [], details: undefined };
+          stint.ran.set(callId, ran);
+          return { content: ran.content, details: ran.details, ...(ran.error === true ? { isError: true } : {}) };
+        } finally {
+          free();
+        }
       },
     };
+  }
+
+  /** A place for one of an answer's tool calls (`limits.toolsAtOnce`): at once, or after a wait the trace is told of as it begins and ends; undefined where a stop took it out of the line. */
+  async #place(stint: Stint, callId: string, tool: string, signal: AbortSignal | undefined): Promise<(() => void) | undefined> {
+    const line = this.#line;
+    if (line === undefined) return () => {};
+    const from = this.#clock.now();
+    let waited = false;
+    const free = await line.take(signal, () => {
+      waited = true;
+      this.#emit(stint, { kind: "waiting", for: "tool", callId, tool });
+    });
+    if (free !== undefined && waited) this.#emit(stint, { kind: "waiting", for: "tool", callId, tool, ms: this.#clock.now() - from });
+    return free;
   }
 
   /**

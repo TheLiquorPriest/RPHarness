@@ -15,13 +15,15 @@ import type { Switchable, SwitchState } from "./switches";
 
 /**
  * Why a tool call never ran, as a fact on its end record (C1's note), so the record says why after
- * the words of the tool answers' file are gone: a limit spent before it started (R-194); the thing it
- * calls out to not switched on for the user; its lane set to Never; the user's no, with his reason;
- * a rule that held it; or a permission or a rule that could not be asked (`error`, the failure's own
- * words, for the trace alone).
+ * the words of the tool answers' file are gone: a limit spent before it started (R-194); a call past
+ * the count of tool calls one answer may make (`answer`, that count); the thing it calls out to not
+ * switched on for the user; its lane set to Never; the user's no, with his reason; a rule that held
+ * it; or a permission or a rule that could not be asked (`error`, the failure's own words, for the
+ * trace alone).
  */
 export type CallRefusal =
   | { by: "limit"; hit: LimitHit }
+  | { by: "answer"; max: number }
   | { by: "switch"; thing: Switchable; state: SwitchState }
   | { by: "never"; lane: string }
   | { by: "declined"; lane: string; reason?: string }
@@ -109,6 +111,13 @@ export type TraceEvent =
    * waited, as it ends.
    */
   | { kind: "connection_wait"; connection: string; for: "minute" | "place"; ms?: number }
+  /**
+   * A call waits for a place (§10.11): `tool`, one of an answer's tool calls past the agent's tool
+   * calls at once; `agent`, a sub-agent (`delegate`, `agent_message`) past the run's sub-agents at
+   * once, on the trace of the agent that called. Told as the wait begins, and again with `ms`, how
+   * long it waited, as it ends; a call stopped in line is told no end.
+   */
+  | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number }
   /** The agent's definition names a connection that is no longer there: its call went on the default connection (`used`), with that connection's own model. */
   | { kind: "connection_stand_in"; named: string; used: string }
   /** A tool call began; `via` when it was reached through `tool_use`, and `closing` when the agent marked it so (§10.7). */

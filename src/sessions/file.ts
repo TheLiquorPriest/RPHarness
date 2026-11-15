@@ -150,7 +150,8 @@ export interface OpeningEntry extends EntryBase {
 
 /**
  * What a turn's runs have spent so far (N-22), written as each run of it ends: the calls and tokens
- * of every agent of its runs, and their wall time in milliseconds, added up. The newest for a turn,
+ * of every agent of its runs, their answers that called tools (`rounds`, absent in a mark written
+ * before they were counted), and their wall time in milliseconds, added up. The newest for a turn,
  * in the order of the file, is the turn's: a later run of it (a continue, a run that settles) goes on
  * counting from it, over a restart too. A mark: it is never the leaf, and no entry follows it.
  */
@@ -158,6 +159,7 @@ export interface SpentEntry extends EntryBase {
   type: "spent";
   turn: string;
   usage: Usage;
+  rounds?: number;
   ms: number;
 }
 
@@ -212,7 +214,7 @@ function isEntry(v: Record<string, unknown>): boolean {
       return v["turn"] === undefined && str(v["lead"]) && isMapping(v["opening"]);
     case "spent": {
       const usage = v["usage"];
-      return str(v["turn"]) && isMapping(usage) && USAGE_FIELDS.every((field) => typeof usage[field] === "number") && typeof v["ms"] === "number";
+      return str(v["turn"]) && isMapping(usage) && USAGE_FIELDS.every((field) => typeof usage[field] === "number") && (v["rounds"] === undefined || typeof v["rounds"] === "number") && typeof v["ms"] === "number";
     }
     default:
       return false;

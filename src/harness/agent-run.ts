@@ -38,6 +38,8 @@ export interface AgentRunDeps {
 /** What every agent of one run is made with: its gate, its kept requests, its transcript. */
 export class AgentRuns {
   readonly #d: AgentRunDeps;
+  /** Calls of a write tool that ran without failing, by any agent of the run: the loop's count of the same call starts again after one. */
+  #writes = 0;
 
   constructor(deps: AgentRunDeps) {
     this.#d = deps;
@@ -45,7 +47,7 @@ export class AgentRuns {
     new Transcripts({ files: env.files, scope, folder: places.turn ?? places.session, log: env.log, tell: (written) => deps.tell(written) }).follow(deps.trace);
   }
 
-  /** The gate around each tool call of an agent (§13.3). */
+  /** The gate around each tool call of an agent (§13.3), which counts the run's writes. */
   gate(agent: AgentRef, parent: ParentCall | undefined): ToolGate {
     const d = this.#d;
     const { env } = d;
@@ -67,15 +69,17 @@ export class AgentRuns {
       clipChars: d.settings().clipChars,
     });
     const ran = d.ran;
-    if (ran === undefined) return gate;
     return {
       before: (call, signal) => gate.before(call, signal),
-      after(call, result, signal, added, room) {
-        ran(call, result, tools.get(call.tool));
+      after: (call, result, signal, added, room) => {
+        const tool = tools.get(call.tool);
+        if (tool?.tier === "write" && result.error !== true) this.#writes += 1;
+        ran?.(call, result, tool);
         return gate.after(call, result, signal, added, room);
       },
       bound: (call, answer, added, room) => gate.bound(call, answer, added, room),
       permissionOf: (call) => gate.permissionOf(call),
+      writes: () => this.#writes,
     };
   }
 

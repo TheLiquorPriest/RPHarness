@@ -8,9 +8,10 @@
 // or continued it, it is counted and shown under its own name, and its writes go through the gate
 // the lead's do, as itself.
 //
-// Code holds a sub-agent to the user's limits on how deep and how many, and to nothing else. Every
-// word an agent is told comes from a file: the brief's frame, the question's, and the lines of
-// `.prompts/delegation.md`.
+// Code holds a sub-agent to the user's limits on how deep, how many and how many at once (one past
+// it waits for a place), and to its definition's count of messages after its first answer, and to
+// nothing else. Every word an agent is told comes from a file: the brief's frame, the question's,
+// the lines of `.prompts/delegation.md`, and a message past its count in `.prompts/tool-notices.md`.
 import type { AgentRef, BodyFields, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
 import { loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
@@ -18,6 +19,7 @@ import { userMessage } from "../harness/prompt";
 import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import { PlaceLine } from "../loop/line";
 import type { RequestPoint } from "../loop/types";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
@@ -63,7 +65,7 @@ export interface TeamDeps {
   questions?(): QuestionRules | undefined;
   /** The turn's limits, shared by every agent of it. */
   budget(): Budget;
-  /** The user's limits on how deep sub-agents may stand and how many one turn may start: the turn's settings. */
+  /** The user's limits on how deep sub-agents may stand, how many the run may start and how many may work at once: the turn's settings, or the job's (`job`), whose count is its own. */
   settings(): AgentSettings;
   /** The most one call takes (the user's `tools.perCall`), which a stretch of the chat an agent is given is held to. */
   perCall(): number;
@@ -94,6 +96,12 @@ interface Member {
   parent: ParentCall;
   /** Hears how each stretch of its work that a message set going ended. */
   ended?(outcome: AgentOutcome): void;
+  /** Its definition's count of messages after its first answer (`limits.messages`); absent, none. */
+  most?: number;
+  /** The messages it was sent after its first answer. */
+  messages: number;
+  /** A message to it waits for a place: another is answered as one to an agent at work. */
+  waiting: boolean;
 }
 
 /** A sub-agent made and ready to start, its brief its runner's fixed context: itself, what it was given by name, what nobody could give, and its model's room. */
@@ -102,6 +110,8 @@ interface Made {
   runner: AgentRunner;
   given: string[];
   missing: string[];
+  /** Its definition's count of messages after its first answer. */
+  most?: number;
   limits: ModelLimits;
 }
 
@@ -134,6 +144,8 @@ interface Begun {
   work: Work;
   untrack: () => void;
   stop: () => void;
+  /** Gives its place back (`limits.turn.agentsAtOnce`). */
+  free: () => void;
 }
 
 function template(part: PromptPart | undefined): TemplatePart | undefined {
@@ -171,6 +183,8 @@ export class Team implements TeamWork {
   readonly #numbers = new Map<string, number>();
   #started = 0;
   #loaded: Promise<Loaded> | undefined;
+  /** Where a sub-agent's work waits for a place past the sub-agents at once, made at its first use. */
+  #line: PlaceLine | undefined;
 
   constructor(deps: TeamDeps) {
     this.#d = deps;
@@ -182,8 +196,9 @@ export class Team implements TeamWork {
     const { words } = loaded;
     const level = (this.#members.get(ctx.agent.id)?.level ?? 0) + 1;
     const { depth, agents } = d.settings();
-    if (level > depth) return this.#limited(ctx, { limit: "depth", per: "turn", max: depth, value: level }, words("depth", { agent: call.agent, max: depth, value: level }));
-    if (agents !== undefined && this.#started >= agents) return this.#limited(ctx, { limit: "agents", per: "turn", max: agents, value: this.#started }, words("agents", { agent: call.agent, max: agents, value: this.#started }));
+    const per = d.job !== undefined ? "job" : "turn";
+    if (level > depth) return this.#limited(ctx, { limit: "depth", per, max: depth, value: level }, words("depth", { agent: call.agent, max: depth, value: level }));
+    if (agents !== undefined && this.#started >= agents) return this.#limited(ctx, { limit: "agents", per, max: agents, value: this.#started }, words("agents", { agent: call.agent, max: agents, value: this.#started }));
     // Its place is taken before anything is awaited, so the calls of one step cannot pass the limit
     // together; a call that starts nobody gives it back.
     this.#started += 1;
@@ -195,18 +210,21 @@ export class Team implements TeamWork {
       this.#started -= 1;
       throw error;
     }
-    if (!("runner" in made) || ctx.signal.aborted) {
+    // One past the sub-agents at once waits for a place; stopped in line, it starts nobody.
+    const free = "runner" in made ? await this.#place(ctx, "delegate") : undefined;
+    if (!("runner" in made) || free === undefined || ctx.signal.aborted) {
+      free?.();
       this.#started -= 1;
       return "runner" in made ? said("") : made;
     }
-    const member: Member = { ref: made.ref, runner: made.runner, level, parent };
+    const member: Member = { ref: made.ref, runner: made.runner, level, parent, messages: 0, waiting: false, ...(made.most !== undefined ? { most: made.most } : {}) };
     const fields = fieldsOf(member.ref);
     this.#members.set(member.ref.id, member);
     d.gauge?.(member.ref, made.limits);
     d.progress?.("delegate", fields);
     const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
     if (working > 1) d.progress?.("agents", { count: working });
-    const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx);
+    const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx, free);
     return this.#end(member, work, ctx, made.missing, loaded);
   }
 
@@ -291,7 +309,7 @@ export class Team implements TeamWork {
     });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     // Its start record names only what it was handed.
-    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits };
+    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {
@@ -305,10 +323,20 @@ export class Team implements TeamWork {
     const member = this.#members.get(call.agent);
     // A handle is held by the agent that started it (§10.5, §13.4): no other answers, continues or grants it consent.
     if (member === undefined || member.ref.parent !== ctx.agent.id) return answer(loaded.words("no_handle", { agent: call.agent }), true);
-    // Nothing is awaited between this and the start, so two messages to one agent cannot both begin.
-    if (member.runner.working) return answer(loaded.words("busy", fieldsOf(member.ref)), true);
+    // Nothing is awaited between this and its place in line, so two messages to one agent cannot both begin.
+    if (member.runner.working || member.waiting) return answer(loaded.words("busy", fieldsOf(member.ref)), true);
     if (ctx.signal.aborted) return said("");
-    const work = this.#begin(member, { message: call.message }, { parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId } }, ctx);
+    // A message past its definition's count after its first answer is answered, and the agent is not run.
+    if (member.most !== undefined && member.messages >= member.most) return answer(this.#d.texts().pastMessageCount?.({ agent: member.ref.definition, max: member.most }), true);
+    member.messages += 1;
+    member.waiting = true;
+    const free = await this.#place(ctx, "agent_message");
+    member.waiting = false;
+    if (free === undefined) {
+      member.messages -= 1;
+      return said("");
+    }
+    const work = this.#begin(member, { message: call.message }, { parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId } }, ctx, free);
     if (call.consent !== undefined) await this.#consent(member, call.consent, ctx);
     return this.#end(member, work, ctx, [], loaded);
   }
@@ -344,22 +372,42 @@ export class Team implements TeamWork {
     return this.#loaded;
   }
 
-  /** Starts a stretch of a member's work under `parent`'s call: the turn tracks it, and the call's own stop stops it. */
-  #begin(member: Member, input: WorkInput, options: WorkOptions & { parent: ParentCall }, ctx: ToolCtx): Begun {
+  /**
+   * A place for a sub-agent's work (`limits.turn.agentsAtOnce`), the run's: at once, or after a wait
+   * the trace of the agent that called is told of as it begins and ends; undefined where its call's
+   * stop took it out of the line.
+   */
+  async #place(ctx: ToolCtx, tool: string): Promise<(() => void) | undefined> {
+    const d = this.#d;
+    const line = (this.#line ??= new PlaceLine(d.settings().agentsAtOnce));
+    const parent = this.#members.get(ctx.agent.id)?.parent;
+    const from = d.trace.clock.now();
+    let waited = false;
+    const free = await line.take(ctx.signal, () => {
+      waited = true;
+      d.trace.event(ctx.agent, parent, { kind: "waiting", for: "agent", callId: ctx.callId, tool });
+    });
+    if (free !== undefined && waited) d.trace.event(ctx.agent, parent, { kind: "waiting", for: "agent", callId: ctx.callId, tool, ms: d.trace.clock.now() - from });
+    return free;
+  }
+
+  /** Starts a stretch of a member's work under `parent`'s call, in the place it took: the turn tracks it, and the call's own stop stops it. */
+  #begin(member: Member, input: WorkInput, options: WorkOptions & { parent: ParentCall }, ctx: ToolCtx, free: () => void): Begun {
     member.parent = options.parent;
     const work = member.runner.start(input, options);
     const untrack = this.#d.track({ runner: member.runner, work });
     const stop = (): void => work.stop();
     ctx.signal.addEventListener("abort", stop, { once: true });
-    return { work, untrack, stop };
+    return { work, untrack, stop, free };
   }
 
-  /** Waits for the stretch of work to end, and gives the call its answer. */
+  /** Waits for the stretch of work to end, gives its place back, and gives the call its answer. */
   async #end(member: Member, begun: Begun, ctx: ToolCtx, missing: readonly string[], loaded: Loaded): Promise<LoopToolResult> {
     let outcome: AgentOutcome;
     try {
       outcome = await begun.work.done;
     } finally {
+      begun.free();
       begun.untrack();
       ctx.signal.removeEventListener("abort", begun.stop);
     }
@@ -379,11 +427,12 @@ export class Team implements TeamWork {
   async enlist(ref: AgentRef, runner: AgentRunner, parent: ParentCall, ctx: ToolCtx, ended?: (outcome: AgentOutcome) => void): Promise<LoopToolResult | undefined> {
     const level = (this.#members.get(ctx.agent.id)?.level ?? 0) + 1;
     const { depth, agents } = this.#d.settings();
+    const per = this.#d.job !== undefined ? "job" : "turn";
     // Its place is taken before anything is awaited, as a delegate's is.
-    const hit: LimitHit | undefined = level > depth ? { limit: "depth", per: "turn", max: depth, value: level } : agents !== undefined && this.#started >= agents ? { limit: "agents", per: "turn", max: agents, value: this.#started } : undefined;
+    const hit: LimitHit | undefined = level > depth ? { limit: "depth", per, max: depth, value: level } : agents !== undefined && this.#started >= agents ? { limit: "agents", per, max: agents, value: this.#started } : undefined;
     if (hit === undefined) {
       this.#started += 1;
-      this.#members.set(ref.id, { ref, runner, level, parent, ...(ended !== undefined ? { ended } : {}) });
+      this.#members.set(ref.id, { ref, runner, level, parent, messages: 0, waiting: false, ...(ended !== undefined ? { ended } : {}) });
       return undefined;
     }
     const { words } = await this.#load();

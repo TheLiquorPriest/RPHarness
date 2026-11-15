@@ -134,6 +134,14 @@ export interface DefinitionLimits {
   callTokensOut?: number;
   /** One call's wall time, in milliseconds, apart from the model layer's silent wait. The header gives it in seconds. */
   callTime?: number;
+  /** Its answers that call tools (today's tool rounds). */
+  toolRounds?: number;
+  /** The tool calls one answer may make; the calls past it are answered and not run. */
+  toolsPerAnswer?: number;
+  /** An answer's tool calls that run at once, in place of the setting `limits.toolsAtOnce`. */
+  toolsAtOnce?: number;
+  /** For a sub-agent: the messages it may be sent after its first answer (§13.4); one past it is answered and it is not run. */
+  messages?: number;
 }
 
 /** An agent definition (§5.4): the nearest file of its name. */
@@ -304,7 +312,7 @@ export const RULE_FIELDS = ["description", "agents", "needs", "turns", "conditio
 // ---------------------------------------------------------------- facts
 
 /** RPH's own facts. */
-export type OwnFactName = "todo.open" | "reply.released" | "reply.owed" | "prompt.notices" | "session.turns";
+export type OwnFactName = "todo.open" | "reply.released" | "reply.owed" | "prompt.notices" | "session.turns" | "limits.left";
 
 /** RPH's own facts' values at a moment, given by whoever keeps them (the todo list, the reply, the prompt's notices). Absent: unknown, and a rule that tests it does not fire. */
 export type OwnFactValues = Partial<Record<OwnFactName, FactValue>>;

@@ -29,9 +29,9 @@ const BLOCKS: AgentMessage[] = [
 /** The opening block and the fixed context: the head of every request. */
 const HEAD = 1 + BLOCKS.length;
 
-/** Four calls of `look`, each its own call, then the answer. */
+/** Four calls of `look`, each its own call with its own note (the same call three times in a row is a loop), then the answer. */
 function fiveCalls(): Reply[] {
-  return [1, 2, 3, 4].map((n): Reply => ({ pieces: [{ call: "look", id: `c${n}` }] })).concat({ pieces: [{ text: "Fixture: nothing moves on the quay." }] });
+  return [1, 2, 3, 4].map((n): Reply => ({ pieces: [{ call: "look", args: { note: `Fixture: look ${n}.` }, id: `c${n}` }] })).concat({ pieces: [{ text: "Fixture: nothing moves on the quay." }] });
 }
 
 /** A request's messages copied as JSON, as the scripted model keeps what it receives. */

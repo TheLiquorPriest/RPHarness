@@ -11,6 +11,12 @@ export const OWN_FACTS: readonly (FactDef & { name: OwnFactName })[] = [
   { name: "reply.owed", counts: "Whether this run still owes the player a reply: 1 while the request asks for one and none has been released, 0 once one is, and for a run that asks for none." },
   { name: "prompt.notices", counts: "Notices this turn about the prompt's shape." },
   { name: "session.turns", counts: "Turns the open session holds, the one being played among them." },
+  {
+    name: "limits.left",
+    counts: "What is left to the agent under its limits and its run's: the fewest left of any limit set. Each group is the fewest left of that limit, the agent's own or the run's, where either is set; a group of a limit set on neither counts 0, so pick only limits that are set.",
+    by: ["calls", "toolRounds", "tokensIn", "tokensOut"],
+    fields: ["agent", "run"],
+  },
 ];
 
 const OWN_NAMES: ReadonlySet<string> = new Set(OWN_FACTS.map((d) => d.name));

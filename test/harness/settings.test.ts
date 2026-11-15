@@ -185,7 +185,6 @@ const LANDED: Readonly<Record<string, string>> = {
   "jobs.perDay": "jobs.perDay",
   "jobs.perRun": "jobs.perRun",
   "jobs.tokensPerDay": "jobs.tokensPerDay",
-  "jobs.cachedWeight": "jobs.cachedWeight",
   "jobs.connections.<connection>.atOnce": "jobs.connections.<connection>.atOnce",
   "jobs.connections.<connection>.perDay": "jobs.connections.<connection>.perDay",
   "jobs.run.calls": "jobs.run.calls",
@@ -463,8 +462,8 @@ test("a key in a section only the harness's settings use that names none of them
   const read = await settingsOf({ global, chat });
   expect({ turn: read.settings.turn, counts: read.settings.jobs.connections[CONNECTION] }).toEqual({ turn: { calls: 30 }, counts: { perDay: 2 } });
   expect(read.said.map(({ message, setting, file, why }) => ({ message, setting, file, why }))).toEqual([
-    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: GLOBAL_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, depth, agents." },
-    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: CHAT_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, depth, agents." },
+    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: GLOBAL_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, toolRounds, depth, agents, agentsAtOnce." },
+    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: CHAT_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, toolRounds, depth, agents, agentsAtOnce." },
     { message: "A key among the harness's settings names none of them; it is passed over.", setting: `jobs.connections.${CONNECTION}.atOnc`, file: CHAT_FILE, why: `jobs.connections.${CONNECTION}.atOnc is no setting the harness reads: jobs.connections.${CONNECTION} holds atOnce, perDay.` },
   ]);
 });

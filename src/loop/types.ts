@@ -109,6 +109,8 @@ export interface ToolGate {
   bound?(call: GateCall, answer: LoopToolResult, added?: readonly string[], room?: number): Promise<Bounded>;
   /** For a write or external tool, the lane and the user's setting it would run under, asking him nothing: the record of a call a limit kept from starting. */
   permissionOf?(call: GateCall): Promise<CallPermission | undefined>;
+  /** Calls of a write tool that ran without failing so far, by any agent of the run: the same call again after one is not a loop. Absent: none counted. */
+  writes?(): number;
 }
 
 /** What one model call is sent with besides its messages, decided in pi's request hook before that request alone. */
@@ -122,12 +124,18 @@ export interface CallSettings {
   maxTokens?: number;
 }
 
-/** What every model call of an agent is made on, from the settings: how its tokens are estimated, the least room an answer is given, and its definition's own sampling. */
+/** What every model call of an agent is made on, from the settings: how its tokens are estimated, the least room an answer is given, how its run's own controls stand where its definition sets none, and its definition's own sampling. */
 export interface CallTerms {
   /** Characters per token, where a provider has not counted (`tokens.charsPerToken`). */
   charsPerToken: number;
   /** The least room an answer is given (`limits.answerFloor`): with less left under a limit, no call is made. */
   answerFloor: number;
+  /** What a token read again from a provider's cache counts for against every limit on tokens sent (`limits.cachedWeight`); absent, in full. */
+  cachedWeight?: number;
+  /** An answer's tool calls that run at once where the definition sets none (`limits.toolsAtOnce`); absent, all of them. */
+  toolsAtOnce?: number;
+  /** The same call with the same arguments this many times in a row, nothing written between, ends the run (`limits.repeats`); absent, never. */
+  repeats?: number;
   /** Its definition's sampling (`sampling.<definition>`), on each call whose settings give none. */
   sampling?: Sampling;
 }
@@ -225,6 +233,14 @@ export interface AgentLimits {
   callTokensOut?: number;
   /** One call's wall time, in milliseconds, apart from the model layer's silent wait. */
   callTime?: number;
+  /** Its answers that call tools. */
+  toolRounds?: number;
+  /** The tool calls one answer may make: the calls past it are answered and not run. */
+  toolsPerAnswer?: number;
+  /** An answer's tool calls that run at once (absent: the setting's); one more waits for a place. */
+  toolsAtOnce?: number;
+  /** For a sub-agent: the messages it may be sent after its first answer; one past it is answered and it is not run. */
+  messages?: number;
 }
 
 /** How one stretch of an agent's work ended. */

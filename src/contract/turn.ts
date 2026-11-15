@@ -108,12 +108,15 @@ export interface Release {
 }
 
 /**
- * A limit the user sets (§10.11): model calls, tokens in and out, tokens sent and written together
- * (`tokens`: the jobs' tokens in the user's day), wall time, sub-agent depth and count, and jobs
- * started (§13.5) in the user's day, or by the agents of one turn's or one job's run; and an agent's
- * own controls on each call (C-M3): its prompt (`callTokensIn`), its answer (`callTokensOut`) and its
- * time (`callTime`), its answers that call tools (`toolRounds`), the messages it may be sent after its
- * first answer (`repeats`), and a connection's tokens in a minute (`tokensPerMinute`).
+ * A limit the user sets (§10.11): model calls, tokens in and out (tokens sent counting a token read
+ * again from the cache at `limits.cachedWeight`), tokens sent and written together (`tokens`: the
+ * jobs' tokens in the user's day), wall time, sub-agent depth and count (the sub-agents one turn's or
+ * one job's run may start), and jobs started (§13.5) in the user's day, or by the agents of one
+ * turn's or one job's run; and an agent's own controls (C-M3): its prompt on one call
+ * (`callTokensIn`), its answer (`callTokensOut`) and its time (`callTime`), its answers that call
+ * tools, its own and the turn's (`toolRounds`), the same tool call with the same arguments in a row
+ * with nothing written between (`repeats`, the loop's count), and a connection's tokens in a minute
+ * (`tokensPerMinute`).
  */
 export type LimitName = "calls" | "tokensIn" | "tokensOut" | "tokens" | "time" | "depth" | "agents" | "jobs" | "callTokensIn" | "callTokensOut" | "callTime" | "toolRounds" | "repeats" | "tokensPerMinute";
 

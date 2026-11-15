@@ -14,10 +14,11 @@ import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 // ---------------------------------------------------------------- jobs
 
 /**
- * Where a job stands (§13.5): waiting for a place, running, ended with its report, failed,
+ * Where a job stands (§13.5): waiting for a place, held by the owner while it waits, running, held
+ * at the point its start named to ask him whether to go on, ended with its report, failed,
  * cancelled, cut off because its turn left the path, or found running after a restart.
  */
-export type JobState = "queued" | "running" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
+export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
 
 /** A job as the Jobs page lists it. */
 export interface JobView {
@@ -47,6 +48,10 @@ export interface JobView {
   missing?: string[];
   /** Each write it made, its sub-agents' included, in order, so an interrupted job shows what it had done. */
   wrote?: JobWrite[];
+  /** For a job the owner started again (§13.5): the job it repeats, whose agent, brief, attachments and limits it has. */
+  repeats?: string;
+  /** For a job that asks (state `asking`): the ask point it reached, and the tokens it had spent when it did, counted as `JobLimits.tokens` is. */
+  asks?: { at: number; tokens: number };
 }
 
 /** A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer. */
@@ -76,6 +81,12 @@ export interface JobLimits {
   tokens?: number;
   /** Seconds of the job's run, as `jobs.run.time` is written. */
   time?: number;
+  /**
+   * Tokens, counted as `tokens` is, at which the job is held, not ended, and the owner is asked
+   * whether to go on (R-31; bootstrap's 200,000): its state is `asking` until he answers. The
+   * point is the owner's word and is no limit: the other limits hold as they did.
+   */
+  askAt?: number;
 }
 
 /** A job the user starts: the definition its agent runs as, what to do, what it is given by name, and limits of its own. A job held to one of them ends with what it has, and its record says which (`JobView.limit`). */
@@ -85,6 +96,37 @@ export interface JobStart {
   attach?: string[];
   limits?: JobLimits;
 }
+
+/** The owner's two switches over all of his jobs (today's Jobs page): none may start; every job held. Kept in the host's store, so a restart keeps them. */
+export interface JobSwitches {
+  /** Jobs switched off: no job may start, by an agent's `job_start` or by the owner; those waiting keep waiting. */
+  off: boolean;
+  /** All jobs held: each running one waits at its next call, and none starts, until he lets them go. */
+  held: boolean;
+}
+
+/** The owner's answer to a job that asks: go on, with the point it asks at next (none: it asks no more), or end it with what it has. */
+export type JobAnswer = { go: "on"; askAt?: number } | { go: "end" };
+
+/**
+ * Why no job was started, or why a control did nothing (§3.4: no sentence of RPH's own reaches a
+ * person): the fact with its numbers, which the host words from its own file.
+ */
+export type JobRefusal =
+  /** The owner switched jobs off. */
+  | { refused: "off" }
+  /** The day's count of jobs, of every job or of those on one connection, is reached. */
+  | { refused: "day-count"; max: number; value: number; connection?: string }
+  /** What jobs sent and wrote in the day counts as `value` tokens, and the setting allows `max`. */
+  | { refused: "day-tokens"; max: number; value: number }
+  /** A limit of the start is not a whole number above 0. */
+  | { refused: "limit"; limit: keyof JobLimits; value: number }
+  /** No agent definition by this name, or no model for it to run on. */
+  | { refused: "agent"; agent: string }
+  /** The user has no job by this id. */
+  | { refused: "no-job"; id: string }
+  /** The job is not in a state the control applies to. */
+  | { refused: "state"; id: string; state: JobState; applies: JobState[] };
 
 /**
  * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found
@@ -99,10 +141,25 @@ export interface JobsApi {
   list(filter: { user: string } & JobQuery): Promise<JobPage>;
   /** The user's job; undefined when he has none by that id. */
   get(user: string, id: string): Promise<JobView | undefined>;
-  /** The user starts a job. Code never does (§13.5). */
-  start(scope: Scope, start: JobStart): Promise<JobView>;
-  /** Stops the user's job; undefined when he has none by that id. */
+  /** The user's two switches over all his jobs. */
+  switches(user: string): Promise<JobSwitches>;
+  /**
+   * The user starts a job, or learns why none was started. Code never does (§13.5). Called only
+   * from the owner's own presses (C-5, C-24).
+   */
+  start(scope: Scope, start: JobStart): Promise<JobView | JobRefusal>;
+  /** Stops the user's job; undefined when he has none by that id. Owner's presses only (C-24). */
   cancel(user: string, id: string): Promise<JobView | undefined>;
+  /** Sets either switch, or both, and answers how they stand. A job that waits starts only while neither is on. Owner's presses only (C-24). */
+  setSwitches(user: string, change: Partial<JobSwitches>): Promise<JobSwitches>;
+  /** Holds a job that waits for a place: it keeps its place and does not start until let go. Owner's presses only (C-24). */
+  hold(user: string, id: string): Promise<JobView | JobRefusal>;
+  /** Lets a held job that waits go on waiting. Owner's presses only (C-24). */
+  letGo(user: string, id: string): Promise<JobView | JobRefusal>;
+  /** Starts an interrupted, failed or cancelled job again, as a new job with the same agent, brief, attachments and limits, that names the one it repeats. Owner's presses only (C-24). */
+  again(user: string, id: string): Promise<JobView | JobRefusal>;
+  /** The owner's answer to a job that asks: it goes on in its own session, or ends with what it has. Owner's presses only (C-24). */
+  answer(user: string, id: string, answer: JobAnswer): Promise<JobView | JobRefusal>;
 }
 
 // ---------------------------------------------------------------- sessions
@@ -192,6 +249,8 @@ export interface RunView {
   what: "turn" | "job" | "talk";
   agents: AgentRef[];
   started: number;
+  /** Whether it is held now: by the owner's pause, by all jobs held, or by a job that asks. */
+  held: boolean;
 }
 
 /** Which runs to follow: a user's, one chat's, or one run. */
@@ -214,6 +273,12 @@ export interface LiveApi {
   running(user: string): RunView[];
   /** Sends every item of the runs that match, as it happens. The returned function stops it. */
   subscribe(filter: LiveFilter, listener: (item: LiveItem) => void): () => void;
+  /** Holds the user's run, every agent of it at its next call (C-19). False: he has no such run going on, or it was held already by his pause. Owner's presses only (C-24). */
+  pause(user: string, run: string): boolean;
+  /** Lets his pause of the run go; false where there was none. Owner's presses only (C-24). */
+  letGo(user: string, run: string): boolean;
+  /** Says something to the run's main agent, which hears it at its next call as the owner's words and the trace shows it (C-19); false: he has no such run, or the words are empty. Owner's presses only (C-24). */
+  say(user: string, run: string, words: string): boolean;
 }
 
 // ---------------------------------------------------------------- usage

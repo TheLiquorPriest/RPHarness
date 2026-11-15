@@ -7,7 +7,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { JobView } from "../../src/contract";
 import { gate, scriptedModel } from "../../src/testing/rig";
 import { CHAT, request, said, type Stage, stage, textOf, USER } from "../harness/support";
-import { userHarness } from "./support";
+import { jobOf, userHarness } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -48,7 +48,7 @@ describe("a job cut off by a restart", () => {
         { pieces: [{ hold: held }, { text: "Never written." }] },
       ],
     }));
-    const job = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    const job = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     // Its second call is under way; the first has ended and been kept.
     await s.trace.seen((record) => record.event.kind === "call_started" && record.event.call === 2);
     await s.harness.jobs!.list({ user: USER });
@@ -74,7 +74,7 @@ describe("a job cut off by a restart", () => {
         { pieces: [{ hold: held }, { text: "Never written." }] },
       ],
     }));
-    const job = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
+    const job = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     await s.trace.seen((record) => record.event.kind === "call_started" && record.event.call === 3);
     await s.harness.jobs!.list({ user: USER });
 
@@ -148,8 +148,8 @@ describe("a job that was waiting", () => {
   test("a harness closed with a job waiting keeps it queued, and the next harness queues it again, while the one that was running stays interrupted", async () => {
     const held = gate();
     const s = (open = await stage({ config: "jobs:\n  atOnce: 1\n", files: { ".agents/keeper.md": KEEPER }, tools: { note: NOTE }, answers: [{ pieces: [{ hold: held }, { text: "Never written." }] }] }));
-    const running = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
-    const waiting = await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: "Count the lamps." });
+    const running = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
+    const waiting = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: "Count the lamps." }));
     expect([running.state, waiting.state]).toEqual(["running", "queued"]);
     await s.harness.close();
     expect([(await s.env.store.jobs.get({ user: USER }, running.id))?.state, (await s.env.store.jobs.get({ user: USER }, waiting.id))?.state]).toEqual(["interrupted", "queued"]);

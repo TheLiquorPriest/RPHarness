@@ -4,4 +4,5 @@ export const RULES_WORDS = {
   "rules.interrupt": { name: "A stream rule that interrupts", about: "What a stream rule that interrupts does: stop the call where it matched, or remind the agent after it instead." },
   "rules.interrupts.<connection>": { name: "A stream rule that interrupts, on a connection", about: "Stop or remind, for one connection whose stopped reply cannot go on cleanly." },
   "rules.judge": { name: "Connection that judges questions", about: "The connection that answers a rule's question, by its name or id, where the rule names none." },
+  "rules.commandTimeout": { name: "Time a rule's command may take", about: "Seconds a rule's command may take to answer yes or no; past them it is stopped and the rule is shown as unable to work, never as a no." },
 };

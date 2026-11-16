@@ -8,8 +8,8 @@ import { CONFIG_KEYS } from "./api";
 import type { At } from "./header";
 import { fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, WrittenItems } from "./header";
 
-/** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`). */
-export type Listing = "instructions" | "agents" | "rules" | "examples" | "skills" | "prompts" | "tools";
+/** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`; `manifests`: the owner's tools' manifests, `<tools>/<name>.json`). */
+export type Listing = "instructions" | "agents" | "rules" | "examples" | "skills" | "prompts" | "tools" | "manifests";
 
 /** A file found at one level, by the name it goes by. */
 export interface FileRef {
@@ -67,10 +67,10 @@ const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "p
 /** The levels' order, farthest first. */
 export const LEVEL_ORDER: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
 
-/** The name `off:` lists and stack entries know an item by: an instruction file's own name, anything else's kind and name (`rules/consent`). */
+/** The name `off:` lists and stack entries know an item by: an instruction file's own name, anything else's kind and name (`rules/consent`); a tool's manifest goes by its tool's (`tools/<name>`). */
 export function itemKey(kind: Listing, name: string): string {
   if (kind === "instructions") return name;
-  return `${kind === "examples" ? "rules/examples" : kind}/${name}`;
+  return `${kind === "examples" ? "rules/examples" : kind === "manifests" ? "tools" : kind}/${name}`;
 }
 
 /** The kind a folder's name is, at any level, or the kind's own word. */
@@ -101,14 +101,14 @@ export function writtenKey(entry: string, layers: readonly Layer[]): string {
 /** Where a listing looks at one level, as a path in the agents' view; undefined when the level holds no such folder. */
 function base(layer: Layer, listing: Listing): string | undefined {
   if (listing === "instructions") return layer.mount;
-  const folder = layer.folders[listing === "examples" ? "rules" : listing]?.replace(/\/+$/, "");
+  const folder = layer.folders[listing === "examples" ? "rules" : listing === "manifests" ? "tools" : listing]?.replace(/\/+$/, "");
   if (folder === undefined) return undefined;
   return `${layer.mount}${folder}${listing === "examples" ? "/examples" : ""}`;
 }
 
 /** A file's name, from its path below the listing's folder; undefined when it is not one of the listing's files. */
 function nameOf(listing: Listing, rest: string): string | undefined {
-  const m = (listing === "skills" ? /^([^/]+)\/SKILL\.md$/ : /^([^/]+)\.md$/).exec(rest);
+  const m = (listing === "skills" ? /^([^/]+)\/SKILL\.md$/ : listing === "manifests" ? /^([^/]+)\.json$/ : /^([^/]+)\.md$/).exec(rest);
   return m?.[1];
 }
 

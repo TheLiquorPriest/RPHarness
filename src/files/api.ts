@@ -90,6 +90,28 @@ export interface Problem {
   message: string;
 }
 
+// ---------------------------------------------------------------- the owner's own tools
+
+/**
+ * One of the owner's own tools, as its manifest (`<tools>/<name>.json`, §5.4 "Tools", P15) writes it:
+ * a command it runs, or an address it calls. Its description is its `<tools>/<name>.md` like any
+ * tool's. Nothing it holds comes from an agent: the command line and the address are the file's.
+ */
+export interface ToolManifest {
+  /** The file's name, which is the tool's. */
+  name: string;
+  /** The family it is found under. */
+  family: string;
+  /** What it takes, as an object schema (`takes`); none: no arguments. */
+  parameters: JsonObject;
+  /** A command line, run as the server's user with the arguments as JSON on stdin; or an address the arguments go to as a JSON body, with headers whose values are the secrets of the names given. */
+  runs: { command: string } | { address: string; method: string; headers: Record<string, string> };
+  /** Seconds it may take; absent: the user's `tools.commandTimeout` or `tools.httpTimeout`. */
+  timeout?: number;
+  path: string;
+  level: LayerLevel;
+}
+
 // ---------------------------------------------------------------- templates
 
 /** A value a template can put in: JSON, where an object may hold its own value under "." (see the head of this file). */
@@ -520,6 +542,8 @@ export interface Guidance {
   part(name: string): Promise<PromptPart | undefined>;
   /** A tool's description in force, from the tools folders (`<tools>/<tool's name>.md`). */
   tool(name: string): Promise<PromptPart | undefined>;
+  /** The owner's own tools' manifests in force (`<tools>/<name>.json`, the nearest of each name, those `off:` names left out), by name. */
+  manifests(): Promise<ToolManifest[]>;
 
   /** Every rule file, examples and broken ones included, as the Rules page lists them. */
   rules(): Promise<RuleView[]>;

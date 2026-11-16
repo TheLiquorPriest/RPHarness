@@ -5,10 +5,11 @@
 // and parsed once.
 
 import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, Refused, RuleView, Scope, StackLeft, UserScope } from "../contract/index";
-import type { AgentDefinition, Guidance, LoadGuidance, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry } from "./api";
+import type { AgentDefinition, Guidance, LoadGuidance, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import { normalized, problemAt, WrittenItems } from "./header";
+import { parseManifest } from "./manifest";
 import { parsePart } from "./parts";
 import type { ReadRule, Rule } from "./rules";
 import { parseRule } from "./rules";
@@ -138,6 +139,13 @@ class TreeGuidance implements Guidance {
     });
   }
 
+  #manifest(name: string): Promise<Found<ToolManifest> | undefined> {
+    return this.#found("manifests", name, (file) => {
+      const { manifest, problems } = parseManifest(file, name);
+      return { item: manifest, problems };
+    });
+  }
+
   #rule(listing: "rules" | "examples", name: string): Promise<Found<ReadRule> | undefined> {
     return this.#found(listing, name, (file, replaces) => {
       const read = parseRule(file, name, replaces);
@@ -231,7 +239,7 @@ class TreeGuidance implements Guidance {
   }
 
   async problems(): Promise<Problem[]> {
-    const [lists, config] = await Promise.all([Promise.all((["instructions", "agents", "skills", "prompts", "tools", "examples"] as const).map(async (l) => [l, [...(await this.#tree.found(l)).keys()]] as const)), this.#tree.config()]);
+    const [lists, config] = await Promise.all([Promise.all((["instructions", "agents", "skills", "prompts", "tools", "examples", "manifests"] as const).map(async (l) => [l, [...(await this.#tree.found(l)).keys()]] as const)), this.#tree.config()]);
     const loads: Promise<unknown>[] = [this.#ruleStates(), this.#mappedToNobody(), this.#pinned()];
     for (const [listing, names] of lists) {
       for (const name of names) {
@@ -239,6 +247,7 @@ class TreeGuidance implements Guidance {
         else if (listing === "agents") loads.push(this.#definition(name));
         else if (listing === "skills") loads.push(this.#skill(name));
         else if (listing === "examples") loads.push(this.#rule("examples", name));
+        else if (listing === "manifests") loads.push(this.#manifest(name));
         else loads.push(this.#part(listing, name));
       }
     }
@@ -562,6 +571,11 @@ class TreeGuidance implements Guidance {
   async tool(name: string): Promise<PromptPart | undefined> {
     const found = await this.#part("tools", name);
     return found === undefined || found.off ? undefined : found.item;
+  }
+
+  async manifests(): Promise<ToolManifest[]> {
+    const names = [...(await this.#tree.found("manifests")).keys()].sort();
+    return (await Promise.all(names.map((name) => this.#manifest(name)))).flatMap((found) => (found === undefined || found.off || found.item === undefined ? [] : [found.item]));
   }
 
   async rules(): Promise<RuleView[]> {

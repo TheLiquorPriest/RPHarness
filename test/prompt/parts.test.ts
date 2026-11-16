@@ -218,6 +218,8 @@ test("each line of the job tools is there, in plain words that say what became o
     ["cancelled", { id: "j-1" }, "Job j-1 was stopped."],
     ["cancel_ended", { id: "j-1", state: "done" }, "Job j-1 had ended already: it is done."],
     ["not_yours", { id: "j-4" }, "Job j-4 was started by the player, and the player stops it."],
+    ["carried_on", { limit: "calls", calls: 10, time: 300 }, "You stopped at your limit on calls, and the player has given you more. Calls: 10 more. Time: 300 more seconds. Go on from where you stood."],
+    ["resumed", {}, "Your work was cut off by a restart, and the player has resumed it. Go on from your last call. A call you were told did not finish may have done its work or not: check before you do it again."],
   ];
   for (const [name, fields, said] of rows) expect({ name, said: part.line(name, fields) }).toEqual({ name, said });
   for (const name of part.names) expect({ name, asks: ASKS.test(part.line(name, { agent: "mapper", id: "j-1", state: "done", brief: "x", report: "x", ref: "x", job: "j-1", value: 1, max: 1, count: 1 }) ?? "") }).toEqual({ name, asks: false });

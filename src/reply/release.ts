@@ -4,6 +4,17 @@
 // never sooner: one cut or failed before anything of it showed takes nothing from the other ways.
 import { sentenceEnds } from "./sentences";
 
+/** His before-release hooks (§5.4 "Hooks"), when one is in force for the reply: nothing of it shows before its message ends and they have seen it whole. */
+export interface ReleaseCheck {
+  /** Sees the whole reply: a reason keeps it back, and the agent is told it; none lets it go out. */
+  check(reply: string): Promise<string | undefined>;
+  /** The reply waits for the hooks: the UI is told. */
+  waits(): void;
+}
+
+/** Sentences held back while a release check is in force: all of them, so nothing goes out before the hooks have seen it. */
+export const HELD_WHOLE = Number.MAX_SAFE_INTEGER;
+
 export class Release {
   readonly #send: (text: string) => void;
   readonly #heldSentences: number;

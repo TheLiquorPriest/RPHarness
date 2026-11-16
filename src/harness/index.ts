@@ -9,6 +9,7 @@
 // the host's store, so a restart, or a session open again after a close, goes on with both. A job a
 // restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
+import { hookSettings, Hooks, type HookTrace, scopeJson } from "../external/hooks";
 import { listFacts, loadGuidance, partsApi } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
@@ -167,6 +168,16 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       closed: sessionClosed,
       log: env.log,
       told,
+      // His session-close hooks: a run of the host's word of its own, as `told`'s, with no agent.
+      closing: async (scope, facts) => {
+        const guidance = loadGuidance(env.files, scope);
+        const settings = await readSettings(guidance, env.files, scope, env.log);
+        const port = hub.tee(env.trace, scope);
+        const run = ids();
+        let seq = 0;
+        const trace: HookTrace = { event: (agent, parent, event) => port.event({ seq: ++seq, run, scope, at: env.clock.now(), ...(agent !== undefined ? { agent } : {}), ...(parent !== undefined ? { parent } : {}), event }) };
+        return new Hooks({ hooks: () => guidance.hooks(), switches: env.switches, user: scope.user, settings: hookSettings(settings), trace, log: env.log }).run("session-close", { scope: scopeJson(scope), ...facts }, {});
+      },
     }),
 
     rules: {
@@ -251,6 +262,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       await external.close();
       await usage.settled();
       await book.settled();
+      // The chats' indexes of their sessions are written after their files: a process that ends lists them as they stand next time.
+      await listing.settled();
       await env.trace.flush();
       await layer.close();
     },

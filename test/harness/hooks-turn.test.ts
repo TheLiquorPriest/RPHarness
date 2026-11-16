@@ -30,3 +30,19 @@ test("a hook before a tool blocks it with its reason; a run-end hook gives the l
     ["epilogue", "run-end", "blocked"],
   ]);
 });
+
+test("a before-release hook keeps back a tag-form reply that breaks his rule: nothing reaches the sink, the lead gets the reason and writes again", async () => {
+  const lead = "---\nname: lead\ndescription: Fixture lead.\nmodel: default\ngiven: [prompt:*]\n---\nFixture lead: you run the turn.\n";
+  const hooks = "before-release:\n  - name: valley-rule\n    command: grep -q wyrm && { printf 'No wyrms in this valley.' >&2; exit 2; }; exit 0\n";
+  const s = await stage({
+    files: { ".agents/lead.md": lead, ".hooks/hooks.yml": hooks },
+    switches: ON,
+    answers: [{ pieces: [{ text: "<reply>A wyrm circles the mill.</reply>" }] }, { pieces: [{ text: "<reply>A heron circles the mill.</reply>" }] }],
+  });
+  const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
+
+  expect(outcome.status).toBe("released");
+  expect(sink.text).toBe("A heron circles the mill.");
+  expect(textOf(s.model.requests[1]!.messages.at(-1)!)).toBe("No wyrms in this valley.");
+  expect(s.trace.of("hook").map((record) => record.event.outcome)).toEqual(["blocked", "ok"]);
+});

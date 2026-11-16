@@ -43,6 +43,11 @@ export class SessionListing {
       .catch((error: unknown) => this.#log.warn("A chat's index of its sessions could not be brought up to date; the next listing makes it again.", { session: scope.session, error: error instanceof Error ? error.message : String(error) }));
   }
 
+  /** Once every index write under way has ended. */
+  settled(): Promise<void> {
+    return this.#writing.then(() => undefined);
+  }
+
   /** Every session the chat's index holds, each placed (an agent's run whose turn left the path is off it), in the order opened; undefined where there is no index. */
   async all(user: string, chat: string): Promise<SessionView[] | undefined> {
     await this.#writing;

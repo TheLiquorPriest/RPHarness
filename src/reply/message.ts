@@ -15,7 +15,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { JsonValue, ReplySink } from "../contract";
 import type { TextChannel } from "../loop/channel";
 import { isClosing } from "../loop/runner";
-import { Release } from "./release";
+import { HELD_WHOLE, Release, type ReleaseCheck } from "./release";
 import { lastSentences } from "./sentences";
 
 export interface MessageReplyOptions {
@@ -40,22 +40,30 @@ export interface MessageReplyOptions {
   onBegin?(): void;
   /** The reply is complete and was sent on: once. */
   onReleased?(reply: string): void;
+  /** His before-release hooks, when one is in force: the reply goes out at its message's end, once they have seen it whole. */
+  beforeRelease?: ReleaseCheck;
 }
 
 export class MessageReply implements TextChannel {
   readonly #o: MessageReplyOptions;
   readonly #release: Release;
-  #state: "none" | "open" | "released" = "none";
+  /** `checking`: the reply is complete, and his before-release hooks are reading it. */
+  #state: "none" | "open" | "checking" | "released" = "none";
   /** The text of the message under way. */
   #message = "";
   /** This message's text is not the reply's to show: the reply went out another way, or another way has it. */
   #unshown = false;
   /** A reply was attempted that could not be shown: the agent is told after the message, once in the generation. */
   #second: "unsaid" | "due" | "said" = "unsaid";
+  /** Each check by his before-release hooks, numbered: one a cut took back since answers nothing. */
+  #checks = 0;
+  #checking: Promise<void> | undefined;
+  /** The reasons his before-release hooks kept a reply back with, for the agent after the message. */
+  #kept: string[] = [];
 
   constructor(options: MessageReplyOptions) {
     this.#o = options;
-    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => this.#claim());
+    this.#release = new Release((text) => options.sink.content(text), options.beforeRelease !== undefined ? HELD_WHOLE : options.heldSentences, () => this.#claim());
   }
 
   /** Whether the reply was released. */
@@ -84,7 +92,7 @@ export class MessageReply implements TextChannel {
 
   write(piece: string): void {
     this.#message += piece;
-    if (!this.#o.stream || this.#state === "released" || this.#unshown || piece === "") return;
+    if (!this.#o.stream || this.#state === "released" || this.#state === "checking" || this.#unshown || piece === "") return;
     this.#state = "open";
     this.#release.hold(piece);
   }
@@ -96,6 +104,10 @@ export class MessageReply implements TextChannel {
   cut(): string {
     const written = this.#message;
     this.#message = "";
+    if (this.#state === "checking") {
+      this.#checks += 1;
+      this.#state = "none";
+    }
     // Shown whole, nothing of the message was shown: all of it is dropped.
     return this.#o.stream ? this.#release.drop() : written;
   }
@@ -103,26 +115,56 @@ export class MessageReply implements TextChannel {
   end(message: AssistantMessage): void {
     // The message's text with no work left after it: the reply, or an attempt at a second one.
     const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall" || isClosing(part.arguments as JsonValue));
-    if (this.#state === "released" || this.#unshown) {
+    if (this.#state === "released" || this.#state === "checking" || this.#unshown) {
       if (replies) this.#notShown();
       return;
     }
     if (this.#o.stream) {
       if (this.#state !== "open") return;
-      if (this.#flush(true)) this.#finish();
-      else if (replies) this.#notShown();
-      return;
+    } else {
+      if (!replies) return;
+      this.#release.hold(this.#message);
     }
-    if (!replies) return;
-    this.#release.hold(this.#message);
-    if (this.#flush(true)) this.#finish();
-    else this.#notShown();
+    if (this.#o.beforeRelease !== undefined) this.#check(this.#o.beforeRelease, replies);
+    else this.#out(replies);
+  }
+
+  settled(): Promise<void> {
+    return this.#checking ?? Promise.resolve();
   }
 
   answers(): string[] {
-    if (this.#second !== "due") return [];
+    const kept = this.#kept.splice(0);
+    if (this.#second !== "due") return kept;
     this.#second = "said";
-    return this.#o.second !== undefined ? [this.#o.second] : [];
+    return this.#o.second !== undefined ? [...kept, this.#o.second] : kept;
+  }
+
+  /** Sends the reply on whole, and it is released; not this form's, it is not shown, and a message that would have been the reply is told so. */
+  #out(replies: boolean): void {
+    if (this.#flush(true)) this.#finish();
+    else if (replies) this.#notShown();
+  }
+
+  /** His before-release hooks read the whole reply: it goes out once they let it; a block drops it, and the agent is told why. */
+  #check(hooks: ReleaseCheck, replies: boolean): void {
+    this.#state = "checking";
+    const at = ++this.#checks;
+    hooks.waits();
+    this.#checking = hooks
+      .check(this.#release.held)
+      .catch(() => undefined)
+      .then((reason) => {
+        if (at !== this.#checks || this.#state !== "checking") return;
+        if (reason === undefined) {
+          this.#state = "open";
+          this.#out(replies);
+          return;
+        }
+        this.#release.drop();
+        this.#state = "none";
+        this.#kept.push(reason);
+      });
   }
 
   /** A reply this form does not show: the agent is told after the message, once in the generation. */

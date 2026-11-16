@@ -23,8 +23,11 @@ export interface TextChannel {
   tail(): string;
   /**
    * Once a message has ended: what the agent is to be told about it, each a text from a file (a
-   * second reply that was not shown, §10.7, told once in the generation however often it comes). It
-   * goes in with the agent's next call, which it gets for it if its work would otherwise have ended.
+   * second reply that was not shown, §10.7, told once in the generation however often it comes), or
+   * the reason his before-release hook kept the reply back with. It goes in with the agent's next
+   * call, which it gets for it if its work would otherwise have ended.
    */
   answers?(): string[];
+  /** Once a reply that waits for his before-release hooks went out or was kept back (§5.4 "Hooks"): asked before `answers`. */
+  settled?(): Promise<void>;
 }

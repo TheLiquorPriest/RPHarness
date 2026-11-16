@@ -1148,6 +1148,9 @@ export class AgentRunner {
       if (stint.halt !== undefined) return { action: "end" };
     }
     const reminders = stint.reminders.splice(0);
+    // A reply waiting for his before-release hooks went out, or was kept back with their reason, before the agent goes on.
+    await Promise.race([this.#o.channel?.settled?.(), stint.halted.promise]);
+    if (stint.halt !== undefined) return { action: "end" };
     const answers = this.#o.channel?.answers?.() ?? [];
     if (!turn.toolResults.every((result) => stint.ended.has(result.toolCallId))) {
       // The work goes on anyway: a reminder, what the reply's form has to say, and the rules a judging model's answer fired go in with the next call.

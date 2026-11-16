@@ -4,7 +4,9 @@
 // compaction asked for, and each session as it stands now. Every change is told as it happens, to
 // the host's trace and the chat's live view (§13.1: RPH reports everything it does). Code never
 // closes a session for its size, and nothing here is a step of a turn.
-import type { CompactionView, FilesPort, Log, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
+import type { CompactionView, FilesPort, JsonObject, Log, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
+import { joined } from "../agents/attachments";
+import type { HookAnswer } from "../external/hooks";
 import type { TemplatePart } from "../files/api";
 import type { SessionBook, SessionFile } from "./book";
 import { copyCache } from "./cache";
@@ -71,6 +73,8 @@ export interface SessionsDeps {
   closed(scope: Scope): void;
   /** A change of the session, told to the host's trace and the chat's live view as a record of the host's word (S-1). */
   told(scope: Scope, change: SessionChange): void;
+  /** His session-close hooks, with what the closing gives them (§5.4 "Hooks"). None: none runs. */
+  closing?(scope: Scope, facts: JsonObject): Promise<HookAnswer>;
 }
 
 /** A compaction as the Sessions page shows it, from its entry. */
@@ -134,11 +138,15 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         // turn, so it leaves the path with that turn.
         const tip = scope.turn === undefined ? undefined : file.log.tip(scope.turn);
         const by = how?.by === "user" ? { by: "user" as const } : {};
+        // His session-close hooks, with the session, its closing turn and its summary as it stands: a block keeps it open, its reason for whoever closed it.
+        const summary = compactionsOf(file.log).filter((compaction) => compaction.stands).at(-1)?.summary ?? file.log.opensWith?.summary ?? file.log.opened?.summary;
+        const hooked = await d.closing?.(scope, { session: scope.session, ...turnOf(scope), ...(summary !== undefined && summary !== "" ? { summary } : {}), ...(how?.by === "user" ? { by: "user" } : {}) });
+        if (hooked?.blocked !== undefined) return { ...view(file, scope), held: hooked.blocked };
         file.add({ type: "closed", parent: tip ?? file.log.leaf, ...turnOf(scope), ...by });
         await file.settled();
         d.closed(scope);
         d.told(scope, { session: scope.session, change: "closed", ...turnOf(scope), ...by });
-        return view(file, scope);
+        return { ...view(file, scope), ...(hooked !== undefined && hooked.added.length > 0 ? { hooked: joined(hooked.added) } : {}) };
       }),
 
     reopen: (scope) =>

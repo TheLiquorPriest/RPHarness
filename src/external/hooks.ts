@@ -8,9 +8,9 @@
 // is shown with its words. The hooks of one moment run one after another, the farthest level's
 // first; the first block ends the rest. Every run of a hook is traced (`hook`), with its reason or
 // what it added. With no hooks nothing runs and nothing waits (§17.5).
-import type { AgentRef, HookEvent, JsonObject, JsonValue, LayerLevel, Log, RunScope, SwitchesPort } from "../contract";
+import type { AgentRef, HookEvent, JsonObject, JsonValue, LayerLevel, Log, RunScope, SwitchesPort, TraceEvent } from "../contract";
 import type { Settings } from "../harness/settings";
-import type { ParentCall, RunTrace } from "../loop/trace";
+import type { ParentCall } from "../loop/trace";
 import { runCommand } from "./run";
 
 /**
@@ -51,13 +51,18 @@ export interface HooksDeps {
   switches: SwitchesPort | undefined;
   user: string;
   settings: HookSettings;
-  trace: RunTrace;
+  trace: HookTrace;
   log: Log;
 }
 
-/** Who a moment's hooks run for: the agent, the call its work hangs under, and the tool call where the moment is one's. */
+/** Where each hook's run is told: a run's trace, or, at a moment that is no agent's (a session's close by the host), the host's trace with no agent. */
+export interface HookTrace {
+  event(agent: AgentRef | undefined, parent: ParentCall | undefined, event: TraceEvent): void;
+}
+
+/** Who a moment's hooks run for: the agent (none at a moment that is no agent's), the call its work hangs under, and the tool call where the moment is one's. */
 export interface HookWho {
-  agent: AgentRef;
+  agent?: AgentRef;
   parent?: ParentCall;
   callId?: string;
 }
@@ -90,15 +95,21 @@ export class Hooks {
     this.#d = deps;
   }
 
+  /** Whether any hook of `on` would run: written for it, and switched on for the user. */
+  async any(on: HookEvent): Promise<boolean> {
+    const d = this.#d;
+    if (d.switches === undefined) return false;
+    for (const hook of (await this.#read()).filter((entry) => entry.on === on)) {
+      if ((await d.switches.state(d.user, { kind: "hook", name: hook.name, target: hook.command })) === "on") return true;
+    }
+    return false;
+  }
+
   /** Runs the hooks of `on`, one after another, with `input` on stdin; a block ends the rest. */
   async run(on: HookEvent, input: JsonObject, who: HookWho, signal?: AbortSignal): Promise<HookAnswer> {
     const d = this.#d;
-    this.#entries ??= d.hooks().catch((error: unknown) => {
-      d.log.error("The hooks could not be read; none runs.", { error: error instanceof Error ? error.message : String(error) });
-      return [];
-    });
     const answer: HookAnswer = { added: [] };
-    for (const hook of (await this.#entries).filter((entry) => entry.on === on)) {
+    for (const hook of (await this.#read()).filter((entry) => entry.on === on)) {
       if (signal?.aborted === true) break;
       const sent: JsonObject = answer.input !== undefined ? { ...input, args: answer.input } : input;
       const result = await runCommand({ command: hook.command, kind: "hook", name: hook.name, user: d.user, input: { hook: hook.name, event: on, ...sent }, timeoutMs: hook.timeout !== undefined ? hook.timeout * 1000 : d.settings.timeoutMs, readMost: d.settings.answerMax, ...(signal !== undefined ? { signal } : {}) }, d.switches);
@@ -142,11 +153,21 @@ export class Hooks {
     return answer;
   }
 
+  /** The hooks in force, read once for the run. */
+  #read(): Promise<readonly HookEntry[]> {
+    const d = this.#d;
+    this.#entries ??= d.hooks().catch((error: unknown) => {
+      d.log.error("The hooks could not be read; none runs.", { error: error instanceof Error ? error.message : String(error) });
+      return [];
+    });
+    return this.#entries;
+  }
+
   /**
    * The moment an agent's work would end (§13.3 l.1458): the run-end hooks, with the run's scope and
    * the agent. A hook's block gives the reason the agent goes on with, for one more call.
    */
-  async atRunEnd(scope: RunScope, who: HookWho, signal?: AbortSignal): Promise<string | undefined> {
+  async atRunEnd(scope: RunScope, who: HookWho & { agent: AgentRef }, signal?: AbortSignal): Promise<string | undefined> {
     return (await this.run("run-end", { scope: scopeJson(scope), agent: agentJson(who.agent) }, who, signal)).blocked?.reason;
   }
 }

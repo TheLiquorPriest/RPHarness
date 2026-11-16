@@ -28,6 +28,7 @@ import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
+import type { ReleaseCheck } from "../reply/release";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile, Unreadable } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, pathTurns, recordsTokens } from "../sessions/carry";
@@ -631,6 +632,8 @@ export class Turn {
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
     const second = this.#words("second_reply");
+    const tagged = opening.form === "tags" && opening.tags !== undefined;
+    const check = await this.#releaseCheck(this.#lead, tagged ? "tags" : "message");
     const channel: TextChannel =
       opening.form === "tags" && opening.tags !== undefined
         ? new TagReply({
@@ -644,6 +647,7 @@ export class Turn {
             onIntentBegan: () => this.#trace.event(this.#lead, undefined, { kind: "intent_began" }),
             onIntent: (text) => this.#intent(text),
             onReleased: (text) => this.#release(text, "tags", this.#lead),
+            ...(check !== undefined ? { beforeRelease: check } : {}),
           })
         : new MessageReply({
             sink: this.#keep.sink,
@@ -654,6 +658,7 @@ export class Turn {
             ...(second !== undefined ? { second } : {}),
             onBegin: () => this.#say("writing"),
             onReleased: (text) => this.#release(text, "message", this.#lead),
+            ...(check !== undefined ? { beforeRelease: check } : {}),
           });
     const leadOptions: RunnerOptions = {
       agent: this.#lead,
@@ -1199,6 +1204,7 @@ export class Turn {
     const rules = this.#rulesRun();
     const streamRules = rules.stream(ref);
     const second = words("second_reply");
+    const check = live ? await this.#releaseCheck(ref, "narrator-live") : undefined;
     const shown = live
       ? new MessageReply({
           sink: this.#keep?.sink ?? this.#sink,
@@ -1209,6 +1215,7 @@ export class Turn {
           ...(second !== undefined ? { second } : {}),
           onBegin: () => this.#say("writing"),
           onReleased: (text) => this.#release(text, "narrator-live", ref),
+          ...(check !== undefined ? { beforeRelease: check } : {}),
         })
       : undefined;
     // A draft shows nothing, and the rules on the reply look at it as it is written all the same.
@@ -1289,6 +1296,9 @@ export class Turn {
       if (ctx.signal.aborted || this.#stopped) return { content: [] };
       if (read.status === "refused") return answer(words(`refused_${read.reason}`, { path: read.path, writable: read.writable }), true);
       if (read.status === "missing") return answer(words(read.folder === true ? "folder" : "missing", { path: read.path }), true);
+      const kept = await this.#heldBack(read.text, "file", ctx.agent);
+      if (ctx.signal.aborted || this.#stopped) return { content: [] };
+      if (kept !== undefined) return answer(kept, true);
       if (!this.#desk.claim("file")) return answer(words("second_reply"), true);
       this.#keep?.sink.content(read.text);
       this.#release(read.text, "file", ctx.agent, read.path);
@@ -1296,10 +1306,31 @@ export class Turn {
     }
     const draft = this.#draft;
     if (draft === undefined) return answer(words("no_draft"), true);
+    const kept = await this.#heldBack(draft.text, "narrator", draft.by);
+    if (ctx.signal.aborted || this.#stopped) return { content: [] };
+    if (kept !== undefined) return answer(kept, true);
     if (!this.#desk.claim("narrator")) return answer(words("second_reply"), true);
     this.#keep?.sink.content(draft.text);
     this.#release(draft.text, "narrator", draft.by);
     return answer(words("released"));
+  }
+
+  /** His before-release hooks for a reply `by` writes in `form`, when one is in force (§5.4 "Hooks"): they see it whole before it goes out, and the UI is told it waits for them. */
+  async #releaseCheck(by: AgentRef, form: ReleaseForm): Promise<ReleaseCheck | undefined> {
+    const hooks = this.#hooks;
+    if (hooks === undefined || !(await hooks.any("before-release"))) return undefined;
+    return {
+      waits: () => this.#say("hook_waits"),
+      check: async (text) => (await hooks.run("before-release", { scope: scopeJson(this.scope), reply: { form, text, by: agentJson(by) } }, { agent: by })).blocked?.reason,
+    };
+  }
+
+  /** A reply sent whole (`reply_release`), seen first by his before-release hooks: the reason one kept it back with, or none. */
+  async #heldBack(text: string, form: ReleaseForm, by: AgentRef): Promise<string | undefined> {
+    const check = await this.#releaseCheck(by, form);
+    if (check === undefined) return undefined;
+    check.waits();
+    return check.check(text);
   }
 
   /** A progress line (§10.7), from the progress part, while the reply is still to come; the setting may keep all but the silence line back. */

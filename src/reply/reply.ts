@@ -6,7 +6,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ReplySink } from "../contract";
 import type { TextChannel } from "../loop/channel";
 import type { StreamRules } from "../loop/rules";
-import { Release } from "./release";
+import { HELD_WHOLE, Release, type ReleaseCheck } from "./release";
 import { lastSentences } from "./sentences";
 import { type ReplyTags, type TagPart, TagParser } from "./tags";
 
@@ -40,6 +40,8 @@ export interface TagReplyOptions {
   onIntent?(text: string): void;
   /** The reply is complete and was sent on whole: once per generation. */
   onReleased?(reply: string): void;
+  /** His before-release hooks, when one is in force: the reply goes out at its message's end, once they have seen it whole. */
+  beforeRelease?: ReleaseCheck;
 }
 
 export class TagReply implements TextChannel {
@@ -48,10 +50,11 @@ export class TagReply implements TextChannel {
   readonly #release: Release;
   /**
    * `open`: being written. `closing`: its closing tag was read, and it is complete once the rules
-   * have looked. `released`: sent on whole. A rule that stops the call while the reply is open
-   * leaves it open, and the agent's next reply tag goes on with it.
+   * have looked. `checking`: complete, and his before-release hooks are reading it. `released`: sent
+   * on whole. A rule that stops the call while the reply is open leaves it open, and the agent's next
+   * reply tag goes on with it.
    */
-  #state: "none" | "open" | "closing" | "released" = "none";
+  #state: "none" | "open" | "closing" | "checking" | "released" = "none";
   #intent = "";
   /** Inside a reply tag opened after the reply was released, or while another form has it: not shown. */
   #extra = false;
@@ -62,11 +65,16 @@ export class TagReply implements TextChannel {
   #second: "unsaid" | "due" | "said" = "unsaid";
   /** This message wrote reply text: only then does its end close a reply its closing tag left open. */
   #wrote = false;
+  /** Each check by his before-release hooks, numbered: one a cut took back since answers nothing. */
+  #checks = 0;
+  #checking: Promise<void> | undefined;
+  /** The reasons his before-release hooks kept a reply back with, for the agent after the message. */
+  #kept: string[] = [];
 
   constructor(options: TagReplyOptions) {
     this.#o = options;
     this.#parser = new TagParser(options.tags);
-    this.#release = new Release((text) => options.sink.content(text), options.heldSentences, () => this.#claim());
+    this.#release = new Release((text) => options.sink.content(text), options.beforeRelease !== undefined ? HELD_WHOLE : options.heldSentences, () => this.#claim());
   }
 
   /** Whether the reply was released. */
@@ -100,10 +108,8 @@ export class TagReply implements TextChannel {
 
   release(): void {
     if (this.#state === "open") this.#flush(false);
-    else if (this.#state === "closing" && this.#flush(true)) {
-      this.#state = "released";
-      this.#o.onReleased?.(this.#release.shown);
-    }
+    // With his before-release hooks in force, a complete reply waits for its message's end.
+    else if (this.#state === "closing" && this.#o.beforeRelease === undefined) this.#out();
   }
 
   cut(): string {
@@ -111,7 +117,10 @@ export class TagReply implements TextChannel {
     this.#intent = "";
     this.#extra = false;
     this.#wrote = false;
-    if (this.#state === "closing") this.#state = "open";
+    if (this.#state === "closing" || this.#state === "checking") {
+      this.#checks += 1;
+      this.#state = "open";
+    }
     return this.#release.drop();
   }
 
@@ -122,20 +131,54 @@ export class TagReply implements TextChannel {
     // A reply this message wrote and left open is complete: the closing tag was left off. A message
     // that wrote none of it (tool calls after a rule stopped the reply) leaves it open for the next.
     if (this.#state === "open" && this.#wrote) this.#state = "closing";
-    this.release();
+    if (this.#state === "closing" && this.#o.beforeRelease !== undefined) this.#check(this.#o.beforeRelease);
+    else this.release();
+  }
+
+  settled(): Promise<void> {
+    return this.#checking ?? Promise.resolve();
   }
 
   answers(): string[] {
-    if (this.#second !== "due") return [];
+    const kept = this.#kept.splice(0);
+    if (this.#second !== "due") return kept;
     this.#second = "said";
-    return this.#o.second !== undefined ? [this.#o.second] : [];
+    return this.#o.second !== undefined ? [...kept, this.#o.second] : kept;
+  }
+
+  /** Sends the complete reply on whole, and it is released. */
+  #out(): void {
+    if (!this.#flush(true)) return;
+    this.#state = "released";
+    this.#o.onReleased?.(this.#release.shown);
+  }
+
+  /** His before-release hooks read the whole reply: it goes out once they let it; a block drops it, and the agent is told why. */
+  #check(hooks: ReleaseCheck): void {
+    this.#state = "checking";
+    const at = ++this.#checks;
+    hooks.waits();
+    this.#checking = hooks
+      .check(this.#release.held)
+      .catch(() => undefined)
+      .then((reason) => {
+        if (at !== this.#checks || this.#state !== "checking") return;
+        if (reason === undefined) {
+          this.#state = "closing";
+          this.#out();
+          return;
+        }
+        this.#release.drop();
+        this.#state = "none";
+        this.#kept.push(reason);
+      });
   }
 
   #take(part: TagPart): void {
     if (part.kind === "open") {
       if (part.role === "intent") this.#o.onIntentBegan?.();
       if (part.role !== "reply") return;
-      if (this.#state === "released" || this.#state === "closing") {
+      if (this.#state === "released" || this.#state === "closing" || this.#state === "checking") {
         this.#extra = true;
         this.#notShown();
         return;

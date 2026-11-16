@@ -15,6 +15,9 @@ export const COMPACTION = worded(
     keepTurns: { key: "compaction.keepTurns", takes: { type: "whole", least: 0 }, default: 3, perConnection: false, at: "compaction.keepTurns" },
     records: { key: "compaction.records", takes: { type: "whole", least: 1 }, default: 6_000, perConnection: false, at: "compaction.records" },
     saveCalls: { key: "compaction.saveCalls", takes: { type: "whole", least: 1 }, default: 1, perConnection: false, at: "compaction.saveCalls" },
+    // pi's coding agent compacts and sends a refused call again once, and keeps its newest 20,000 tokens whole (`keepRecentTokens`).
+    overflowTries: { key: "compaction.overflowTries", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, at: "compaction.overflowTries" },
+    keepRecent: { key: "compaction.keepRecent", takes: { type: "whole", least: 0 }, default: 20_000, perConnection: false, at: "compaction.keepRecent" },
   },
   COMPACTION_WORDS,
 );

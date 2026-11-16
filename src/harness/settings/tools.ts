@@ -6,8 +6,8 @@ import { TOOLS_WORDS } from "./tools-words";
 
 export const TOOLS = worded(
   {
-    // A long message of a story, or a lore entry, runs from 6,000 to 12,000 characters, and an agent should read one in one go.
-    clip: { key: "results.clip", takes: { type: "whole", least: 1 }, default: 12_000, perConnection: false, at: "clipChars" },
+    // A tool's answer is cut only where the whole would not fit the call that reads it (§10.2); this is the owner's own ceiling, none by default.
+    clip: { key: "results.clip", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "no ceiling", perConnection: false, at: "clipChars" },
     // A handful of tools an agent reads at a glance.
     search: { key: "tools.search", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, at: "searchHits" },
     // At about 200 characters a hit, a check of three places comes to about the 12,000 characters of a

@@ -60,7 +60,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, ToolResult, ToolsAs, UserScope } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 
 // ---------------------------------------------------------------- where things come from
@@ -110,6 +110,16 @@ export interface ToolManifest {
   timeout?: number;
   path: string;
   level: LayerLevel;
+}
+
+/** A manifest file in force as read: its tool where it reads whole, what it runs or calls as far as it says, and why it is left out. */
+export interface ManifestRead {
+  name: string;
+  path: string;
+  level: LayerLevel;
+  manifest?: ToolManifest;
+  written?: { kind: "command-tool" | "http-tool"; runs: string };
+  problems: string[];
 }
 
 // ---------------------------------------------------------------- templates
@@ -329,7 +339,7 @@ export interface FileChange {
 // ---------------------------------------------------------------- rules
 
 /** The header fields of a rule. Anything else in its header is reported. */
-export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "judge", "at", "fact", "every", "repeat", "interrupt", "hold"] as const;
+export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "judge", "at", "fact", "command", "every", "repeat", "interrupt", "hold"] as const;
 
 // ---------------------------------------------------------------- facts
 
@@ -387,7 +397,14 @@ export interface RuleRunOptions {
   ranOut?(agent: AgentRef, rule: { rule: string; path: string }, length: number): void;
   /** Whether a stream rule that interrupts may stop `agent`'s call, as its connection's setting says; asked at each model call's start. Absent: it may. */
   stops?(agent: AgentRef): Promise<boolean>;
+  /** Asks a rule's command about the moment (`command:`, C5), with the moment's facts and the agent's place as JSON. Absent: every rule command is off. */
+  command?(agent: AgentRef, rule: { rule: string; command: string }, input: JsonValue): Promise<RuleCommandAnswer>;
+  /** Told of a rule whose command failed or ran out of time: it did not fire, and it is shown as unable to work, never as a "no". */
+  commandFailed?(agent: AgentRef, rule: { rule: string; path: string }, why: string): void;
 }
+
+/** What a rule's command answered: yes or no; that it waits for its switch or is off (nothing ran); or why it could not answer. */
+export type RuleCommandAnswer = "yes" | "no" | "waiting" | "off" | { failed: string };
 
 /** A tool call as the rules see it before the tool runs. */
 export interface ToolCallSeen {
@@ -544,9 +561,11 @@ export interface Guidance {
   tool(name: string): Promise<PromptPart | undefined>;
   /** The owner's own tools' manifests in force (`<tools>/<name>.json`, the nearest of each name, those `off:` names left out), by name. */
   manifests(): Promise<ToolManifest[]>;
+  /** Each manifest file in force, broken ones too: what the list of what runs a command or calls out shows (C3). */
+  manifestFiles(): Promise<ManifestRead[]>;
 
-  /** Every rule file, examples and broken ones included, as the Rules page lists them. */
-  rules(): Promise<RuleView[]>;
+  /** Every rule file, examples and broken ones included, as the Rules page lists them; a rule's command with where it stands as `switches` say (none: off). */
+  rules(switches?: SwitchesPort): Promise<RuleView[]>;
   /** The triggered rules in force now, for one run. */
   ruleRun(options: RuleRunOptions): Promise<RuleRun>;
 }

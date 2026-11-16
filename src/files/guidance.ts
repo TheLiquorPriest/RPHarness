@@ -4,8 +4,8 @@
 // descriptions, the rules as the Rules page lists them, and one run's rule engine. Each file is read
 // and parsed once.
 
-import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, Refused, RuleView, Scope, StackLeft, UserScope } from "../contract/index";
-import type { AgentDefinition, Guidance, LoadGuidance, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
+import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, Refused, RuleView, Scope, StackLeft, SwitchesPort, UserScope } from "../contract/index";
+import type { AgentDefinition, Guidance, LoadGuidance, ManifestRead, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import { normalized, problemAt, WrittenItems } from "./header";
@@ -578,22 +578,43 @@ class TreeGuidance implements Guidance {
     return (await Promise.all(names.map((name) => this.#manifest(name)))).flatMap((found) => (found === undefined || found.off || found.item === undefined ? [] : [found.item]));
   }
 
-  async rules(): Promise<RuleView[]> {
-    const view = (f: Found<ReadRule>, inForce: boolean, why: RuleView["why"]): RuleView => ({
-      name: f.ref.name,
-      path: f.ref.path,
-      level: f.ref.level,
-      description: f.item?.description ?? "",
-      agents: f.item?.agents ?? [],
-      ...(f.item?.trigger !== undefined ? { trigger: f.item.trigger } : {}),
-      inForce,
-      ...(why !== undefined ? { why } : {}),
-      replaces: f.replaces,
-    });
-    const views = [...(await this.#ruleStates()).values()].map((s) => view(s.found, s.inForce, s.why));
+  async manifestFiles(): Promise<ManifestRead[]> {
+    const names = [...(await this.#tree.found("manifests")).keys()].sort();
+    const out: ManifestRead[] = [];
+    for (const found of await Promise.all(names.map((name) => this.#manifest(name)))) {
+      if (found === undefined || found.off) continue;
+      const { name, path, level } = found.ref;
+      // A file the tree could not read says why among the tree's problems as well.
+      const read = found.file === undefined ? undefined : parseManifest(found.file, name);
+      out.push({ name, path, level, ...(read?.manifest !== undefined ? { manifest: read.manifest } : {}), ...(read?.written !== undefined ? { written: read.written } : {}), problems: read === undefined ? ["The file could not be read."] : read.problems.map((p) => p.message) });
+    }
+    return out;
+  }
+
+  async rules(switches?: SwitchesPort): Promise<RuleView[]> {
+    const user = this.scope.user;
+    const view = async (f: Found<ReadRule>, inForce: boolean, why: RuleView["why"]): Promise<RuleView> => {
+      const when = f.item?.rule?.when;
+      const runs = when?.trigger === "moment" ? when.command : undefined;
+      // A rule's command stands as the host's switches say, asked as it is listed: without them it is off.
+      const state = runs === undefined ? undefined : switches === undefined ? "off" : await switches.state(user, { kind: "rule-command", name: f.ref.name, target: runs });
+      return {
+        name: f.ref.name,
+        path: f.ref.path,
+        level: f.ref.level,
+        description: f.item?.description ?? "",
+        agents: f.item?.agents ?? [],
+        ...(f.item?.trigger !== undefined ? { trigger: f.item.trigger } : {}),
+        ...(runs !== undefined && state !== undefined ? { command: { runs, state } } : {}),
+        inForce,
+        ...(why !== undefined ? { why } : {}),
+        replaces: f.replaces,
+      };
+    };
+    const views = await Promise.all([...(await this.#ruleStates()).values()].map((s) => view(s.found, s.inForce, s.why)));
     for (const name of [...(await this.#tree.found("examples")).keys()].sort()) {
       const found = await this.#rule("examples", name);
-      if (found !== undefined) views.push(view(found, false, found.item?.rule === undefined ? "broken" : "example"));
+      if (found !== undefined) views.push(await view(found, false, found.item?.rule === undefined ? "broken" : "example"));
     }
     return views;
   }
@@ -611,7 +632,7 @@ class TreeGuidance implements Guidance {
     if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
     // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
     const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope).#triggered();
-    const { facts, memory, window, patternTime, ranOut, stops } = options;
-    return createRuleRun({ scope, rules: await this.#triggered(), read, facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}) });
+    const { facts, memory, window, patternTime, ranOut, stops, command, commandFailed } = options;
+    return createRuleRun({ scope, rules: await this.#triggered(), read, facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}) });
   }
 }

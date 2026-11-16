@@ -11,8 +11,8 @@ export interface HeldTool extends LoopTool {
   family: string;
   tier: ToolTier;
   lane?: string;
-  /** RPH's own, or the host's. */
-  from: "rph" | "host";
+  /** RPH's own, the host's, or his own from a manifest (`.tools/<name>.json`). */
+  from: "rph" | "host" | "owner";
   /** For a tool that runs a command or calls out (an MCP server's tool, a command tool, an HTTP tool): what it runs or calls, which the host's switches must have on. */
   switchable?: Switchable;
 }
@@ -26,18 +26,24 @@ export interface Held {
 
 export class Registry {
   readonly #tools = new Map<string, HeldTool>();
-  /** Host tools left out because one of RPH's own has the name. */
+  /** Host tools, and his own, left out because a tool before them has the name: RPH's own, then the host's. */
   readonly shadowed: string[] = [];
 
-  constructor(own: readonly OwnTool[], host: readonly HostTool[]) {
+  /** RPH's own tools, the host's, and his own from manifests (C3), in that order; a later one of a name already taken is left out. */
+  constructor(own: readonly OwnTool[], host: readonly HostTool[], owner: readonly HostTool[] = []) {
     for (const tool of own) this.#tools.set(tool.name, { ...tool, from: "rph" });
-    for (const tool of host) {
-      // A host's tool never takes the name of one of RPH's own (Appendix A); one that does is left out.
-      if (this.#tools.has(tool.name)) {
-        this.shadowed.push(tool.name);
-        continue;
+    for (const [tools, from] of [
+      [host, "host"],
+      [owner, "owner"],
+    ] as const) {
+      for (const tool of tools) {
+        // A host's tool never takes the name of one of RPH's own (Appendix A); one that does is left out, and so is one of his that takes a name already held.
+        if (this.#tools.has(tool.name)) {
+          this.shadowed.push(tool.name);
+          continue;
+        }
+        this.#tools.set(tool.name, { name: tool.name, description: tool.description, parameters: tool.parameters, run: (args, ctx) => tool.run(args, ctx), family: tool.family, tier: tool.tier, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), ...(tool.switchable !== undefined ? { switchable: tool.switchable } : {}), from });
       }
-      this.#tools.set(tool.name, { name: tool.name, description: tool.description, parameters: tool.parameters, run: (args, ctx) => tool.run(args, ctx), family: tool.family, tier: tool.tier, ...(tool.lane !== undefined ? { lane: tool.lane } : {}), ...(tool.switchable !== undefined ? { switchable: tool.switchable } : {}), from: "host" });
     }
   }
 

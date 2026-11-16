@@ -147,6 +147,8 @@ export type TraceEvent =
   | { kind: "rule_fired"; firing: RuleFiring }
   /** A rule's pattern ran out of `rules.patternTime` on a text (R-55): that check counted as no match, and the rule stays in force. `length`: the text's, in characters. */
   | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number }
+  /** A rule's command failed or ran out of `rules.commandTimeout` (C5): the rule did not fire, and is unable to work, never a "no". `detail`: why, in words. */
+  | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string }
   /** A hook ran (§5.4 "Hooks"): what it did, and how long it took. */
   | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number }
   /** A write to a lane set to Confirm waits for the user's word (§6.8). */

@@ -26,6 +26,8 @@ export interface CommandRun {
   readMost: number;
   /** The folder it runs in; the process's own where absent. */
   cwd?: string;
+  /** Stops it: the run it is part of was stopped. It is killed, and what it wrote so far is read. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -54,7 +56,7 @@ function environment(): Record<string, string> {
 }
 
 /** Reads a stream to its end or to `most` bytes, whichever comes first: the bytes, and whether it stopped at the limit. */
-async function readUpTo(stream: ReadableStream<Uint8Array>, most: number): Promise<{ bytes: Uint8Array; cut: boolean }> {
+export async function readUpTo(stream: ReadableStream<Uint8Array>, most: number): Promise<{ bytes: Uint8Array; cut: boolean }> {
   const reader = stream.getReader();
   const chunks: Uint8Array[] = [];
   let size = 0;
@@ -88,16 +90,26 @@ export async function runCommand(run: CommandRun, switches: SwitchesPort | undef
     timedOut = true;
     proc.kill("SIGKILL");
   }, run.timeoutMs);
+  const stop = (): void => {
+    proc.kill("SIGKILL");
+  };
+  if (run.signal?.aborted === true) stop();
+  else run.signal?.addEventListener("abort", stop, { once: true });
   try {
     if (run.input !== undefined) proc.stdin.write(JSON.stringify(run.input));
     await proc.stdin.end();
   } catch {
     // A command that reads nothing may close its stdin first; what it answers still counts.
   }
-  const [out, err] = await Promise.all([readUpTo(proc.stdout, run.readMost), new Response(proc.stderr).text().catch(() => "")]);
-  if (out.cut) proc.kill("SIGKILL");
+  // Past the read limit it is killed at once, so its stderr ends too.
+  const stdout = readUpTo(proc.stdout, run.readMost).then((read) => {
+    if (read.cut) proc.kill("SIGKILL");
+    return read;
+  });
+  const [out, err] = await Promise.all([stdout, readUpTo(proc.stderr, run.readMost).then((read) => new TextDecoder().decode(read.bytes)).catch(() => "")]);
   const exit = await proc.exited;
   clearTimeout(timer);
+  run.signal?.removeEventListener("abort", stop);
   const text = new TextDecoder().decode(out.bytes);
   let output: JsonValue | undefined;
   try {

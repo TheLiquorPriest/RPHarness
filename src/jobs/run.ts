@@ -14,6 +14,7 @@ import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
 import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
+import type { External } from "../external";
 import type { SessionBook } from "../sessions/book";
 import { type AgentOutcome, type AgentRunner, Budget, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
@@ -39,6 +40,8 @@ export interface JobCore {
   book: SessionBook;
   /** The harness's jobs, for a job's agent that holds `job_start`. */
   jobs: JobsWork;
+  /** His own tools and rule commands (C3). */
+  external: External;
 }
 
 /** What a job is asked: its run's id, where it runs, its definition and brief as `delegate` takes them, and who started it with which call. */
@@ -116,6 +119,12 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       if (definition === undefined) return interruptFor(settings, { id: null, name: null }) === "stop";
       const connection = await connectionOf(core.connections, scope, definition, env.log);
       return interruptFor(settings, connection) === "stop";
+    },
+    // A rule's command is asked under the user's `rules.commandTimeout`; one that failed shows in the trace and the log, never as a "no".
+    command: core.external.ruleCommands(scope.user, settings),
+    commandFailed: (agent, rule, why) => {
+      trace.event(agent, undefined, { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "command", detail: why });
+      env.log.warn("A rule's command could not answer; the rule did not fire.", { job: ask.id, rule: rule.rule, path: rule.path, why });
     },
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
@@ -260,8 +269,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       schemaShown: settings.schemaShown,
     }),
   ];
-  registry = new Registry(tools, await env.tools.all(scope));
-  if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
+  // His own tools from the manifests are the registry's third source, after RPH's own and the host's.
+  registry = new Registry(tools, await env.tools.all(scope), await core.external.tools(guidance, settings, words));
+  if (registry.shadowed.length > 0) env.log.warn("Host tools, and his own, that take the name of a tool before them are left out.", { tools: registry.shadowed });
 
   const made = await team.first(ask.call, ask.by, ask.parent);
   if (!("runner" in made)) return made;

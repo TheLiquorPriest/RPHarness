@@ -97,6 +97,11 @@ export interface SecretsDoc {
    * (§16; READINGS R-53). Absent when no connection has a key or a header's value.
    */
   places?: Record<string, string>;
+  /**
+   * The secrets his HTTP tools and MCP servers send, by the name their files give (C4): a file names
+   * the secret and never holds its value, so no value is ever in the tree (§16). Absent when none is set.
+   */
+  tools?: Record<string, string>;
   device?: string;
 }
 
@@ -344,4 +349,8 @@ export interface ModelsApi {
   signIn(user: string): SignInApi;
   /** Passes a request through to the user's connection and streams the answer to `sink`. Resolves after `finish` or `error`. */
   pass(user: string, request: PassRequest, sink: PassSink, signal: AbortSignal): Promise<void>;
+  /** The names of the secrets set for his tools and servers (C4), sorted; never a character of a value. */
+  toolSecrets(user: string): Promise<string[]>;
+  /** Sets the secret of a name for his tools and servers, or (null) takes it away: the owner's own act, on his press (C4). */
+  setToolSecret(user: string, name: string, value: string | null): Promise<void>;
 }

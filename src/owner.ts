@@ -22,7 +22,7 @@ const MEMBERS = {
   definitions: ["apply"],
   jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "answer"],
   sessions: ["compact", "reopen", "uncompact"],
-  models: ["save"],
+  models: ["save", "setToolSecret"],
 } as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[]; models: readonly (keyof ModelsApi)[] };
 
 /** The calls that are the owner's in one form only: the member, and the field and value of its last argument that make a call of it his. */

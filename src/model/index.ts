@@ -104,6 +104,8 @@ export interface ModelLayer extends ModelSource {
    * be switched on at the place it now goes to. Never rejects.
    */
   turnStarting(user: string): Promise<readonly string[]>;
+  /** The value of a secret his tools and servers send (C4), for their calls alone: never a page's, a trace's or a model's. */
+  toolSecret(user: string, name: string): Promise<string | undefined>;
   /** Ends open sign-ins and waits for the documents to be written. */
   close(): Promise<void>;
 }
@@ -352,6 +354,12 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     embed: (user, texts, signal) => embed(deskOf(user).calls, texts, signal),
     signIn: (user) => deskOf(user).signIn,
     pass: (user, request, sink, signal) => passRequest(deskOf(user).calls, request, sink, signal),
+    toolSecrets: (user) => deskOf(user).book.toolSecretNames(),
+    async setToolSecret(user, name, value) {
+      // As a key's, the floor a secret is held to is the levels every chat shares'.
+      const { secretFloor } = await deps.settings({ user });
+      await deskOf(user).book.setToolSecret(name, value, secretFloor);
+    },
   };
 
   return {
@@ -369,6 +377,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       cleanupSessionResources(sessionKey(user, sessionId));
     },
     turnStarting: (user) => deskOf(user).book.refresh(),
+    toolSecret: (user, name) => deskOf(user).book.toolSecret(name),
     async close() {
       for (const desk of desks.values()) desk.signIn.close();
       await Promise.all([...desks.values()].map((desk) => desk.book.settled()));

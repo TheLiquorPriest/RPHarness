@@ -9,15 +9,15 @@
 // time counts as no match, is told (`ranOut`), and the rule stays in force (R-55). A stream rule that
 // interrupts reminds instead where the agent's connection is set to (`stops`), and its firing says so.
 
-import type { AgentRef, FactDef, FactValue, RuleMoment, Scope, ToolResult } from "../contract/index";
+import type { AgentRef, FactDef, FactValue, JsonValue, RuleMoment, Scope, ToolResult } from "../contract/index";
 import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../loop/rules";
-import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Question, RuleMemory, RuleRun, ToolCallFired, ToolCallSeen } from "./api";
+import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Question, RuleCommandAnswer, RuleMemory, RuleRun, RuleRunOptions, ToolCallFired, ToolCallSeen } from "./api";
 import type { FactTest } from "./facts";
 import { factFields, factsNamed, holds } from "./facts";
 import type { Rule, RuleScope } from "./rules";
 import { runPattern } from "./pattern";
 
-export interface RuleRunInput {
+export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandFailed"> {
   scope: Scope;
   /** The triggered rules in force when the run begins, each loaded whole. */
   rules: readonly Rule[];
@@ -130,6 +130,8 @@ class Run implements RuleRun {
   readonly #patternTime: number;
   readonly #ranOut: RuleRunInput["ranOut"];
   readonly #stopsFor: RuleRunInput["stops"];
+  readonly #command: RuleRunInput["command"];
+  readonly #commandFailed: RuleRunInput["commandFailed"];
   /** Each agent's connection's word, as last asked at a model call's start: may a stream rule stop its call. */
   readonly #stops = new Map<string, boolean>();
   /** `<rule> <agent id>`: what fired in this run, for `once per turn`. */
@@ -151,6 +153,8 @@ class Run implements RuleRun {
     this.#patternTime = input.patternTime;
     this.#ranOut = input.ranOut;
     this.#stopsFor = input.stops;
+    this.#command = input.command;
+    this.#commandFailed = input.commandFailed;
     this.#defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
     this.#factNames = new Set(this.#defs.keys());
     const memory: RuleMemory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
@@ -246,26 +250,52 @@ class Run implements RuleRun {
     });
     if (candidates.length === 0) return [];
     const names = new Set<string>();
+    // A rule's command is told every fact of the moment.
+    const asking = candidates.some(({ rule }) => rule.when.trigger === "moment" && rule.when.command !== undefined);
     for (const { rule } of candidates) {
       const test = factTest(rule);
       if (test !== undefined) names.add(test.name);
       for (const name of factsNamed(rule.text.fields, this.#factNames)) names.add(name);
     }
+    if (asking) for (const name of this.#factNames) names.add(name);
     const values = await this.#read(agent, [...names], candidates.map((c) => c.rule));
     const out: Fired[] = [];
     for (const { rule, moment } of candidates) {
       const test = factTest(rule);
       const value = test === undefined ? undefined : values[test.name];
       if (test !== undefined && (value === undefined || !holds(test, value))) continue;
+      const command = rule.when.trigger === "moment" ? rule.when.command : undefined;
+      if (command !== undefined && !(await this.#asks(agent, rule, command, moment, values))) continue;
       // Asked again: another moment of the same agent may have fired it while the facts were read.
       if (!this.#may(rule, agent)) continue;
       this.#mark(rule, agent);
       out.push({
-        firing: { rule: rule.name, path: rule.path, level: rule.level, moment, ...(test !== undefined && value !== undefined ? { fact: { name: test.name, value } } : {}) },
+        firing: { rule: rule.name, path: rule.path, level: rule.level, moment, ...(test !== undefined && value !== undefined ? { fact: { name: test.name, value } } : {}), ...(command !== undefined ? { matched: "yes" } : {}) },
         text: rule.text.render(factFields(values, test)).text,
       });
     }
     return out;
+  }
+
+  /**
+   * Asks a rule's command about the moment (C5), with the moment's facts and the agent's place: true
+   * when it says yes. One that waits for its switch or is off ran nothing and does not fire; one that
+   * failed or ran out of time is told, as unable to work, and is never taken for a no.
+   */
+  async #asks(agent: AgentRef, rule: Rule, command: string, moment: RuleMoment, facts: Record<string, FactValue>): Promise<boolean> {
+    if (this.#command === undefined) return false;
+    const scope = this.#scope;
+    const input = { moment, agent: { id: agent.id, definition: agent.definition, ...(agent.plays !== undefined ? { plays: agent.plays } : {}) }, place: { chat: scope.chat, session: scope.session, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, facts } as unknown as JsonValue;
+    let said: RuleCommandAnswer;
+    try {
+      said = await this.#command(agent, { rule: rule.name, command }, input);
+    } catch (error) {
+      said = { failed: error instanceof Error ? error.message : String(error) };
+    }
+    if (typeof said !== "object") return said === "yes";
+    this.problems.push({ path: rule.path, level: rule.level, message: `Its command could not answer (${said.failed}), so it did not fire: the rule is unable to work until its command answers yes or no.` });
+    this.#commandFailed?.(agent, { rule: rule.name, path: rule.path }, said.failed);
+    return false;
   }
 
   async turnStart(agent: AgentRef): Promise<BriefingFired[]> {

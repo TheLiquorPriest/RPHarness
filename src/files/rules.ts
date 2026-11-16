@@ -36,7 +36,8 @@ export type RuleWhen =
   | { trigger: "pattern"; pattern: RegExp; scope: RuleScope[]; interrupt: boolean; hold: boolean }
   /** `interrupt`: the agent waits for the judging model's answer before its next call (`interrupt: always`); otherwise it goes on. `judge`: the connection the rule's own header names for the judging model. */
   | { trigger: "question"; question: string; scope: RuleScope[]; interrupt: boolean; judge?: string }
-  | { trigger: "moment"; at: RuleMomentName; fact?: FactTest }
+  /** `command`: the command line, as written, asked yes or no at the moment (C5); a yes fires it as a fact that holds does. */
+  | { trigger: "moment"; at: RuleMomentName; fact?: FactTest; command?: string }
   | { trigger: "interval"; every: number; fact?: FactTest };
 
 export interface Rule {
@@ -141,6 +142,12 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     else fact = parsed;
   }
 
+  let command: string | undefined;
+  if (Object.hasOwn(h, "command")) {
+    if (typeof h.command === "string" && h.command.trim() !== "") command = h.command;
+    else fail("command", "`command:` is a command line, in quotes, that answers yes or no: `command: 'python3 check.py'`.");
+  }
+
   let when: RuleWhen = { trigger: "always" };
   const trigger = triggers[0];
   if (trigger === "condition") {
@@ -175,10 +182,10 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     if (judge === false) fail("judge", "`judge:` names the connection the judging model is reached through, by its name or its id.");
     if (typeof h.question === "string" && scope !== undefined && interrupt !== undefined && judge !== false) when = { trigger: "question", question: h.question.trim(), scope, interrupt, ...(judge !== undefined ? { judge } : {}) };
   } else if (trigger === "at") {
-    read.trigger = "moment";
+    read.trigger = command !== undefined ? "command" : "moment";
     const moment = MOMENTS.find((m) => m === h.at);
     if (moment === undefined) fail("at", `\`at:\` is one of ${MOMENTS.join(", ")}.`);
-    else when = { trigger: "moment", at: moment, ...(fact !== undefined ? { fact } : {}) };
+    else when = { trigger: "moment", at: moment, ...(fact !== undefined ? { fact } : {}), ...(command !== undefined ? { command } : {}) };
   } else if (trigger === "every") {
     read.trigger = "interval";
     if (typeof h.every !== "number" || !Number.isInteger(h.every) || h.every < 1) fail("every", "`every:` is a whole number of turns: `every: 10`.");
@@ -186,6 +193,7 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
   } else read.trigger = "always";
 
   if (Object.hasOwn(h, "fact") && trigger !== "at" && trigger !== "every") fail("fact", "`fact:` is tested at a moment: give the rule `at:` (turn-start, run-end or before-compaction) or `every:`.");
+  if (Object.hasOwn(h, "command") && trigger !== "at") fail("command", "`command:` is asked at a moment: give the rule `at:` (turn-start, run-end or before-compaction).");
   if (trigger !== "condition" && trigger !== "question" && h.scope !== undefined) problem("scope", "`scope:` goes with `condition:` or `question:`, and is not read here.");
   if (trigger !== "condition" && trigger !== "question" && h.interrupt !== undefined) problem("interrupt", "`interrupt:` goes with `condition:` or `question:`, and is not read here.");
   if (trigger !== "condition" && h.hold !== undefined) problem("hold", "`hold:` goes with `condition:`, and is not read here.");

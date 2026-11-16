@@ -13,6 +13,7 @@ import type { Carry, LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./tur
 import type { ListedFact } from "./facts";
 import type { JsonSchema } from "./json";
 import type { PromptMapApi } from "./prompt";
+import type { ExternalApi, SwitchState } from "./switches";
 
 // ---------------------------------------------------------------- jobs
 
@@ -268,8 +269,8 @@ export interface CompactionView {
 
 // ---------------------------------------------------------------- rules
 
-/** How a rule is triggered (§5.4): always on; a pattern; a question to a judging model; a moment, alone or with a fact; an interval. */
-export type RuleTrigger = "always" | "pattern" | "question" | "moment" | "interval";
+/** How a rule is triggered (§5.4): always on; a pattern; a question to a judging model; a moment, alone or with a fact; a moment whose command answers yes or no (C5); an interval. */
+export type RuleTrigger = "always" | "pattern" | "question" | "moment" | "command" | "interval";
 
 /** A rule as the Rules page lists it. */
 export interface RuleView {
@@ -282,6 +283,8 @@ export interface RuleView {
   agents: "all" | string[];
   /** How it is triggered; absent for a `broken` rule whose header does not say. */
   trigger?: RuleTrigger;
+  /** A `command` rule's command line, as written, and where it stands as the host's switches say (C5): one that waits does nothing. */
+  command?: { runs: string; state: SwitchState };
   /** In force now. */
   inForce: boolean;
   /**
@@ -431,11 +434,11 @@ export interface DeclaredTools {
   most: number;
 }
 
-/** A tool the registry holds for a scope, as `definitions.tools` lists it (C-T14): its name, its family, and whose it is. */
+/** A tool the registry holds for a scope, as `definitions.tools` lists it (C-T14): its name, its family, and whose it is: RPH's own, the host's, or his own from a manifest (C3). */
 export interface RegisteredTool {
   name: string;
   family: string;
-  from: "rph" | "host";
+  from: "rph" | "host" | "owner";
 }
 
 /**
@@ -577,6 +580,8 @@ export interface Harness {
   models: ModelsApi;
   /** The prompt map as the Prompt page shows and edits it (C-9): RPH makes the owner's edits and keeps them when the map is learned again. */
   promptMap: PromptMapApi;
+  /** Everything a scope's files name that runs a command or calls out, with where each stands (C3): what the pages and `rpe allow` list as waiting. */
+  external: ExternalApi;
   /**
    * An agent's kept request (the file its `call_started` names, C-17) rebuilt exactly as it was sent,
    * from the pointers into the turn's files it holds; undefined when there is no such file.

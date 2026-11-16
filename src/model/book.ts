@@ -101,6 +101,8 @@ interface Secrets {
   /** Where each connection's key and headers' values were given for, by its id (`placeOf`). */
   places: Record<string, string>;
   signins: Record<string, SignInToken>;
+  /** The secrets his tools and servers send, by the name their files give (C4). */
+  tools: Record<string, string>;
   device?: string;
 }
 
@@ -404,11 +406,11 @@ export class Book {
       this.failedReads += 1;
       return;
     }
-    if (raw !== null && raw !== undefined && !(isRecord(raw) && raw.v === FORMAT && isRecord(raw.keys) && isRecord(raw.signins) && (raw.headers === undefined || isRecord(raw.headers)) && (raw.places === undefined || isRecord(raw.places)))) {
+    if (raw !== null && raw !== undefined && !(isRecord(raw) && raw.v === FORMAT && isRecord(raw.keys) && isRecord(raw.signins) && (raw.headers === undefined || isRecord(raw.headers)) && (raw.places === undefined || isRecord(raw.places)) && (raw.tools === undefined || isRecord(raw.tools)))) {
       this.secretsTrouble = "The saved keys and sign-ins aren't in a form this build reads: fix or remove them, then start again.";
       return;
     }
-    const secrets: Secrets = { keys: {}, headers: {}, places: {}, signins: {} };
+    const secrets: Secrets = { keys: {}, headers: {}, places: {}, signins: {}, tools: {} };
     if (isRecord(raw)) {
       if (isRecord(raw.keys)) for (const [id, key] of Object.entries(raw.keys)) if (typeof key === "string") secrets.keys[id] = key;
       if (isRecord(raw.headers)) {
@@ -419,6 +421,7 @@ export class Book {
         }
       }
       if (isRecord(raw.places)) for (const [id, place] of Object.entries(raw.places)) if (typeof place === "string") secrets.places[id] = place;
+      if (isRecord(raw.tools)) for (const [name, value] of Object.entries(raw.tools)) if (typeof value === "string") secrets.tools[name] = value;
       if (isRecord(raw.signins)) {
         for (const [provider, credential] of Object.entries(raw.signins)) {
           const token = tokenOf(credential);
@@ -600,10 +603,10 @@ export class Book {
    * where given; the book holds those once they are written. A host's document marked not to be
    * written is never written: the book then holds them at once.
    */
-  private async writeSecrets(keys?: Record<string, string>, headers?: Record<string, Record<string, string>>, places?: Record<string, string>): Promise<void> {
+  private async writeSecrets(keys?: Record<string, string>, headers?: Record<string, Record<string, string>>, places?: Record<string, string>, tools?: Record<string, string>): Promise<void> {
     const secrets = this.secrets;
     if (secrets === undefined) return;
-    const next = { keys: keys ?? secrets.keys, headers: headers ?? secrets.headers };
+    const next = { keys: keys ?? secrets.keys, headers: headers ?? secrets.headers, tools: tools ?? secrets.tools };
     const at = places ?? this.placesFor(next.keys, next.headers, secrets.places);
     const doc: SecretsDoc = {
       v: FORMAT,
@@ -612,6 +615,7 @@ export class Book {
       ...(secrets.device !== undefined ? { device: secrets.device } : {}),
       ...(Object.keys(next.headers).length > 0 ? { headers: next.headers } : {}),
       ...(Object.keys(at).length > 0 ? { places: at } : {}),
+      ...(Object.keys(next.tools).length > 0 ? { tools: next.tools } : {}),
     };
     if (this.deps.store.secretsWritten !== false) {
       try {
@@ -623,6 +627,7 @@ export class Book {
     secrets.keys = next.keys;
     secrets.headers = next.headers;
     secrets.places = at;
+    secrets.tools = next.tools;
   }
 
   /** Of `places`, those of the connections that have a key or headers' values kept: the secrets keep a place beside what was given for it alone. */
@@ -702,6 +707,33 @@ export class Book {
     } catch (error) {
       this.deps.log(errorWords(error));
     }
+  }
+
+  /** The names of the secrets set for his tools and servers (C4), sorted. */
+  async toolSecretNames(): Promise<string[]> {
+    return Object.keys((await this.secretsNow()).tools).sort();
+  }
+
+  /** The value of a secret his tools and servers send, by its name; undefined when none is set. */
+  async toolSecret(name: string): Promise<string | undefined> {
+    return own((await this.secretsNow()).tools, name);
+  }
+
+  /**
+   * Sets the secret of a name for his tools and servers, or (null) takes it away, written at once. A
+   * value is `floor` characters at least (`calls.secretFloor`), as a key is: it is taken out of what
+   * an address answers by that floor.
+   */
+  setToolSecret(name: string, value: string | null, floor: number): Promise<void> {
+    return this.serial(async () => {
+      const secrets = await this.secretsNow();
+      if (name.trim() === "") throw new Error("A secret needs a name: the name a tool's or a server's file gives it.");
+      if (value !== null && value.trim().length < floor) throw new Error(`A secret needs ${floor} characters at least: it is taken out of whatever an address says back, and a shorter one only where it stands as a word of its own. ${settingWords(MODELS.secretFloor)} says how many.`);
+      const tools = { ...secrets.tools };
+      if (value === null) delete tools[name];
+      else tools[name] = value;
+      await this.writeSecrets(undefined, undefined, undefined, tools);
+    });
   }
 
   /**

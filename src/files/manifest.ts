@@ -15,8 +15,11 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** A manifest read from its file: the tool, or the problems that leave it out. */
-export function parseManifest(file: FileText, name: string): { manifest?: ToolManifest; problems: Problem[] } {
+/**
+ * A manifest read from its file: the tool, or the problems that leave it out; and, either way, what it
+ * runs or calls as far as its file says (`written`), so a list of what waits can show a broken one too.
+ */
+export function parseManifest(file: FileText, name: string): { manifest?: ToolManifest; problems: Problem[]; written?: { kind: "command-tool" | "http-tool"; runs: string } } {
   const problems: Problem[] = [];
   const problem = (message: string) => problems.push({ path: file.path, level: file.level, message });
   let raw: unknown;
@@ -65,6 +68,7 @@ export function parseManifest(file: FileText, name: string): { manifest?: ToolMa
     }
     runs = { address, method, headers };
   }
-  if (problems.length > 0 || runs === undefined) return { problems };
-  return { manifest: { name, family, parameters: takes as JsonObject, runs, ...(typeof timeout === "number" ? { timeout } : {}), path: file.path, level: file.level }, problems };
+  const written = command !== undefined ? { kind: "command-tool" as const, runs: command } : address !== undefined ? { kind: "http-tool" as const, runs: address } : undefined;
+  if (problems.length > 0 || runs === undefined) return { problems, ...(written !== undefined ? { written } : {}) };
+  return { manifest: { name, family, parameters: takes as JsonObject, runs, ...(typeof timeout === "number" ? { timeout } : {}), path: file.path, level: file.level }, problems, ...(written !== undefined ? { written } : {}) };
 }

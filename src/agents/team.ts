@@ -145,12 +145,16 @@ interface Made {
   limits: ModelLimits;
   again: Map<string, string | undefined>;
   session: string;
+  /** The model it runs on, which its kept work is read back for (a job that goes on). */
+  model: AgentModel["model"];
 }
 
 /** Who an agent is made for: the agent whose call starts it, and the call its work hangs under; neither for a job the user started. */
 interface Origin {
   agent?: string;
   parent?: ParentCall;
+  /** Its own session with its model, where it has one already (a job's, which goes on in it). */
+  session?: string;
 }
 
 /** The first agent of a run of its own, made and ready to start (`Team.first`), its brief its runner's fixed context. */
@@ -160,6 +164,8 @@ export interface FirstAgent {
   /** What it was given by name, and what of it nobody could give. */
   given: string[];
   missing: string[];
+  /** The model it runs on. */
+  model: AgentModel["model"];
 }
 
 /** What the team reads once a turn, the first time it is asked to do anything. */
@@ -270,14 +276,15 @@ export class Team implements TeamWork {
    * `delegate` makes a sub-agent. It stands where a turn's lead does: the user's limits on how deep
    * and how many hold for the agents it starts and not for it, and it has nobody above it to ask.
    * `by` is the agent whose call starts it and `parent` that call; neither when the user starts it.
-   * Gives it ready to start, or the answer that says why none can be made.
+   * `session` is its own session (the job's), which its work is kept in, and goes on in when the job
+   * is carried on or resumed. Gives it ready to start, or the answer that says why none can be made.
    */
-  async first(call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined): Promise<FirstAgent | LoopToolResult> {
-    const made = await this.#make(call, { ...(by !== undefined ? { agent: by.id } : {}), ...(parent !== undefined ? { parent } : {}) }, await this.#load());
+  async first(call: DelegateCall, by: AgentRef | undefined, parent: ParentCall | undefined, session: string): Promise<FirstAgent | LoopToolResult> {
+    const made = await this.#make(call, { ...(by !== undefined ? { agent: by.id } : {}), ...(parent !== undefined ? { parent } : {}), session }, await this.#load());
     if (!("runner" in made)) return made;
     this.#d.gauge?.(made.ref, made.limits);
     this.#d.session?.(made.ref, "job", parent);
-    return { ref: made.ref, runner: made.runner, given: made.given, missing: made.missing };
+    return { ref: made.ref, runner: made.runner, given: made.given, missing: made.missing, model: made.model };
   }
 
   /** An agent made from its definition and ready to start, or the answer that says why none can be. */
@@ -314,7 +321,7 @@ export class Team implements TeamWork {
     const rules = d.rules();
     const keep = d.keep?.(ref);
     const questions = d.questions?.();
-    const session = d.ids();
+    const session = origin.session ?? d.ids();
     const options: RunnerOptions = {
       agent: ref,
       trace: d.trace,
@@ -391,7 +398,7 @@ export class Team implements TeamWork {
     // Its definition's items as given now: a message that continues it gives again only those that changed.
     const again = new Map<string, string | undefined>(definition.given.map((name) => [name, given.blocks.find((block) => block.name === name)?.text]));
     // Its start record names only what it was handed.
-    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, again, session, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
+    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, again, session, model: model.model, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {

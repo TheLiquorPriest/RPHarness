@@ -84,7 +84,7 @@ describe("a job's brief", () => {
     const turn = await s.play("Fixture: start the count.");
     expect((await turn.done).status).toBe("done");
 
-    const made = await turn.team.first({ agent: "keeper", brief: BRIEF, attach: [] }, undefined, undefined);
+    const made = await turn.team.first({ agent: "keeper", brief: BRIEF, attach: [] }, undefined, undefined, "s-job");
     if (!("runner" in made)) throw new Error("The team made no keeper.");
     expect((await made.runner.start({ messages: [] }).done).status).toBe("done");
 

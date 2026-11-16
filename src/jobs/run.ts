@@ -4,6 +4,7 @@
 // sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools. A
 // job started from a turn holds that turn's prompt (R-16): its prompt tools and `prompt:` names read
 // the prompt RPH kept for that turn, so a mapper run as a job maps it.
+import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
 import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
@@ -16,7 +17,9 @@ import { callTerms, interruptFor, readSettings, type Settings } from "../harness
 import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
 import type { SessionBook } from "../sessions/book";
-import { type AgentOutcome, type AgentRunner, Budget, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
+import { keptWork } from "../sessions/work";
+import { userMessage } from "../harness/prompt";
+import { type AgentOutcome, type AgentRunner, Budget, emptyUsage, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
@@ -58,6 +61,13 @@ export interface JobAsk {
   spend: DaySpend;
   /** Limits of its own from the start. The owner's own start (none names an agent) gives his word for this job: each stands in place of the settings', looser or tighter. An agent's start only makes each tighter than the settings', never looser. */
   limits?: JobLimits;
+  /**
+   * A job that goes on (§13.5): carried on with more after it stopped at one of its limits, or
+   * resumed after a restart cut it off. Its agent starts from its own work as its session kept it,
+   * then `line` (`.prompts/jobs.md`'s words); its limits count on from what it had spent (`used`),
+   * with what the owner gave it beyond them (`more`) added to each.
+   */
+  goOn?: { used: Usage; more?: JobLimits; line?: string };
 }
 
 /** How a job's run ended: its agent's outcome, what every agent of it spent, and a limit of the run's own it reached. */
@@ -133,19 +143,24 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const given = ask.limits ?? {};
   const owner = ask.by === undefined;
   const limit = (setting: number | undefined, asked: number | undefined): number | undefined => (asked === undefined ? setting : owner || setting === undefined ? asked : Math.min(setting, asked));
-  const time = limit(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
-  const calls = limit(settings.jobs.run.calls, given.calls);
-  const tokensIn = limit(settings.jobs.run.tokensIn, given.tokensIn);
-  const tokensOut = limit(settings.jobs.run.tokensOut, given.tokensOut);
+  // What the owner gave it beyond these by carrying it on adds to each (to what it had spent, where none was set); its time is that of the run that goes on.
+  const more = ask.goOn?.more ?? {};
+  const used = ask.goOn?.used ?? emptyUsage();
+  const plus = (max: number | undefined, extra: number | undefined, spent: number): number | undefined => (extra === undefined ? max : (max ?? spent) + extra);
+  const time = more.time !== undefined ? more.time * 1000 : limit(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
+  const calls = plus(limit(settings.jobs.run.calls, given.calls), more.calls, used.calls);
+  const tokensIn = plus(limit(settings.jobs.run.tokensIn, given.tokensIn), more.tokensIn, used.input);
+  const tokensOut = plus(limit(settings.jobs.run.tokensOut, given.tokensOut), more.tokensOut, used.output);
+  const tokens = plus(given.tokens, more.tokens, used.input + used.output);
   // A job started by another job's agent spends from that job's run, which spends from the user's jobs' day, which spends from every agent's day; any other, from the jobs' day. The usage book counts every call into the day as it ends, so these budgets only read the counts.
   const everyAgent = new Budget("day", settings.day.tokens !== undefined ? { tokens: settings.day.tokens } : {}, undefined, { spent: ask.spend.all, cachedWeight: settings.cachedWeight });
   const day = new Budget("day", settings.jobs.tokensPerDay !== undefined ? { tokens: settings.jobs.tokensPerDay } : {}, everyAgent, { spent: ask.spend.jobs, cachedWeight: settings.cachedWeight });
   // Its own `tokens` count a cached re-read at the weight the day's job tokens do, so the two limits on a job's tokens mean the same; tokens in and out count in full, as the run limits they tighten.
   const budget = new Budget(
     "job",
-    { ...(calls !== undefined ? { calls } : {}), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(given.tokens !== undefined ? { tokens: given.tokens } : {}) },
+    { ...(calls !== undefined ? { calls } : {}), ...(tokensIn !== undefined ? { tokensIn } : {}), ...(tokensOut !== undefined ? { tokensOut } : {}), ...(tokens !== undefined ? { tokens } : {}) },
     ask.over ?? day,
-    { cachedWeight: settings.cachedWeight },
+    { cachedWeight: settings.cachedWeight, ...(ask.goOn !== undefined ? { used: { ...ask.goOn.used } } : {}) },
   );
   const working = new Set<{ runner: AgentRunner; work: Work }>();
   let registry: Registry | undefined;
@@ -274,7 +289,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   registry = new Registry(tools, await env.tools.all(scope), await core.external.tools(guidance, settings, words));
   if (registry.shadowed.length > 0) env.log.warn("Host tools, and his own, that take the name of a tool before them are left out.", { tools: registry.shadowed });
 
-  const made = await team.first(ask.call, ask.by, ask.parent);
+  // Its agent's own session is the job's: its work is kept there, and a job that goes on reads it back.
+  const made = await team.first(ask.call, ask.by, ask.parent, scope.session);
   if (!("runner" in made)) return made;
   if (made.missing.length > 0) env.log.warn("A job's agent was not given what nobody could find.", { job: ask.id, agent: made.ref.id, missing: made.missing });
   const definition = await guidance.definition(ask.call.agent);
@@ -340,7 +356,17 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         for (const entry of working) entry.work.stop();
       };
       // Its brief is its runner's fixed context (`Team.first`), which every request carries after its opening block.
-      const work = runner.start({ messages: [] }, { ...(ask.parent !== undefined ? { parent: ask.parent } : {}), given: made.given });
+      // A job that goes on starts from its own work as its session kept it, then the line it goes on under; one whose session cannot be read starts from that line alone.
+      let messages: AgentMessage[] = [];
+      if (ask.goOn !== undefined) {
+        try {
+          messages = await core.book.with({ user: scope.user, chat: scope.chat, session: scope.session }, (file) => keptWork(file.log, scope.turn ?? ask.id, made.model, (tool) => texts.unfinished?.({ tool })));
+        } catch (error) {
+          env.log.warn("A job's own session could not be read back; it goes on from its brief.", { job: ask.id, error: error instanceof Error ? error.message : String(error) });
+        }
+        if (ask.goOn.line !== undefined) messages.push(userMessage(ask.goOn.line.trimEnd(), env.clock.now()));
+      }
+      const work = runner.start({ messages }, { ...(ask.parent !== undefined ? { parent: ask.parent } : {}), given: made.given });
       const entry = { runner, work };
       working.add(entry);
       signal.addEventListener("abort", stop, { once: true });

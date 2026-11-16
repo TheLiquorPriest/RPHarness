@@ -21,6 +21,7 @@
 import type { DelegateCall } from "../agents/tools";
 import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
 import { loadGuidance } from "../files";
+import type { Fields } from "../files/api";
 import { lines } from "../harness/means";
 import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
 import type { JobCount } from "../harness/usage";
@@ -73,6 +74,19 @@ function errorWords(error: unknown): string {
 /** The owner's switches as the store keeps them; a value that is none, or is not one, leaves both off. */
 function switchesOf(value: JsonValue | undefined): JobSwitches {
   return { off: isObject(value) && value["off"] === true, held: isObject(value) && value["held"] === true };
+}
+
+/** A limit given that is not a whole number above 0, as the refusal that names it; none where each is. */
+function badLimit(limits: JobLimits | undefined): JobRefusal | undefined {
+  const bad = Object.entries(limits ?? {}).find(([, value]) => value !== undefined && !(Number.isInteger(value) && value > 0));
+  return bad === undefined ? undefined : { refused: "limit", limit: bad[0] as keyof JobLimits, value: bad[1] as number };
+}
+
+/** Two lots of more, added up limit by limit. */
+function added(had: JobLimits | undefined, more: JobLimits): JobLimits {
+  const sum: JobLimits = { ...had };
+  for (const [key, value] of Object.entries(more) as [keyof JobLimits, number | undefined][]) if (value !== undefined) sum[key] = (sum[key] ?? 0) + value;
+  return sum;
 }
 
 export class Jobs implements JobsApi, JobsWork {
@@ -243,8 +257,8 @@ export class Jobs implements JobsApi, JobsWork {
 
   /** The user starts a job, tied to no turn. The limits of his start stand in place of the settings' for it. The job, or why none could be started. */
   async start(scope: Scope, start: JobStart): Promise<JobView | JobRefusal> {
-    const bad = Object.entries(start.limits ?? {}).find(([, value]) => value !== undefined && !(Number.isInteger(value) && value > 0));
-    if (bad !== undefined) return { refused: "limit", limit: bad[0] as keyof JobLimits, value: bad[1] as number };
+    const bad = badLimit(start.limits);
+    if (bad !== undefined) return bad;
     const begun = await this.#begin({ scope: { user: scope.user, chat: scope.chat, session: this.#core.ids() }, call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
     return this.#started(begun, start.agent);
   }
@@ -312,6 +326,59 @@ export class Jobs implements JobsApi, JobsWork {
     if (!AGAIN.includes(old.state)) return { refused: "state", id, state: old.state, applies: [...AGAIN] };
     const begun = await this.#begin({ scope: { user, chat: old.scope.chat, session: this.#core.ids() }, call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
     return this.#started(begun, old.agent);
+  }
+
+  /**
+   * A job that stopped at one of its own limits (its run's, or its agent's; never the day's, which is
+   * all his jobs') goes on from its own session where it stood, with more of each limit named added to
+   * what it had; its agent is told it was given more (`.prompts/jobs.md` `carried_on`).
+   */
+  async carryOn(user: string, id: string, more: JobLimits): Promise<JobView | JobRefusal> {
+    const bad = badLimit(more);
+    if (bad !== undefined) return bad;
+    const old = await this.get(user, id);
+    if (old === undefined) return { refused: "no-job", id };
+    if (old.state !== "done") return { refused: "state", id, state: old.state, applies: ["done"] };
+    if (old.limit === undefined || old.limit.per === "day") return { refused: "not-at-limit", id };
+    return this.#goOn({ ...old, more: added(old.more, more) }, "carried_on", { limit: old.limit.limit, ...more });
+  }
+
+  /** An interrupted job goes on from the last call its own session holds, with what it had done and spent; its agent is told it was cut off (`.prompts/jobs.md` `resumed`). */
+  async resume(user: string, id: string): Promise<JobView | JobRefusal> {
+    const old = await this.get(user, id);
+    if (old === undefined) return { refused: "no-job", id };
+    if (old.state !== "interrupted") return { refused: "state", id, state: old.state, applies: ["interrupted"] };
+    return this.#goOn(old, "resumed", {});
+  }
+
+  /**
+   * The job, the same one, waits for a place again and goes on from its own session: its spend counts
+   * on from what it had, it is not counted again among the day's jobs, and none goes on past the day's
+   * tokens or while jobs are switched off.
+   */
+  async #goOn(view: JobView, line: string, fields: Fields): Promise<JobView | JobRefusal> {
+    const core = this.#core;
+    const { scope } = view;
+    if (this.#switchesOf(scope.user).off) return { refused: "off" };
+    const part = lines(await loadGuidance(core.env.files, scope).part(LINES_PART));
+    const said = part?.line(line, fields);
+    const prepared = await prepareJob(
+      { ...core, jobs: this },
+      {
+        id: view.id,
+        scope,
+        call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] },
+        ...(view.startedBy !== "user" ? { by: view.startedBy } : {}),
+        spend: await core.usage.spend(scope.user),
+        ...(view.limits !== undefined ? { limits: view.limits } : {}),
+        goOn: { used: view.usage, ...(view.more !== undefined ? { more: view.more } : {}), ...(said !== undefined ? { line: said } : {}) },
+      },
+    );
+    if (!("run" in prepared)) return { refused: "agent", agent: view.agent };
+    const hit = prepared.day.reached(prepared.agent)[0];
+    if (hit !== undefined) return { refused: "day-tokens", max: hit.max, value: hit.value };
+    const { ended: _ended, limit: _limit, asks: _asks, ...rest } = view;
+    return { ...this.#enqueue({ ...rest, state: "queued" }, prepared, jobCountsFor(prepared.settings, prepared.connection)).view };
   }
 
   /** The owner's answer to a job that asks: it goes on in the session it has, with the point it asks at next if he names one, or it ends with what it has. */

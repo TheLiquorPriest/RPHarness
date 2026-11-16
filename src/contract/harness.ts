@@ -56,6 +56,8 @@ export interface JobView {
   repeats?: string;
   /** For a job that asks (state `asking`): the ask point it reached, and the tokens it had spent when it did, counted as `JobLimits.tokens` is. */
   asks?: { at: number; tokens: number };
+  /** What the owner gave it beyond its limits by carrying it on, each added up over every time he did: each adds to the limit it names, its run counting on from what it had spent (`time`: seconds of the run that goes on). */
+  more?: JobLimits;
 }
 
 /** A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer. */
@@ -130,7 +132,9 @@ export type JobRefusal =
   /** The user has no job by this id. */
   | { refused: "no-job"; id: string }
   /** The job is not in a state the control applies to. */
-  | { refused: "state"; id: string; state: JobState; applies: JobState[] };
+  | { refused: "state"; id: string; state: JobState; applies: JobState[] }
+  /** The job did not stop at one of its own limits, so more of one would not let it go on. */
+  | { refused: "not-at-limit"; id: string };
 
 /**
  * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found
@@ -162,6 +166,13 @@ export interface JobsApi {
   letGo(user: string, id: string): Promise<JobView | JobRefusal>;
   /** Starts an interrupted, failed or cancelled job again, as a new job with the same agent, brief, attachments and limits, that names the one it repeats. Owner's presses only (C-24). */
   again(user: string, id: string): Promise<JobView | JobRefusal>;
+  /**
+   * A job that stopped at one of its own limits goes on from its own session, where it stood, with
+   * more of each limit `more` names, added to what it had. Owner's presses only (C-24).
+   */
+  carryOn(user: string, id: string, more: JobLimits): Promise<JobView | JobRefusal>;
+  /** An interrupted job goes on from the last call its own session holds, with what it had done and spent. Owner's presses only (C-24). */
+  resume(user: string, id: string): Promise<JobView | JobRefusal>;
   /** The owner's answer to a job that asks: it goes on in its own session, or ends with what it has. Owner's presses only (C-24). */
   answer(user: string, id: string, answer: JobAnswer): Promise<JobView | JobRefusal>;
 }

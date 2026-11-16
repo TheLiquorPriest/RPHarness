@@ -3,7 +3,7 @@
 // which then runs as itself (`ToolReach.run`). Neither adds anything to the tools an agent's
 // requests carry, so the cached front of every prompt holds through a session. Their words are the
 // lines of `.prompts/tool-search.md`.
-import type { JsonValue, Switchable, SwitchesPort } from "../../contract";
+import type { AgentRef, JsonValue, Switchable, SwitchesPort } from "../../contract";
 import type { Guidance } from "../../files/api";
 import { fit } from "../../loop/fit";
 import { answer, argumentsOf, fieldsOf, invalidFields, type OwnTool, text, type ToolText, whole, type Words } from "../kit";
@@ -23,8 +23,8 @@ export interface ToolSearchDeps {
   reach: ToolReach;
   /** The host's switches; without them everything that runs a command or calls out is off. */
   switches?: SwitchesPort;
-  /** The guidance of the scope the tools serve: the lines they answer in. */
-  guidance: Pick<Guidance, "part">;
+  /** The guidance of the scope the tools serve: the lines they answer in, and each family's guide (`.tools/<family>.md`). */
+  guidance: Pick<Guidance, "part" | "tool">;
   /**
    * The tool answers' lines (`.prompts/tool-notices.md`): a found tool's arguments that do not fit
    * are answered with the same line as a fixed tool's (`invalid`).
@@ -40,6 +40,31 @@ export interface ToolSearchDeps {
   perCall: number;
   /** How the tools a search covers are ordered; `plainRank` when absent. */
   rank?: Rank;
+  /**
+   * The families whose guide a search has given in the calling agent's session, kept where the
+   * session is (its cache); absent: kept for as long as these tools are, which is the session of a
+   * run that ends with them.
+   */
+  guidesGiven?: GuidesGiven;
+}
+
+/** The families whose guide a search gave in an agent's session: each guide is given once a session. */
+export interface GuidesGiven {
+  given(agent: AgentRef): Promise<ReadonlySet<string>>;
+  add(agent: AgentRef, families: readonly string[]): Promise<void>;
+}
+
+/** Guides given, kept in memory by agent for as long as the tools are. */
+function guidesInMemory(): GuidesGiven {
+  const byAgent = new Map<string, Set<string>>();
+  return {
+    given: async (agent) => byAgent.get(agent.id) ?? new Set(),
+    add: async (agent, families) => {
+      const given = byAgent.get(agent.id) ?? new Set();
+      for (const family of families) given.add(family);
+      byAgent.set(agent.id, given);
+    },
+  };
 }
 
 /** The answers' lines as the guidance has them; a line the file does not have is no words. */
@@ -51,6 +76,7 @@ async function wordsOf(guidance: Pick<Guidance, "part">): Promise<Words> {
 
 export function toolSearch(deps: ToolSearchDeps): OwnTool {
   const own = deps.texts.get(TOOL_SEARCH);
+  const guides = deps.guidesGiven ?? guidesInMemory();
   return {
     name: TOOL_SEARCH,
     family: FAMILY,
@@ -94,9 +120,18 @@ export function toolSearch(deps: ToolSearchDeps): OwnTool {
         ...(found.length > shown.length ? [words("more", { count: found.length - shown.length })] : []),
         ...[...waiting.values()].map((thing) => words("waiting", thing)),
       ].filter((line): line is string => line !== undefined && line !== "");
-      const details: JsonValue = { found: shown.map((tool) => tool.name), waiting: [...waiting.values()].map((thing) => thing.name) };
+      // The guide of each family a find is of (R-66), once a session: a family of its fixed list has its guide in the opening; one an earlier search gave is named, not repeated.
+      const fixedFamilies = new Set(reach.tools.filter((tool) => reach.fixed.includes(tool.name)).map((tool) => tool.family));
+      const guided = await guides.given(ctx.agent);
+      const families = [...new Set(shown.map((tool) => tool.family))].filter((family) => !fixedFamilies.has(family) && !reach.tools.some((tool) => tool.name === family));
+      const read = await Promise.all(families.filter((family) => !guided.has(family)).map(async (family) => ({ family, part: await deps.guidance.tool(family) })));
+      const fresh = read.flatMap(({ family, part }) => (part?.format === "template" ? [{ family, text: part.render().text.trim() }] : [])).filter(({ text }) => text !== "");
+      if (fresh.length > 0) await guides.add(ctx.agent, fresh.map(({ family }) => family));
+      const guideLines = [...fresh.map(({ family, text }) => words("guide", { family, guide: text })), ...families.filter((family) => guided.has(family)).map((family) => words("guide_given", { family }))].filter((line): line is string => line !== undefined && line !== "");
+      const details: JsonValue = { found: shown.map((tool) => tool.name), waiting: [...waiting.values()].map((thing) => thing.name), guides: fresh.map(({ family }) => family) };
       if (shown.length === 0 && waiting.size === 0) return { ...answer(words("none_found", { words: asked })), details };
-      return { ...answer(lines.length === 0 ? undefined : lines.join("\n")), details };
+      const said = [...(lines.length === 0 ? [] : [lines.join("\n")]), ...guideLines];
+      return { ...answer(said.length === 0 ? undefined : said.join("\n\n")), details };
     },
   };
 }

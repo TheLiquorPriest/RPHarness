@@ -3,7 +3,7 @@
 // A tool of the external tier (web, HTTP, MCP; §16) has a setting of its own beside the lanes,
 // named `external`, with the same three values, whatever lane it names.
 
-import type { AgentRef, Scope } from "./common";
+import type { AgentRef, RunScope } from "./common";
 import type { JsonValue } from "./json";
 
 /** The user's setting for a lane: writes go ahead; wait for the user's word; never go ahead. */
@@ -27,10 +27,10 @@ export type ApprovalAnswer = { go: true } | { go: false; reason?: string };
 /** Without it, every lane is Auto, and `external` too (Appendix D.1: "Write permission, each lane: Auto"). */
 export interface ApprovalsPort {
   /** The user's setting in this chat for a lane, or, asked with `external`, for the tools of the external tier. */
-  permission(scope: Scope, lane: string): Promise<LanePermission>;
+  permission(scope: RunScope, lane: string): Promise<LanePermission>;
   /**
    * Asks the user and resolves with the answer. The signal ends the wait (the turn stopped or its
    * time ran out): the host takes the question down, and the promise rejects with the signal's reason.
    */
-  ask(scope: Scope, ask: ApprovalAsk, signal: AbortSignal): Promise<ApprovalAnswer>;
+  ask(scope: RunScope, ask: ApprovalAsk, signal: AbortSignal): Promise<ApprovalAnswer>;
 }

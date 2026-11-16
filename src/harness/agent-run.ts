@@ -4,7 +4,7 @@
 // its request files and transcripts as a turn's does. Every agent of a run made here writes its
 // transcript (`transcripts.ts`), and each sub-agent and job's agent its own session's file
 // (`sessions/runs.ts`), closed at the run's end (`close`).
-import type { AgentRef, Environment, Places, Scope } from "../contract";
+import type { AgentRef, Environment, Places, RunScope } from "../contract";
 import type { Guidance, RuleRun } from "../files/api";
 import type { ParentCall, RunTrace } from "../loop/trace";
 import type { GateCall, KeepRequest, LoopToolResult, ToolGate } from "../loop/types";
@@ -20,7 +20,7 @@ import type { CompactFacts } from "../sessions/compact";
 
 export interface AgentRunDeps {
   env: Environment;
-  scope: Scope;
+  scope: RunScope;
   trace: RunTrace;
   places: Places;
   /** The guidance of the run: where each of RPH's own tools' descriptions comes from. */

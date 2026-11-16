@@ -27,6 +27,7 @@ import { listedTools, ownTexts } from "./own";
 import { keptOpening, Sessions } from "./sessions";
 import { rebuildRequest } from "./requests";
 import { switchRule, testRule } from "./ruletest";
+import { questionsCannot } from "./judge";
 import { formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
 import { Registry } from "../tools";
@@ -69,7 +70,17 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   const usage = new UsageBook({ store: env.store, clock: env.clock, log: env.log, files: env.files });
   // Each chat's index of its sessions, brought up to date whenever a session's file changes, so the Sessions page lists without reading them.
   const listing = new SessionListing(env.store, env.log);
-  const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now(), changed: (file) => listing.keep(file.scope, viewOf(file, env.clock.now()), file.log.leftTurns()) });
+  // A session of a chat is listed for its chat; a job's of no chat (C-23) is on no chat's list.
+  const book = new SessionBook({
+    files: env.files,
+    log: env.log,
+    ids,
+    now: () => env.clock.now(),
+    changed: (file) => {
+      const { scope } = file;
+      if (scope.chat !== undefined) listing.keep(scope, viewOf(file, scope, env.clock.now()), file.log.leftTurns());
+    },
+  });
   const external = new External({ files: env.files, switches: env.switches, secret: (user, name) => layer.toolSecret(user, name), log: env.log });
   const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, book, external });
   const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs, external };
@@ -159,7 +170,15 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     }),
 
     rules: {
-      list: (scope) => loadGuidance(env.files, scope).rules(env.switches),
+      // A question rule whose question cannot be put is listed as not in force, with what it lacks (§17.2), never left to answer "no".
+      list: async (scope) => {
+        const guidance = loadGuidance(env.files, scope);
+        const views = await guidance.rules(env.switches);
+        if (!views.some((view) => view.trigger === "question" && view.inForce)) return views;
+        const settings = await readSettings(guidance, env.files, scope, env.log);
+        const judge = await questionsCannot(guidance, layer.api, scope.user, settings.judge);
+        return judge === undefined ? views : views.map((view) => (view.trigger === "question" && view.inForce ? { ...view, inForce: false, why: "judge" as const, judge } : view));
+      },
       // One writer per fact: a host fact under one of RPH's names is listed marked, and said in the log.
       facts: async () => {
         const facts = listFacts(env.facts);

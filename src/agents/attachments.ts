@@ -14,7 +14,7 @@
 // A stretch of the chat is given whole, however long: read page by page of the user's
 // `tools.perCall` messages, in order, nothing cut (§10.5: "each in full").
 // Messages and entries are laid out by lines of a file; nothing here adds a word.
-import type { AgentRef, AttachMoment, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
+import type { AgentRef, AttachMoment, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, RunScope, Scope } from "../contract";
 import type { LinesPart } from "../files/api";
 
 /** A name an agent is given, and where it was named: its definition's `given:`, or the call that started it. */
@@ -31,7 +31,8 @@ export interface Given {
 
 export interface AttachDeps {
   env: Pick<Environment, "files" | "chat" | "lore" | "events" | "log">;
-  scope: Scope;
+  /** Where the agent works: a chat's scope, or a job's of no chat (C-23), where a stretch of the chat or a lore entry is not found. */
+  scope: RunScope;
   /** The lines a chat message (`chat_message`) and a lore entry's head (`lore_entry`) are laid out by. */
   lines: LinesPart | undefined;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map; none: such a name is not found. */
@@ -102,7 +103,7 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
     return again.status === "read" ? again.text : undefined;
   };
 
-  const chatText = async (stretch: Stretch): Promise<string | undefined> => {
+  const chatText = async (scope: Scope, stretch: Stretch): Promise<string | undefined> => {
     let range: HistoryRange | undefined;
     if ("named" in stretch) {
       const { ranges } = await env.chat.info(scope);
@@ -138,7 +139,7 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
     return joined(laid);
   };
 
-  const loreText = async (id: string): Promise<string | undefined> => {
+  const loreText = async (scope: Scope, id: string): Promise<string | undefined> => {
     const [entry] = await env.lore.read(scope, [id], reader);
     if (entry === undefined) return undefined;
     const head = lines?.line("lore_entry", { id: entry.id, title: entry.title, source: entry.source, keys: entry.keys }) ?? "";
@@ -155,9 +156,9 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
         case "file":
           return { own: true, text: await fileText(kind.path) };
         case "chat":
-          return { own: true, text: await chatText(kind.stretch) };
+          return { own: true, text: scope.chat === undefined ? undefined : await chatText(scope, kind.stretch) };
         case "lore":
-          return { own: true, text: await loreText(kind.id) };
+          return { own: true, text: scope.chat === undefined ? undefined : await loreText(scope, kind.id) };
         case "prompt":
           return { own: true, text: await deps.slice?.(ref, reader) };
         case "host":

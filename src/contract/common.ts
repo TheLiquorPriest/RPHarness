@@ -39,6 +39,25 @@ export interface UserScope {
   user: string;
 }
 
+/**
+ * Where a job the owner starts for no chat runs (C-23; the Build page's model jobs): the user and
+ * the job's own session, which sits at the user's level; no chat and no turn. Its files are the
+ * shipped and global levels (C19).
+ */
+export interface UserSessionScope extends UserScope {
+  /** The job's own session, at the user's level. */
+  session: string;
+  chat?: undefined;
+  turn?: undefined;
+}
+
+/**
+ * Where a run's work happens: a chat's (`Scope`), or that of a job of no chat (`UserSessionScope`).
+ * Every port and tool a job's run reaches takes this, and one that cannot do its work without a chat
+ * says so in its own words; `answer`, `talk` and a turn's own work keep a chat.
+ */
+export type RunScope = Scope | UserSessionScope;
+
 /** One agent of a run, as RPH names it to the host: for the record of who wrote what, for dropping one agent's staged writes, and for who reads lore. */
 export interface AgentRef {
   /** The agent's handle, unique within its run (a turn, a job or a talk). The lead continues a sub-agent by it (§13.4). */

@@ -30,9 +30,9 @@ export function closingOf(file: SessionFile): ClosedEntry | undefined {
   return standing(file.log, new Set(pathTurns(file.log, file.log.leaf).map((turn) => turn.entry.turn))).at(-1);
 }
 
-/** A session as it stands at its leaf: the newest closing that stands says who closed it. */
-export function viewOf(file: SessionFile, now: number): SessionView {
-  const { log, header, scope } = file;
+/** A session of a chat (`scope`) as it stands at its leaf: the newest closing that stands says who closed it. */
+export function viewOf(file: SessionFile, scope: Scope, now: number): SessionView {
+  const { log, header } = file;
   const turns = pathTurns(log, log.leaf);
   const closing = standing(log, new Set(turns.map((turn) => turn.entry.turn))).at(-1);
   return {
@@ -97,7 +97,7 @@ function compactionsOf(log: SessionLog): CompactionView[] {
 }
 
 export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
-  const view = (file: SessionFile): SessionView => viewOf(file, d.now());
+  const view = (file: SessionFile, scope: Scope): SessionView => viewOf(file, scope, d.now());
   const turnOf = (scope: Scope): { turn?: string } => (scope.turn !== undefined ? { turn: scope.turn } : {});
   // An agent's run is off the path with the turn it was played in (a swipe, a delete), as that turn's session says; its file is kept.
   const placed = async (seen: SessionView): Promise<SessionView> => {
@@ -111,11 +111,11 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
     open: (scope, opening) =>
       book.with(scope, async (file) => {
         // Opened once: the summary it opened with stays the one it carries (§11), until the host says another (`opensWith`).
-        if (file.log.opened !== undefined) return view(file);
+        if (file.log.opened !== undefined) return view(file, scope);
         file.add({ type: "opened", parent: file.log.leaf, ...(opening?.summary !== undefined && opening.summary !== "" ? { summary: opening.summary } : {}) });
         await file.settled();
         d.told(scope, { session: scope.session, change: "opened", ...turnOf(scope) });
-        return view(file);
+        return view(file, scope);
       }),
 
     opensWith: (scope, summary) =>
@@ -124,12 +124,12 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         const now = file.log.opensWith?.summary ?? file.log.opened?.summary ?? "";
         if (summary !== now) file.add({ type: "opensWith", parent: file.log.leaf, summary });
         await file.settled();
-        return view(file);
+        return view(file, scope);
       }),
 
     close: (scope, how) =>
       book.with(scope, async (file) => {
-        if (view(file).state === "closed") return view(file);
+        if (view(file, scope).state === "closed") return view(file, scope);
         // The closing hangs at the end of the turn that did it, or for the owner's, the chat's newest
         // turn, so it leaves the path with that turn.
         const tip = scope.turn === undefined ? undefined : file.log.tip(scope.turn);
@@ -138,18 +138,18 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         await file.settled();
         d.closed(scope);
         d.told(scope, { session: scope.session, change: "closed", ...turnOf(scope), ...by });
-        return view(file);
+        return view(file, scope);
       }),
 
     reopen: (scope) =>
       book.with(scope, async (file) => {
         // His undo takes back his own closings that stand; a turn's stands until its turn leaves the path.
         const his = standing(file.log, new Set(pathTurns(file.log, file.log.leaf).map((turn) => turn.entry.turn))).filter((closing) => closing.by === "user");
-        if (his.length === 0) return view(file);
+        if (his.length === 0) return view(file, scope);
         for (const closing of his) file.add({ type: "reopened", parent: closing.id, closing: closing.id });
         await file.settled();
         if (closingOf(file) === undefined) d.told(scope, { session: scope.session, change: "reopened", by: "user" });
-        return view(file);
+        return view(file, scope);
       }),
 
     fork: (from, to) =>
@@ -191,7 +191,7 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
           const toScope: Scope = { user: to.user, chat: to.chat, session: to.session };
           await copyCache(d.files, { scope: fromScope, places: await d.files.places(fromScope) }, { scope: toScope, places: await d.files.places(toScope) }, d.log);
           d.told(to, { session: to.session, change: "forked", from: from.session, turn: from.turn });
-          return view(target);
+          return view(target, to);
         });
       }),
 
@@ -200,11 +200,11 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         // Marked when there is something to summarize: the session's next turn compacts at its start, where the lead can save what matters first.
         if (file.log.asked === undefined && compactionAt(file.log, file.log.leaf, undefined, await d.keepTurns(scope)) !== undefined) file.add({ type: "compact", parent: file.log.leaf });
         await file.settled();
-        return view(file);
+        return view(file, scope);
       }),
 
     get: async (scope) => {
-      const seen = await book.with(scope, (file) => (file.header === undefined && file.log.entries.length === 0 ? undefined : view(file)));
+      const seen = await book.with(scope, (file) => (file.header === undefined && file.log.entries.length === 0 ? undefined : view(file, scope)));
       return seen === undefined ? undefined : placed(seen);
     },
 
@@ -225,7 +225,7 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
       });
       // One file at a time, each let go once its view is made: a chat's sessions are never in memory all at once.
       const made: { view: SessionView; left: string[] }[] = [];
-      for (const session of ids) made.push(await book.with({ user, chat, session }, (file) => ({ view: view(file), left: file.log.leftTurns() })));
+      for (const session of ids) made.push(await book.with({ user, chat, session }, (file) => ({ view: view(file, { user, chat, session }), left: file.log.leftTurns() })));
       await d.listing.rebuild(user, chat, made);
       return pageOf((await d.listing.all(user, chat)) ?? [], page?.after, limit);
     },

@@ -452,11 +452,8 @@ export class Turn {
       connections: this.#c.connections,
       settings,
       budget: this.#budget,
-      own: async (agent) => {
-        if (agent.id === this.#lead.id) return connection;
-        const own = await guidance.definition(agent.definition);
-        return own === undefined ? connection : this.#connection(own);
-      },
+      // The Author's connection judges where neither the rule nor `rules.judge` names one: this turn's lead's (Appendix D.1).
+      author: async () => connection,
       track: (entry) => {
         this.#working.add(entry);
         return () => this.#working.delete(entry);

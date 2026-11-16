@@ -3,7 +3,7 @@
 // and the rule that names it says what matters. RPH has facts of its own (`todo.open`,
 // `reply.released`, `prompt.notices`); these are the host's.
 
-import type { Scope } from "./common";
+import type { RunScope } from "./common";
 import type { JsonValue } from "./json";
 
 /** A fact the host can count, as the Rules page lists it. */
@@ -58,5 +58,5 @@ export interface FactsPort {
    * turn (C-10), so `rules.test` judges a past turn by its own facts; a fact the host cannot give as
    * of then is left out, and the rule that tests it does not fire.
    */
-  read(scope: Scope, names?: string[]): Promise<Record<string, FactValue>>;
+  read(scope: RunScope, names?: string[]): Promise<Record<string, FactValue>>;
 }

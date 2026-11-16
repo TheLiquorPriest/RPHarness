@@ -63,6 +63,8 @@ export interface GateBefore {
   hold?: Fired;
   remind: Fired[];
   permission?: CallPermission;
+  /** The call's arguments as a hook before it changed them (§5.4 "Hooks"): the tool runs with these, where they still fit its schema. */
+  args?: JsonValue;
 }
 
 /**

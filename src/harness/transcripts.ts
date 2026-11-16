@@ -4,13 +4,13 @@
 // the turn's folder (the lead, each sub-agent, the writer, a judging call, a compaction's summary
 // call); a job's agents under the turn that started the job, or in the job's own session folder
 // when the owner started it. Each line is JSON: `{"at":…,"type":"message"|"call"|"result",…}`.
-import type { AgentRef, FilesPort, JsonObject, Log, Scope, TraceEvent } from "../contract";
+import type { AgentRef, FilesPort, JsonObject, Log, RunScope, TraceEvent } from "../contract";
 import type { AgentRecord, RunTrace } from "../loop/trace";
 import { agentFileName, TRANSCRIPTS } from "./requests";
 
 export interface TranscriptsDeps {
   files: FilesPort;
-  scope: Scope;
+  scope: RunScope;
   /** The folder the run's `transcripts/` is in: the turn's, or the session's for a run with no turn. */
   folder: string;
   log: Log;

@@ -131,6 +131,14 @@ export interface RunnerOptions {
    * briefing.
    */
   changed?(): Promise<string>;
+  /** A judging model's run (§5.4): the question rule it answers and the agent whose message it judges, which its start record names. */
+  judges?: { rule: string; agent: string };
+  /**
+   * His hooks at the moment the work would end (§5.4 "Hooks", §13.3 l.1458), asked once a stretch:
+   * a hook's block gives its reason, which goes in as a follow-up, and the agent gets one more call
+   * under its limits. None: nothing is asked.
+   */
+  atRunEnd?(): Promise<string | undefined>;
 }
 
 export type WorkInput =
@@ -214,6 +222,8 @@ interface Stint {
   readonly reminders: StreamFired[];
   /** A carrier's calls (`tool_use`) as they began, by call id: its own arguments, traced only if it carries no tool. */
   readonly carried: Map<string, { args: JsonValue; closing: boolean }>;
+  /** A call's arguments as a hook before it changed them (§5.4 "Hooks"), by call id: the tool runs with them where they still fit its schema. */
+  readonly changed: Map<string, JsonValue>;
   /** The tool each carrier's call ran as itself (`runAs`), by the carrier's call id. */
   readonly ranAs: Map<string, string>;
   /** Questions put to the judging model about its messages, still unanswered. */
@@ -226,6 +236,8 @@ interface Stint {
   readonly stopped: AbortController;
   /** How many calls in a row the provider refused as too long and went out again. */
   resent: number;
+  /** Its hooks at the work's end were asked this stretch. */
+  hooked: boolean;
   /**
    * What failed in the harness inside pi's loop before a request went out (the run's point, the
    * call's settings). pi ends its loop on the throw with an answer of its own, which is no call's.
@@ -384,16 +396,18 @@ export class AgentRunner {
       finished: new Set(),
       reminders: [],
       carried: new Map(),
+      changed: new Map(),
       ranAs: new Map(),
       judging: new Set(),
       judged: [],
       halted: Promise.withResolvers<void>(),
       stopped: new AbortController(),
       resent: 0,
+      hooked: false,
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
-    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, session: this.#o.session, given: options.given ?? [], ...(this.#o.listSize !== undefined ? { tools: this.#o.listSize } : {}) });
+    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, session: this.#o.session, given: options.given ?? [], ...(this.#o.listSize !== undefined ? { tools: this.#o.listSize } : {}), ...(this.#o.judges !== undefined ? { judges: this.#o.judges } : {}) });
     const time = this.#o.limits?.time;
     if (time !== undefined) {
       stint.timer = this.#clock.setTimeout(() => {
@@ -961,6 +975,7 @@ export class AgentRunner {
       return this.#blocked(stint, call, { content: [{ type: "text", text: before.hold.text.trimEnd() }] }, before.remind.map((fired) => fired.text.trimEnd()));
     }
     if (before.remind.length > 0) stint.argued.set(id, before.remind);
+    if (before.args !== undefined) stint.changed.set(id, before.args);
     return undefined;
   }
 
@@ -1135,13 +1150,22 @@ export class AgentRunner {
       return undefined;
     }
     // The work would end here. What is due at a run's end goes in as a follow-up, and the agent
-    // gets one more call.
+    // gets one more call. It does not end while a question about its messages is unanswered (§5.4):
+    // it waits for the judging model, racing a stop, and a yes gives it one more call too.
+    if (stint.judging.size > 0) {
+      await Promise.race([Promise.allSettled([...stint.judging].map((judgment) => judgment.answer)), stint.halted.promise]);
+      if (stint.halt !== undefined) return { action: "end" };
+    }
     const due = (await this.#o.runEnd?.due({ agent: this.agent, call: this.#calls })) ?? [];
+    if (stint.halt !== undefined) return { action: "end" };
+    const kept = stint.hooked ? undefined : await this.#o.atRunEnd?.();
+    stint.hooked = true;
     if (stint.halt !== undefined) return { action: "end" };
     for (const fired of reminders) this.#add(stint, fired, "remind", "follow-up");
     for (const text of answers) this.#pi.followUp(this.#message([text]));
     for (const fired of due) this.#add(stint, fired, "follow-up", "follow-up");
     for (const judged of stint.judged.splice(0)) this.#judged(stint, judged, "follow-up");
+    if (kept !== undefined) this.#pi.followUp(this.#message([kept]));
     return undefined;
   }
 
@@ -1247,7 +1271,11 @@ export class AgentRunner {
         if (free === undefined) return { content: [], details: undefined };
         try {
           // pi waits on a tool until it settles; a stop does not.
-          const ran = await untilAborted(this.#run(tool, own ? withoutClosing(params as JsonValue) : (params as JsonValue), ctx), signal);
+          // A hook's change of the arguments holds where they still fit the tool's own schema; else the call runs as the model wrote it.
+          const asked = own ? withoutClosing(params as JsonValue) : (params as JsonValue);
+          const changed = stint.changed.get(callId);
+          const fitted = changed === undefined ? undefined : fit(tool, changed, callId);
+          const ran = await untilAborted(this.#run(tool, fitted !== undefined && "args" in fitted ? fitted.args : asked, ctx), signal);
           answered = true;
           if (ran === undefined) return { content: [], details: undefined };
           stint.ran.set(callId, ran);

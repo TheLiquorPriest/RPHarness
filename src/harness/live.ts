@@ -10,7 +10,7 @@
 // run's items, and a change to the setting is taken by the next run. The owner's hand on each run
 // going on is here too (C-19): he pauses a run of his, lets it go, or says something to its main
 // agent, and every runner of the run asks the run's hold before each request.
-import type { AgentRef, JsonValue, LiveApi, LiveFilter, LiveItem, Log, RunView, Scope, TracePort } from "../contract";
+import type { AgentRef, JsonValue, LiveApi, LiveFilter, LiveItem, Log, RunScope, RunView, TracePort } from "../contract";
 import { Holds } from "../jobs/hold";
 import type { RunHold } from "../loop";
 import { TRACE } from "./settings/trace";
@@ -57,7 +57,7 @@ export class LiveHub implements LiveApi {
    * takes it. `backlog` is the run's own `live.backlog`, read where the run holds its settings;
    * absent, the setting's default.
    */
-  tee(port: TracePort, scope: Scope, backlog: () => number = () => TRACE.liveBacklog.default): TracePort {
+  tee(port: TracePort, scope: RunScope, backlog: () => number = () => TRACE.liveBacklog.default): TracePort {
     return {
       event: (record) => {
         port.event(record);
@@ -126,7 +126,7 @@ export class LiveHub implements LiveApi {
   }
 
   /** Puts `item` in the queue of each subscriber that follows it; the run's way goes on at once. */
-  #send(item: LiveItem, scope: Scope, run: string, backlog: () => number): void {
+  #send(item: LiveItem, scope: RunScope, run: string, backlog: () => number): void {
     for (const subscriber of this.#subscribers) {
       const { filter } = subscriber;
       if (filter.user !== scope.user || (filter.chat !== undefined && filter.chat !== scope.chat) || (filter.run !== undefined && filter.run !== run)) continue;

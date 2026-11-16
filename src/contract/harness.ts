@@ -2,7 +2,7 @@
 // talk with an agent, and the pages' ways in (jobs, sessions, rules, the live view, usage,
 // definitions, models). `createHarness` builds one over an environment.
 
-import type { AgentRef, Effort, Scope, Usage } from "./common";
+import type { AgentRef, Effort, RunScope, Scope, Usage, UserScope } from "./common";
 import type { Environment } from "./environment";
 import type { RuleFiring } from "./events";
 import type { LayerLevel } from "./files";
@@ -33,7 +33,7 @@ export interface JobView {
   brief: string;
   state: JobState;
   /** Its chat, its own session, and the turn that started it, where one did (§13.5: tied to the turn). */
-  scope: Scope;
+  scope: RunScope;
   /** Nothing starts a job but an agent's `job_start` or the user (§13.5). */
   startedBy: AgentRef | "user";
   started: number;
@@ -153,9 +153,11 @@ export interface JobsApi {
   switches(user: string): Promise<JobSwitches>;
   /**
    * The user starts a job, or learns why none was started. Code never does (§13.5). Called only
-   * from the owner's own presses (C-5, C-24).
+   * from the owner's own presses (C-5, C-24). A scope with a chat starts a job of that chat; one that
+   * names only the user starts a job of no chat (C-23: the Build page's model jobs), whose files are
+   * the shipped and global levels and whose session sits at the user's level.
    */
-  start(scope: Scope, start: JobStart): Promise<JobView | JobRefusal>;
+  start(scope: Scope | UserScope, start: JobStart): Promise<JobView | JobRefusal>;
   /** Stops the user's job; undefined when he has none by that id. Owner's presses only (C-24). */
   cancel(user: string, id: string): Promise<JobView | undefined>;
   /** Sets either switch, or both, and answers how they stand. A job that waits starts only while neither is on. Owner's presses only (C-24). */
@@ -300,10 +302,12 @@ export interface RuleView {
   inForce: boolean;
   /**
    * Why not: switched off; a file its `needs:` names is not in force (§5.4); it is one of the
-   * examples under `examples/`, where nothing is in force (§5.4); or its header or text does not
-   * parse.
+   * examples under `examples/`, where nothing is in force (§5.4); its header or text does not
+   * parse; or, for a question rule, its question cannot be put (`judge` says what is missing).
    */
-  why?: "off" | "needs" | "example" | "broken";
+  why?: "off" | "needs" | "example" | "broken" | "judge";
+  /** For a question rule that cannot be asked (§5.4, §17.2): the judging model's part is missing or switched off (`part`), names no `yes:` (`yes`), or the connection that judges is none of his (`connection`). */
+  judge?: "part" | "yes" | "connection";
   /** The farther files of the same name it replaces (§5.2). */
   replaces: { level: LayerLevel; path: string }[];
 }
@@ -391,7 +395,7 @@ export interface PartsApi {
 /** A run going on now. */
 export interface RunView {
   run: string;
-  scope: Scope;
+  scope: RunScope;
   what: "turn" | "job" | "talk";
   agents: AgentRef[];
   started: number;
@@ -412,7 +416,7 @@ export interface LiveFilter {
  * its items in turn, the next once a promise it returns settles; one that has left more of a run's
  * items untaken than that run's setting `live.backlog` allows is cut off, so no run waits on it.
  */
-export type LiveItem = { type: "event"; record: TraceRecord } | { type: "delta"; scope: Scope; delta: TraceDelta } | { type: "cut"; behind: number };
+export type LiveItem = { type: "event"; record: TraceRecord } | { type: "delta"; scope: RunScope; delta: TraceDelta } | { type: "cut"; behind: number };
 
 export interface LiveApi {
   /** The user's runs going on now. */

@@ -5,12 +5,18 @@
 // (`afterToolCall`), the rules on its result, and the user's bound on what the model reads of one
 // call (R-118): its answer and reports, the rules' texts after it, and a refusal's or a hold's words,
 // with the whole kept in the turn's folder (`cache/results/`), or the session's where the run has no
-// turn. A tool found through `tool_use` is asked about as itself. Every word the model is told comes
-// from the tool answers' file. A tool's own answer stands whatever fails around it: a rule on its
-// result that could not be asked, or a whole that could not be kept, is a line beside it, and the log
+// turn. A tool found through `tool_use` is asked about as itself. His hooks (§5.4 "Hooks") run around
+// each call too: before it, after the permission, a block is the call's answer, a change of its
+// arguments is what the rules and the tool see, and what a hook adds comes back with the result;
+// after it, a block puts the hook's reason in place of what the model reads, the whole kept in the
+// turn's folder, and what a hook adds goes after the answer. Every word the model is told comes
+// from the tool answers' file, or from his hooks. A tool's own answer stands whatever fails around
+// it: a rule on its result that could not be asked, or a whole that could not be kept, is a line
+// beside it, and the log
 // names what failed. Every refusal says why, as a fact, for the call's end record. Every read and
 // search a call makes is saved whole in the turn's `queries/` (the session's, for a run with no turn).
-import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Log, Places, Scope, SwitchesPort, ToolContent } from "../contract";
+import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, JsonObject, Log, Places, RunScope, SwitchesPort, ToolContent } from "../contract";
+import type { Hooks } from "../external/hooks";
 import type { RuleRun } from "../files/api";
 import type { Fired } from "../loop/rules";
 import type { ParentCall, RunTrace } from "../loop/trace";
@@ -29,7 +35,7 @@ function errorText(error: unknown): string {
 }
 
 export interface GateDeps {
-  scope: Scope;
+  scope: RunScope;
   agent: AgentRef;
   parent?: ParentCall;
   trace: RunTrace;
@@ -47,10 +53,19 @@ export interface GateDeps {
   clipChars?: number;
   /** Where what failed around a tool is named: a rule that could not be asked, a whole that could not be kept. */
   log: Log;
+  /** His hooks before and after a tool; none runs none. */
+  hooks?: Hooks;
+}
+
+/** A run's scope as a hook is sent it. */
+function scopeJson(scope: RunScope): JsonObject {
+  return { user: scope.user, session: scope.session, ...(scope.chat !== undefined ? { chat: scope.chat } : {}), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) };
 }
 
 export class TurnGate implements ToolGate {
   readonly #d: GateDeps;
+  /** What a hook before a call added, by its id: it comes back with the call's result. */
+  readonly #added = new Map<string, string[]>();
 
   constructor(deps: GateDeps) {
     this.#d = deps;
@@ -85,8 +100,16 @@ export class TurnGate implements ToolGate {
         if (!said.go) return { refuse: answer(d.words("declined", { tool: call.tool, ...(said.reason !== undefined ? { reason: said.reason } : {}) }), true), refused: { by: "declined", lane, ...(said.reason !== undefined ? { reason: said.reason } : {}) }, remind: [], permission };
       }
     }
-    const fired = await d.rules.toolCall(d.agent, { id: call.callId, tool: call.tool, args: call.args });
-    return { ...(fired.hold !== undefined ? { hold: fired.hold } : {}), remind: fired.remind, ...(permission !== undefined ? { permission } : {}) };
+    // His hooks before the call, one after another (R-200): a block is its answer, in the hook's words.
+    let args = call.args;
+    if (d.hooks !== undefined) {
+      const hooked = await d.hooks.run("before-tool", { scope: scopeJson(d.scope), agent: { id: d.agent.id, definition: d.agent.definition }, tool: call.tool, callId: call.callId, args }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
+      if (hooked.blocked !== undefined) return { refuse: answer(hooked.blocked.reason, true), refused: { by: "hook", hook: hooked.blocked.hook, reason: hooked.blocked.reason }, remind: [], ...(permission !== undefined ? { permission } : {}) };
+      if (hooked.input !== undefined) args = hooked.input;
+      if (hooked.added.length > 0) this.#added.set(call.callId, hooked.added);
+    }
+    const fired = await d.rules.toolCall(d.agent, { id: call.callId, tool: call.tool, args });
+    return { ...(fired.hold !== undefined ? { hold: fired.hold } : {}), remind: fired.remind, ...(permission !== undefined ? { permission } : {}), ...(args !== call.args ? { args } : {}) };
   }
 
   async permissionOf(call: GateCall): Promise<CallPermission | undefined> {
@@ -96,7 +119,7 @@ export class TurnGate implements ToolGate {
     return { lane, setting: d.approvals === undefined ? "auto" : await d.approvals.permission(d.scope, lane) };
   }
 
-  async after(call: GateCall, result: LoopToolResult, _signal?: AbortSignal, added: readonly string[] = [], room?: number): Promise<GateAfter> {
+  async after(call: GateCall, result: LoopToolResult, signal?: AbortSignal, added: readonly string[] = [], room?: number): Promise<GateAfter> {
     const d = this.#d;
     // Every search and read is saved whole beside the gap checks, so another agent, a query, the live view and he can see what was looked at (§5.3).
     if (d.tools.get(call.tool)?.tier === "read") await this.#saveRead(call, result);
@@ -111,7 +134,20 @@ export class TurnGate implements ToolGate {
       const line = d.words("rule_unasked", { tool: call.tool });
       if (line !== undefined) beside.push(line);
     }
-    const bounded = await this.#bound(call, result, [...added, ...remind.map((fired) => fired.text.trimEnd())], room, beside);
+    // What a hook before the call added, then his hooks after it: a block puts its reason in place of what the model reads, the whole kept.
+    const hookAdded = this.#added.get(call.callId) ?? [];
+    this.#added.delete(call.callId);
+    let read = result;
+    if (d.hooks !== undefined) {
+      const text = [...result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])), ...(result.reports ?? [])].join("\n");
+      const hooked = await d.hooks.run("after-tool", { scope: scopeJson(d.scope), agent: { id: d.agent.id, definition: d.agent.definition }, tool: call.tool, callId: call.callId, args: call.args, result: { text, ...(result.error === true ? { error: true } : {}) } }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
+      hookAdded.push(...hooked.added);
+      if (hooked.blocked !== undefined) {
+        await this.#keep(call, text);
+        read = { content: [{ type: "text", text: hooked.blocked.reason }], ...(result.details !== undefined ? { details: result.details } : {}) };
+      }
+    }
+    const bounded = await this.#bound(call, read, [...added, ...hookAdded, ...remind.map((fired) => fired.text.trimEnd())], room, beside);
     return { ...bounded, remind };
   }
 

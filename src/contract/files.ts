@@ -12,7 +12,7 @@
 // the user (`UserScope`): its view is the two levels every chat shares, shipped then global, under
 // their mounts, and nothing of a character's or a chat's; it writes nowhere.
 
-import type { AgentRef, Scope, UserScope } from "./common";
+import type { AgentRef, RunScope, Scope, UserScope } from "./common";
 
 /** A level of the tree, farthest first: shipped < global < character < chat (§5.2). The nearer level wins a conflict. */
 export type LayerLevel = "shipped" | "global" | "character" | "chat";
@@ -253,8 +253,8 @@ export interface FilesPort {
    * every chat shares, shipped then global, under the same mounts, and no other.
    */
   layers(scope: Scope | UserScope): Promise<Layer[]>;
-  /** The chat's notes, session and turn folders, and where agents of this scope may write. */
-  places(scope: Scope): Promise<Places>;
+  /** The chat's notes, session and turn folders, and where agents of this scope may write; for a job of no chat (C-23), its session's folder at the user's level, and no chat's or turn's. */
+  places(scope: RunScope): Promise<Places>;
   /**
    * Reads a file, or the lines `range` names. With a scope that names only the user, a path at a
    * character's or a chat's level (the root among them) is refused as `outside`, `writable` empty.

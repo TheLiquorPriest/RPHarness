@@ -67,23 +67,24 @@ test("with `interrupt: always` the lead waits for the answer before its next cal
   expect(outcome.usage.calls).toBe(3);
 });
 
-test("without it the lead goes on; an answer that comes once its work has ended is held for its next briefing, and the turn waits for it; the judge runs on the setting's connection", async () => {
+test("a yes about the lead's last message gives it one more call before its run ends; the judge runs on the setting's connection, its start naming the rule and the agent", async () => {
   const slow = gate();
   const s = (open = await stage({
     config: "rules:\n  judge: fixture-setting\n",
     files: { ".agents/lead.md": LEAD, ".rules/fixture-reward.md": rule("") },
-    answers: routed([{ pieces: [{ text: "<reply>A reward awaits whoever climbs.</reply>" }] }, { pieces: [{ text: "<reply>The tower waits.</reply>" }] }], [{ pieces: [{ hold: slow }, { text: "yes" }] }, { pieces: [{ text: "No." }] }]),
+    answers: routed([{ pieces: [{ text: "<reply>A reward awaits whoever climbs.</reply>" }] }, { pieces: [{ text: "Noted." }] }], [{ pieces: [{ hold: slow }, { text: "yes" }] }]),
   }));
 
   const first = s.turn(request("t1", { lead: "lead" }));
-  // The lead's work ends with its reply while the judge has not answered; the turn waits for it.
-  await s.trace.seen((record) => record.event.kind === "agent_ended" && record.agent?.parent === undefined);
+  // The judge is asked about the lead's last message; the lead's run waits for its answer.
+  await s.trace.seen((record) => record.event.kind === "agent_started" && record.agent?.parent !== undefined);
+  expect(s.trace.of("agent_ended").some((record) => record.agent?.parent === undefined)).toBe(false);
   slow.open();
   expect((await first).outcome.status).toBe("released");
-  expect(s.trace.of("rule_fired").map((record) => record.event.firing.action)).toEqual(["briefing"]);
-  expect(s.trace.of("agent_started").find((record) => record.agent?.parent !== undefined)?.event.connection).toBe("fixture-setting");
-
-  expect((await s.turn(request("t2", { lead: "lead" }))).outcome.status).toBe("released");
-  const second = s.model.requests.findLastIndex((req) => req.messages.some((message) => textOf(message).includes("Fixture lead: you run the turn.")));
-  expect(sent(s, second)).toContain(TEXT);
+  expect(s.trace.of("rule_fired").map((record) => record.event.firing.action)).toEqual(["follow-up"]);
+  const judge = s.trace.of("agent_started").find((record) => record.agent?.parent !== undefined);
+  expect(judge?.event.connection).toBe("fixture-setting");
+  expect(judge?.event.judges?.rule).toBe("fixture-reward");
+  // Its one more call carries the rule's text.
+  expect(sent(s, s.model.requests.length - 1)).toContain(TEXT);
 });

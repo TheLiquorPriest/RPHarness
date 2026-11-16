@@ -6,8 +6,18 @@
 // lines are not lost: they go out again, before anything newer, with the next append, and the file
 // is kept in memory until they are on disk. So no entry on disk ever names a parent the file
 // lacks, and the turns after a failed write still find the session whole. The turn it records goes on.
-import type { FileRead, FilesPort, JsonValue, Log, Scope } from "../contract";
+import type { FileRead, FilesPort, JsonValue, Log, RunScope } from "../contract";
 import { lineOf, parseSession, type SessionEntry, type SessionHeader, SessionLog } from "./file";
+
+/** A session's own scope within a run's: the user, the chat where there is one (none for a job of no chat, C-23), and the session. */
+export function sessionScope(scope: RunScope, session: string): RunScope {
+  return scope.chat === undefined ? { user: scope.user, session } : { user: scope.user, chat: scope.chat, session };
+}
+
+/** The chat a session's first line names, where it has one. */
+function chatOf(scope: RunScope): { chat?: string } {
+  return scope.chat === undefined ? {} : { chat: scope.chat };
+}
 
 type Unsaved<E> = E extends SessionEntry ? Omit<E, "id" | "at"> : never;
 
@@ -30,7 +40,7 @@ export interface BookDeps {
 /** One session's file: its tree in memory, and its lines on disk. */
 export class SessionFile {
   /** The session's own scope: whose, which chat, which session. */
-  readonly scope: Scope;
+  readonly scope: RunScope;
   /** Where it is, in the agents' view: `<session>.jsonl` in the session's folder (§5). */
   readonly path: string;
   readonly log: SessionLog;
@@ -53,7 +63,7 @@ export class SessionFile {
    */
   readonly unreadable: Unreadable | undefined;
 
-  constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean, unreadable?: Unreadable) {
+  constructor(d: BookDeps, scope: RunScope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean, unreadable?: Unreadable) {
     this.#d = d;
     this.scope = scope;
     this.path = path;
@@ -72,7 +82,7 @@ export class SessionFile {
     let text = lineOf(saved);
     if (!this.#begun) {
       this.#begun = true;
-      this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, chat: this.scope.chat, at: full.at };
+      this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, ...chatOf(this.scope), at: full.at };
       text = lineOf(this.header) + text;
     }
     this.#write(text);
@@ -83,14 +93,14 @@ export class SessionFile {
   begin(run: Required<Pick<SessionHeader, "kind" | "parent" | "agent">>): void {
     if (this.#begun) return;
     this.#begun = true;
-    this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, chat: this.scope.chat, at: this.#d.now(), ...run };
+    this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, ...chatOf(this.scope), at: this.#d.now(), ...run };
     this.#write(lineOf(this.header));
   }
 
   /** Begins the file as a branch: its first line names where it was forked from, then the entries it starts from, written as one. */
   copy(entries: readonly SessionEntry[], from: NonNullable<SessionHeader["from"]>): void {
     this.#begun = true;
-    this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, chat: this.scope.chat, at: this.#d.now(), from };
+    this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, ...chatOf(this.scope), at: this.#d.now(), from };
     for (const entry of entries) this.log.add(entry);
     this.#write([this.header, ...entries].map(lineOf).join(""));
   }
@@ -184,11 +194,11 @@ export class SessionBook {
   }
 
   /** The file of the session a scope names, held until released: read from disk when nothing holds it, and the same file for all that hold it at once. */
-  async hold(scope: Scope): Promise<HeldFile> {
-    const key = JSON.stringify([scope.user, scope.chat, scope.session]);
+  async hold(scope: RunScope): Promise<HeldFile> {
+    const key = JSON.stringify([scope.user, scope.chat ?? null, scope.session]);
     let kept = this.#files.get(key);
     if (kept === undefined) {
-      kept = { file: this.#read({ user: scope.user, chat: scope.chat, session: scope.session }), holds: 0 };
+      kept = { file: this.#read(sessionScope(scope, scope.session)), holds: 0 };
       this.#files.set(key, kept);
     }
     this.#idle.delete(key);
@@ -215,7 +225,7 @@ export class SessionBook {
   }
 
   /** Works on the file of the session a scope names, holding it until the work is done. */
-  async with<T>(scope: Scope, work: (file: SessionFile) => T | Promise<T>): Promise<T> {
+  async with<T>(scope: RunScope, work: (file: SessionFile) => T | Promise<T>): Promise<T> {
     const { file, release } = await this.hold(scope);
     try {
       return await work(file);
@@ -263,7 +273,7 @@ export class SessionBook {
     await Promise.all(files.map((file) => (file.status === "fulfilled" ? file.value.flush() : undefined)));
   }
 
-  async #read(scope: Scope): Promise<SessionFile> {
+  async #read(scope: RunScope): Promise<SessionFile> {
     const { files, log } = this.#d;
     const places = await files.places(scope);
     const path = `${places.session}${scope.session}.jsonl`;

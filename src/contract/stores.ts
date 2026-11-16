@@ -2,7 +2,7 @@
 // summaries), the searchers `gap_check` runs besides chat and lore (§10.5: state and the story
 // record, for RPE), and the web searcher (§6.8 `web_search`).
 
-import type { AgentRef, Scope, SearchHit } from "./common";
+import type { AgentRef, RunScope, Scope, SearchHit } from "./common";
 
 /** One of the host's other stores, as `archive_search` lists it. */
 export interface StoreInfo {
@@ -84,7 +84,7 @@ export interface WebQuery {
  */
 export interface WebSearchPort {
   /** Whether the user has a web search provider set and on, for this scope, now. */
-  enabled(scope: Scope): Promise<boolean>;
+  enabled(scope: RunScope): Promise<boolean>;
   /** Searches the web by the words given. Each hit's `ref` is the page's address. */
-  search(scope: Scope, query: WebQuery): Promise<SearchHit[]>;
+  search(scope: RunScope, query: WebQuery): Promise<SearchHit[]>;
 }

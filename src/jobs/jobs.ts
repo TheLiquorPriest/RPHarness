@@ -19,7 +19,7 @@
 // not ended, once its tokens reach it: its agents wait at their next call, in the session they have,
 // until he answers.
 import type { DelegateCall } from "../agents/tools";
-import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, Scope, ToolCtx, Usage } from "../contract";
+import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, ToolCtx, Usage, UserScope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Fields } from "../files/api";
 import { lines } from "../harness/means";
@@ -148,7 +148,8 @@ export class Jobs implements JobsApi, JobsWork {
         return answer(part?.line("no_task"), true);
       }
       begun = await this.#begin({
-        scope: { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) },
+        // A job started in a job of no chat is of no chat too (C-23); else of the caller's chat, tied to its turn.
+        scope: scope.chat === undefined ? { user: scope.user, session: this.#core.ids() } : { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) },
         call: asked,
         by: ctx.agent,
         parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId },
@@ -255,11 +256,11 @@ export class Jobs implements JobsApi, JobsWork {
     return { ...this.#switchesOf(user) };
   }
 
-  /** The user starts a job, tied to no turn. The limits of his start stand in place of the settings' for it. The job, or why none could be started. */
-  async start(scope: Scope, start: JobStart): Promise<JobView | JobRefusal> {
+  /** The user starts a job, tied to no turn: of the scope's chat, or of none where it names only him (C-23). The limits of his start stand in place of the settings' for it. The job, or why none could be started. */
+  async start(scope: Scope | UserScope, start: JobStart): Promise<JobView | JobRefusal> {
     const bad = badLimit(start.limits);
     if (bad !== undefined) return bad;
-    const begun = await this.#begin({ scope: { user: scope.user, chat: scope.chat, session: this.#core.ids() }, call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
+    const begun = await this.#begin({ scope: this.#ownScope(scope.user, "chat" in scope ? scope.chat : undefined), call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
     return this.#started(begun, start.agent);
   }
 
@@ -324,7 +325,7 @@ export class Jobs implements JobsApi, JobsWork {
     const old = await this.get(user, id);
     if (old === undefined) return { refused: "no-job", id };
     if (!AGAIN.includes(old.state)) return { refused: "state", id, state: old.state, applies: [...AGAIN] };
-    const begun = await this.#begin({ scope: { user, chat: old.scope.chat, session: this.#core.ids() }, call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
+    const begun = await this.#begin({ scope: this.#ownScope(user, old.scope.chat), call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
     return this.#started(begun, old.agent);
   }
 
@@ -437,6 +438,12 @@ export class Jobs implements JobsApi, JobsWork {
   }
 
   // ---------------------------------------------------------------- inside
+
+  /** A job's own scope, tied to no turn: the user, its chat where it has one (none: a job of no chat, C-23), and a session of its own. */
+  #ownScope(user: string, chat: string | undefined): RunScope {
+    const session = this.#core.ids();
+    return chat === undefined ? { user, session } : { user, chat, session };
+  }
 
   /**
    * Makes a job and counts it in the user's day: its view, the limit it would pass, or the answer that

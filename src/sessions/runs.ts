@@ -5,9 +5,9 @@
 // back, never its thinking (`entryOf`, the one way a record becomes an entry, the lead's too).
 // `agent_message` writes on in the same file. The run's end closes each of its sessions, whatever
 // the end, so a job a restart cut off leaves every entry written before it.
-import type { AgentRef, Log, Scope, SessionParent, TraceEvent } from "../contract";
+import type { AgentRef, Log, RunScope, SessionParent, TraceEvent } from "../contract";
 import type { AgentRecord, ParentCall, RunTrace } from "../loop/trace";
-import type { HeldFile, NewEntry, SessionBook } from "./book";
+import { type HeldFile, type NewEntry, type SessionBook, sessionScope } from "./book";
 import type { CompactFacts } from "./compact";
 
 /** What a record of an agent's work is in its session's file: its intent record, what it wrote in a call, a call, what came back; nothing for any other record. */
@@ -32,7 +32,7 @@ export function entryOf(event: TraceEvent, turn: string, parent: string | null):
 export interface RunSessionsDeps {
   book: SessionBook;
   /** The run's own scope: its user, chat, session and turn. */
-  scope: Scope;
+  scope: RunScope;
   /** The run's id: what a run with no turn (a job the owner started) keys its sessions' work by. */
   run: string;
   log: Log;
@@ -42,7 +42,7 @@ export interface RunSessionsDeps {
 
 /** One agent's run that is a session of its own: its file, held while the run goes on. */
 interface Opened {
-  scope: Scope;
+  scope: RunScope;
   held: Promise<HeldFile>;
 }
 
@@ -98,8 +98,7 @@ export class RunSessions {
   #begin(agent: AgentRef, session: string): void {
     const asked = this.#asked.get(agent.id);
     if (asked === undefined || this.#opened.has(agent.id)) return;
-    const { scope } = this.#d;
-    const own: Scope = { user: scope.user, chat: scope.chat, session };
+    const own = sessionScope(this.#d.scope, session);
     const opened: Opened = { scope: own, held: this.#d.book.hold(own) };
     this.#opened.set(agent.id, opened);
     this.#on(opened, (file) => {

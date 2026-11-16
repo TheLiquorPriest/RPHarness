@@ -7,7 +7,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
-import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
+import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, RunScope, ToolCtx, Usage } from "../contract";
 import { createFacts, loadGuidance, partFields } from "../files";
 import { AgentRuns } from "../harness/agent-run";
 import { Judges } from "../harness/judge";
@@ -16,7 +16,7 @@ import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harne
 import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
-import type { SessionBook } from "../sessions/book";
+import { type SessionBook, sessionScope } from "../sessions/book";
 import { keptWork } from "../sessions/work";
 import { userMessage } from "../harness/prompt";
 import { type AgentOutcome, type AgentRunner, Budget, emptyUsage, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
@@ -51,7 +51,7 @@ export interface JobCore {
 export interface JobAsk {
   id: string;
   /** Its chat, its own session, and the turn that started it, where one did. */
-  scope: Scope;
+  scope: RunScope;
   call: DelegateCall;
   by?: AgentRef;
   parent?: ParentCall;
@@ -200,7 +200,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     connections: core.connections,
     settings,
     budget,
-    own: async (agent) => connectionOf(core.connections, scope, (await guidance.definition(agent.definition)) ?? {}, env.log),
+    // The Author's connection judges where neither the rule nor `rules.judge` names one: the definition the chat's config names its lead (`lead:`), else the asking agent's own.
+    author: async (agent) => connectionOf(core.connections, scope, (await guidance.definition(settings.lead ?? agent.definition)) ?? {}, env.log),
     track: (entry) => {
       working.add(entry);
       return () => working.delete(entry);
@@ -360,7 +361,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       let messages: AgentMessage[] = [];
       if (ask.goOn !== undefined) {
         try {
-          messages = await core.book.with({ user: scope.user, chat: scope.chat, session: scope.session }, (file) => keptWork(file.log, scope.turn ?? ask.id, made.model, (tool) => texts.unfinished?.({ tool })));
+          messages = await core.book.with(sessionScope(scope, scope.session), (file) => keptWork(file.log, scope.turn ?? ask.id, made.model, (tool) => texts.unfinished?.({ tool })));
         } catch (error) {
           env.log.warn("A job's own session could not be read back; it goes on from its brief.", { job: ask.id, error: error instanceof Error ? error.message : String(error) });
         }

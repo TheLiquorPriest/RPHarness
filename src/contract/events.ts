@@ -2,7 +2,7 @@
 // decision: the host records, shows and ties to the turn. The one call that returns something,
 // `attachments`, returns text the host owns, never a ruling.
 
-import type { AgentRef, Scope, SearchHit } from "./common";
+import type { AgentRef, RunScope, Scope, SearchHit } from "./common";
 import type { FactValue } from "./facts";
 import type { LayerLevel } from "./files";
 import type { JobView } from "./harness";
@@ -167,13 +167,13 @@ export interface TurnEvents {
    * are for (C-T13, R-144): the host may lay out what comes to mind for it (who and what the task and
    * message name); RPH takes back only the items' text.
    */
-  attachments(scope: Scope, agent: AgentRef, refs: AttachmentRef[], moment: AttachMoment): Promise<ContextBlock[]>;
+  attachments(scope: RunScope, agent: AgentRef, refs: AttachmentRef[], moment: AttachMoment): Promise<ContextBlock[]>;
   /** A consent the lead gave, for the record and the Turn page (§10.5 step 6). */
-  consent(scope: Scope, grant: ConsentGrant): Promise<void>;
+  consent(scope: RunScope, grant: ConsentGrant): Promise<void>;
   /** A gap check run, with its evidence. */
   gapCheck(scope: Scope, check: GapCheck): Promise<void>;
   /** The lead drops a sub-agent's writes, which the host staged under the turn (§13.4). */
-  dropStaged(scope: Scope, agent: AgentRef): Promise<void>;
+  dropStaged(scope: RunScope, agent: AgentRef): Promise<void>;
   /** A rule fired: which, on what, and what the agent did next. Told once the agent's next step is known (or its run ended). */
   ruleFired(scope: Scope, firing: RuleFiring): Promise<void>;
   /** An agent's suggestion, for the user to accept, edit or dismiss; answered with whether it was kept, which the agent is told. */
@@ -189,5 +189,5 @@ export interface TurnEvents {
    * next turn of the job's end in a `job` since-item; a host without it has the trace's `job`
    * events and `Harness.jobs`.
    */
-  job?(scope: Scope, job: JobView): Promise<void>;
+  job?(scope: RunScope, job: JobView): Promise<void>;
 }

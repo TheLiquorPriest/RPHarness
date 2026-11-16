@@ -2,7 +2,7 @@
 // format, a tool's file as the tool takes it, the texts the runners send a model from the tool
 // answers' file, and the connection a definition names.
 import { joined } from "../agents/attachments";
-import type { Log, ModelsApi, Scope } from "../contract";
+import type { Log, ModelsApi, RunScope } from "../contract";
 import type { AgentDefinition, LinesPart, PromptPart, TemplatePart } from "../files/api";
 import type { RunnerTexts } from "../loop";
 import { connectionNamed } from "../model/runs-on";
@@ -60,7 +60,7 @@ export interface Connection {
 }
 
 /** The connection a definition (or a rule's `judge:`) names among the scope's user's connections (`connectionNamed`): `default` (or none) is his default connection; any other name is a connection's name or id. The choice carries the run's scope, so its calls read the model layer's settings at its chat's levels. The effort is the definition's alone (READINGS N-7): where it names none, the connection's own. */
-export async function connectionOf(connections: ModelsApi, scope: Scope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs">, log: Log): Promise<Connection> {
+export async function connectionOf(connections: ModelsApi, scope: RunScope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs">, log: Log): Promise<Connection> {
   const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
   const list = await connections.list(scope.user).catch((error: unknown) => {
     log.warn("The connections could not be listed.", { error: error instanceof Error ? error.message : String(error) });

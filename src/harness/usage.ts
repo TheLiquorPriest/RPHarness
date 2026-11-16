@@ -18,7 +18,7 @@
 // they fall in, read once, the first time this process reads the user's spend: the day's usage of
 // every agent, and the day's job tokens and counts of jobs, in each of their older forms. Read, they
 // leave the store.
-import type { AgentRef, Clock, FilesPort, JsonObject, JsonValue, LimitHit, Log, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
+import type { AgentRef, Clock, FilesPort, JsonObject, JsonValue, LimitHit, Log, RunScope, RunUsage, Scope, StorePort, TraceRecord, Usage, UsageApi, WindowGauge } from "../contract";
 import { addUsage, emptyUsage } from "../loop/budget";
 import { readSettingsOf } from "./settings";
 import { USAGE } from "./settings/usage";
@@ -194,7 +194,7 @@ function sum(spends: readonly Spent[], counted: readonly SpentIn[]): Usage {
   return total;
 }
 
-function gaugeKey(scope: Scope, agent: string): string {
+function gaugeKey(scope: RunScope, agent: string): string {
   return JSON.stringify([scope.user, scope.chat, scope.session, scope.turn ?? null, agent]);
 }
 
@@ -234,7 +234,7 @@ export class UsageBook implements UsageApi {
   }
 
   /** An agent's model and the room it keeps for its answer, for its gauge while the run lasts. */
-  gauge(scope: Scope, run: string, agent: string, window: number, reserve: number): void {
+  gauge(scope: RunScope, run: string, agent: string, window: number, reserve: number): void {
     const key = gaugeKey(scope, agent);
     this.#gauges.set(key, { used: 0, window, reserve });
     this.#gauged.set(run, [...(this.#gauged.get(run) ?? []), key]);

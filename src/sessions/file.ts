@@ -19,7 +19,8 @@ export interface SessionHeader {
   version: 1;
   id: string;
   user: string;
-  chat: string;
+  /** Its chat; none for a job of no chat (C-23), whose session sits at the user's level. */
+  chat?: string;
   at: number;
   from?: { chat: string; session: string; turn: string };
   kind?: "agent" | "job" | "talk";

@@ -139,7 +139,9 @@ export interface LimitHit {
  * by tags and no reply contract in force names them (`no-tags`). The host says it in its own words.
  */
 export interface ReplyError {
-  code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags";
+  code: "no-reply" | "limit" | "provider" | "stopped" | "failed" | "no-definition" | "no-tags" | "hook";
+  /** For `hook`: the turn-start hook that blocked the turn (§5.4 "Hooks"); `detail` is its reason, in its own words. */
+  hook?: string;
   limit?: LimitHit;
   detail?: string;
   /**

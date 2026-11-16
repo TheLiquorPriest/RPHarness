@@ -3,7 +3,7 @@
 // started it (§13.4), and nothing done that is not shown (§18.4: a piece is not done if its work
 // cannot be watched).
 
-import type { AgentRef, Effort, Scope, Usage } from "./common";
+import type { AgentRef, Effort, RunScope, Usage } from "./common";
 import type { RuleFiring } from "./events";
 import type { JobView } from "./harness";
 import type { JsonValue } from "./json";
@@ -28,7 +28,9 @@ export type CallRefusal =
   | { by: "never"; lane: string }
   | { by: "declined"; lane: string; reason?: string }
   | { by: "hold"; rule: string }
-  | { by: "unasked"; error: string };
+  | { by: "unasked"; error: string }
+  /** A hook before the call blocked it (§5.4 "Hooks"): its name and its reason, which is the call's answer. */
+  | { by: "hook"; hook: string; reason: string };
 
 /**
  * A tool call a model made: the model's id for it, the tool, and its arguments. `began`: when the
@@ -90,9 +92,11 @@ export type TraceEvent =
    * An agent began work, on its model, in its own session, with what it was given by name. `tools`:
    * the size of the fixed list its requests declare, in tokens as the model layer counts a call's
    * tools, and the user's `tools.fixedTokens`; it is over where `tokens` passes `most`, and nothing is
-   * refused for that (a lead's).
+   * refused for that (a lead's). `judges`: the call is a judging model's (§5.4), answering the
+   * question rule `rule` about a message of the agent `agent` (its handle), so the live view shows a
+   * judge, not another author.
    */
-  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number } }
+  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } }
   /**
    * A tool an agent's list names is not held (§6.8), told once a session and definition: its
    * definition lists a name nobody registered (`unregistered`); a host's tool takes a name of RPH's
@@ -149,8 +153,14 @@ export type TraceEvent =
   | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number }
   /** A rule's command failed or ran out of `rules.commandTimeout` (C5): the rule did not fire, and is unable to work, never a "no". `detail`: why, in words. */
   | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string }
-  /** A hook ran (§5.4 "Hooks"): what it did, and how long it took. */
-  | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number }
+  /** A question rule's question cannot be put (§5.4, §17.2): the judging model's part is missing, off or names no `yes:`, its connection is none, or it has no model. Shown each time it would be asked, never taken as a "no". `detail`: what is missing, in words. */
+  | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string }
+  /**
+   * A hook ran (§5.4 "Hooks", C2): which, at which moment, what it did, and how long it took; for a
+   * tool's moments, the call (`callId`); `text`: its reason where it blocked, failed or timed out, or
+   * what it added. The record's agent is the one it ran for.
+   */
+  | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number; callId?: string; text?: string }
   /** A write to a lane set to Confirm waits for the user's word (§6.8). */
   | { kind: "approval_asked"; callId: string; tool: string; lane: string }
   | { kind: "approval_answered"; callId: string; tool: string; lane: string; answer: ApprovalAnswer }
@@ -211,7 +221,7 @@ export interface TraceRecord {
   seq: number;
   /** The run's own id, made by the harness's `ids` when the run starts: each run of a turn (its first, a continue, a "Settle now"), a job's, a talk's. Never the turn's id; the turn is in `scope`. */
   run: string;
-  scope: Scope;
+  scope: RunScope;
   at: number;
   /**
    * The agent it is about; for a run's own events, the agent the run started with. Absent for a

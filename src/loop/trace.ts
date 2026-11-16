@@ -1,7 +1,7 @@
 // One run's trace (a turn's, a job's or a talk's): every agent of the run writes through the same
 // writer, so records are numbered from 1 with no gap across all of them, and each carries the agent
 // and the run it belongs to.
-import type { AgentRef, Scope, TraceEvent, TracePort, TraceRecord } from "../contract";
+import type { AgentRef, RunScope, TraceEvent, TracePort, TraceRecord } from "../contract";
 import type { LoopClock, RunHold } from "./types";
 
 /** The agent, run and tool call that started or continued a sub-agent's work. */
@@ -12,7 +12,7 @@ export type AgentRecord = TraceRecord & { agent: AgentRef };
 
 export class RunTrace {
   readonly port: TracePort;
-  readonly scope: Scope;
+  readonly scope: RunScope;
   readonly run: string;
   readonly clock: LoopClock;
   /** The owner's hand on the run, which every agent of it asks before each request. */
@@ -20,7 +20,7 @@ export class RunTrace {
   readonly #watchers: ((record: AgentRecord) => void)[] = [];
   #seq = 0;
 
-  constructor(port: TracePort, scope: Scope, run: string, clock: LoopClock, hold?: RunHold) {
+  constructor(port: TracePort, scope: RunScope, run: string, clock: LoopClock, hold?: RunHold) {
     this.port = port;
     this.scope = scope;
     this.run = run;

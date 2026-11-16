@@ -2,7 +2,7 @@
 // An agent's definition lists the ones it holds fixed; the rest are reached through RPH's
 // `tool_search` and `tool_use`. Each does one neutral thing when asked and reports what it did.
 
-import type { AgentRef, Scope } from "./common";
+import type { AgentRef, RunScope } from "./common";
 import type { JsonSchema, JsonValue } from "./json";
 import type { Switchable } from "./switches";
 
@@ -38,7 +38,8 @@ export interface ToolResult {
 
 /** What a tool's call runs with. */
 export interface ToolCtx {
-  scope: Scope;
+  /** Where the call happens: a chat's, or a job's of no chat (C-23), where a tool that needs a chat says it has none. */
+  scope: RunScope;
   /** The agent that called it. */
   agent: AgentRef;
   /** The run the call is part of: the turn's, a job's or a talk's. */
@@ -103,5 +104,5 @@ export interface ToolsPort {
    * session opened them, so the cached front of every prompt holds, and a tool the host no longer
    * offers is answered as withdrawn when it is called. The next session's list leaves it out.
    */
-  all(scope: Scope): Promise<HostTool[]>;
+  all(scope: RunScope): Promise<HostTool[]>;
 }

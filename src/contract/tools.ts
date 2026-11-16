@@ -49,6 +49,8 @@ export interface ToolCtx {
   signal: AbortSignal;
   /** Shows part of the answer while the call runs, in the live view. Calls after the tool has answered are ignored. */
   onUpdate(partial: ToolResult): void;
+  /** The agent marked this call closing (§10.7): its answer reaches no one, so a tool that starts work of its own (a closing `agent_message` to a kept agent) need not wait for it. */
+  closing?: true;
 }
 
 /**

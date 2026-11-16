@@ -14,6 +14,7 @@ import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
 import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
+import type { SessionBook } from "../sessions/book";
 import { type AgentOutcome, type AgentRunner, Budget, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
 import { fileFind, fileRead, fileWrite, type OwnTool, Registry, todo, TodoLists, type ToolText, type Words } from "../tools";
@@ -34,6 +35,8 @@ export interface JobCore {
   connections: ModelsApi;
   hub: LiveHub;
   usage: UsageBook;
+  /** The harness's session files: each agent of a job is a session of its own (§11), opened as it starts and closed at the job's end. */
+  book: SessionBook;
   /** The harness's jobs, for a job's agent that holds `job_start`. */
   jobs: JobsWork;
 }
@@ -144,6 +147,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     env,
     scope,
     trace,
+    book: core.book,
     places,
     guidance,
     settings: () => settings,
@@ -213,6 +217,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     compaction: () => settings.compaction,
     job: ask.id,
     slice: promptSlice(prompt, guidance),
+    session: (agent, kind, by) => runs.session(agent, kind, by),
+    compacted: (agent, summary) => runs.compacted(agent, summary),
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {
@@ -333,7 +339,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         outcome = await work.done;
         // What the judging model still has under way is part of the run.
         await judges.settled();
-        // Its request files and transcripts settle before its end is told, as a turn's do.
+        // The sessions of the job's agents close at its end, and their lines settle with its request files and transcripts before its end is told, as a turn's do.
+        await runs.close();
         while (pending.size > 0) await Promise.allSettled([...pending]);
       } finally {
         working.delete(entry);

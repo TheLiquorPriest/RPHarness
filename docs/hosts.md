@@ -51,9 +51,12 @@ the user and its session.
   `progress` lines apart) and ends with `finish` or `error`. Give the prompt to the prompt port first.
 - `harness.turnLeft(scope)` when a turn leaves the path (a swipe, a delete, or a turn you dropped
   because it kept nothing); `harness.turnShown(scope)` when an earlier attempt is shown again.
-- The pages' ways in: `jobs`, `sessions`, `rules`, `live`, `usage`, `definitions`, `models`,
-  `promptMap`, `external` (everything that waits to be switched on), `parts`. The members on
-  `OWNER_ONLY` (from `rp-harness/helpers`) are called only from the owner's own presses.
+- The pages' ways in: `jobs`, `sessions`, `rules`, `live`, `usage` (a day's spend of every agent, or
+  `day(user, "jobs")` of the jobs alone), `definitions`, `models`, `promptMap`, `external` (everything
+  that waits to be switched on), `parts`, `problems` (every problem RPH finds in the files it reads, a
+  hooks file that does not parse among them), `rebuildRequest` (a kept call's messages, each naming
+  the file of the turn's folder it points into). The members on `OWNER_ONLY` (from
+  `rp-harness/helpers`) are called only from the owner's own presses.
 - **At start,** list each user's jobs (`harness.jobs.list({ user })`): a job a restart cut off is then
   kept as interrupted and told, and one that only waited is queued again.
 - **At shutdown,** `harness.close()`: it stops every run and job (a running job is kept as

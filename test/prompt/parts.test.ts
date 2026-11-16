@@ -251,7 +251,7 @@ test("carried lays out an agent's own older work in its run: for a summary call,
   const part = await shippedParts().part("carried");
   if (part?.format !== "template") throw new Error("carried is not a template");
   const work = [{ items: [{ said: "I will look." }, { call: { tool: "roll", args: "{}", result: "A six." } }, { heard: "The player says: wait." }] }];
-  const compacting = part.render({ run: true, compacting: true, summary: "Earlier, in short.", turns: work }).text;
+  const compacting = part.render({ run: true, compacting: true, summary: "Earlier, in short.", turns: work as never }).text;
   expect(compacting.startsWith("# This agent's earlier work in this run, to be summarized\n")).toBe(true);
   for (const said of ["## The summary so far, which these turns follow", "Earlier, in short.", "The agent wrote:\n\nI will look.", "The agent called `roll` with {}.", "The agent was told:\n\nThe player says: wait."]) expect(compacting).toContain(said);
   expect(compacting).not.toMatch(/## Turn|The lead called|You /);

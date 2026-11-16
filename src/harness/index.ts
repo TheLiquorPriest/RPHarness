@@ -9,7 +9,7 @@
 // the host's store, so a restart, or a session open again after a close, goes on with both. A job a
 // restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
-import { listFacts, loadGuidance } from "../files";
+import { listFacts, loadGuidance, partsApi } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
@@ -94,6 +94,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
   return {
     external: { list: (scope) => external.list(scope) },
+    parts: partsApi(env),
     async answer(req, sink, signal) {
       const turn = new Turn(core, req, sink);
       const key = turnKey(req.scope);

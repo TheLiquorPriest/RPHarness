@@ -20,7 +20,7 @@ import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, LoreEntry, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { CACHE, type CacheDeps, GUIDES_KEY, hostCached, keepCached, loreKey, PROMPT_MAP_KEY, readCached, standing } from "../sessions/cache";
-import { createFacts, loadGuidance } from "../files";
+import { createFacts, loadGuidance, partFields } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
@@ -289,7 +289,7 @@ export class Turn {
     const { env } = this.#c;
     const req = this.#req;
     const scope = this.scope;
-    const guidance = loadGuidance(env.files, scope);
+    const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
     this.#guidance = guidance;
     const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, file] = await Promise.all([
       readSettings(guidance, env.files, scope, env.log),

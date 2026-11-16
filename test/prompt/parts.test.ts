@@ -316,3 +316,12 @@ test("the briefing says when the session's file could not be read, whole or in l
   expect(part.render({ turn: { kind: "reply" } } as never).text).not.toContain("This session's file");
   expect(ASKS.test(whole + partly)).toBe(false);
 });
+
+test("a suggestion past the most the chat holds is told as not kept, and suggest takes a new entry's book, title and keys and an edit's passage as it stands", async () => {
+  const base = await shippedParts().part("base-tools");
+  if (base?.format !== "lines") throw new Error("base-tools is a lines part");
+  const said = base.line("suggest_full", { most: 5 }) ?? "";
+  expect(said).toBe("The suggestion was not kept: the chat already has 5 suggestions waiting for the player.");
+  expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
+  expect(Object.keys((await shippedTool("suggest")).arguments)).toEqual(["file", "lore", "new_lore", "text", "reason", "book", "title", "keys", "was"]);
+});

@@ -27,6 +27,7 @@ gap_no_topic: Name the topic to look for.
 no_skill: There is no skill named {{name}}.
 suggest_target: Say what the suggestion is for - a file, a lore entry, or new lore - and name only one.
 suggested: The suggestion is with the player, who may accept it, change it or dismiss it. Nothing has changed.
+suggest_full: The suggestion was not kept: the chat already has {{most}} suggestions waiting for the player.
 archive_hit: {{ref}} {{title}} ({{store}}): {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
 archive_item: {{title}} ({{store}}, {{ref}})
 archive_needs: Give the words to look for, or the ref of something found to read it in full.

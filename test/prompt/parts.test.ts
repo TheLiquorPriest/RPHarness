@@ -305,3 +305,14 @@ test("the briefing says what the session has already looked up and where it is k
   expect(part.render({ turn: { kind: "reply" } } as never).text).not.toContain("already looked up");
   expect(ASKS.test(said)).toBe(false);
 });
+
+test("the briefing says when the session's file could not be read, whole or in lines, and says nothing when it could", async () => {
+  const part = await template("briefing");
+  const whole = part.render({ turn: { kind: "reply" }, session_unreadable: { reason: "The host refused it." } } as never).text;
+  expect(whole).toContain("## This session's file\n\nIt could not be read: The host refused it. You hold nothing of this session's earlier turns this turn.");
+  const partly = part.render({ turn: { kind: "reply" }, session_unreadable: { lines: [4, 9] } } as never).text;
+  expect(partly).toContain("Some lines of it could not be read and were passed over");
+  expect(partly).toContain("- 4\n- 9");
+  expect(part.render({ turn: { kind: "reply" } } as never).text).not.toContain("This session's file");
+  expect(ASKS.test(whole + partly)).toBe(false);
+});

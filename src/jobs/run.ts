@@ -16,6 +16,7 @@ import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harne
 import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
+import { hookSettings, Hooks } from "../external/hooks";
 import { type SessionBook, sessionScope } from "../sessions/book";
 import { keptWork } from "../sessions/work";
 import { userMessage } from "../harness/prompt";
@@ -168,11 +169,14 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   let heard: JobHearing | undefined;
   /** Every write of the run still under way (a kept request, a transcript line): the run's end waits for them. */
   const pending = new Set<Promise<unknown>>();
+  // His hooks for the job's run (§5.4 "Hooks"): around each tool of its agents, and at each one's run's end.
+  const hooks = new Hooks({ hooks: () => guidance.hooks(), switches: env.switches, user: scope.user, settings: hookSettings(settings), trace, log: env.log });
   const runs = new AgentRuns({
     env,
     scope,
     trace,
     book: core.book,
+    hooks,
     places,
     guidance,
     settings: () => settings,
@@ -245,6 +249,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     slice: promptSlice(prompt, guidance),
     session: (agent, kind, by) => runs.session(agent, kind, by),
     compacted: (agent, summary, facts) => runs.compacted(agent, summary, facts),
+    atRunEnd: (agent, parent) => hooks.atRunEnd(scope, { agent, ...(parent !== undefined ? { parent } : {}) }),
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {

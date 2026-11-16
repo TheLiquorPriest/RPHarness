@@ -8,7 +8,8 @@
 // is shown with its words. The hooks of one moment run one after another, the farthest level's
 // first; the first block ends the rest. Every run of a hook is traced (`hook`), with its reason or
 // what it added. With no hooks nothing runs and nothing waits (§17.5).
-import type { AgentRef, HookEvent, JsonObject, JsonValue, LayerLevel, Log, SwitchesPort } from "../contract";
+import type { AgentRef, HookEvent, JsonObject, JsonValue, LayerLevel, Log, RunScope, SwitchesPort } from "../contract";
+import type { Settings } from "../harness/settings";
 import type { ParentCall, RunTrace } from "../loop/trace";
 import { runCommand } from "./run";
 
@@ -61,6 +62,21 @@ export interface HookWho {
 
 function isObject(value: JsonValue | undefined): value is JsonObject {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A run's scope as a hook is sent it. */
+export function scopeJson(scope: RunScope): JsonObject {
+  return { user: scope.user, session: scope.session, ...(scope.chat !== undefined ? { chat: scope.chat } : {}), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) };
+}
+
+/** An agent as a hook is sent it. */
+export function agentJson(agent: AgentRef): JsonObject {
+  return { id: agent.id, definition: agent.definition, ...(agent.plays !== undefined ? { plays: agent.plays } : {}) };
+}
+
+/** The settings hooks run under, from the user's (`hooks.*`). */
+export function hookSettings(settings: Pick<Settings, "hookTimeout" | "hookBlockExit" | "hookAnswerMax" | "hookReasonChars">): HookSettings {
+  return { timeoutMs: settings.hookTimeout, blockExit: settings.hookBlockExit, answerMax: settings.hookAnswerMax, reasonChars: settings.hookReasonChars };
 }
 
 /** A run's hooks, read once for the run. */
@@ -120,5 +136,13 @@ export class Hooks {
       traced(changed !== undefined ? "changed" : context !== undefined ? "added" : "ok", result.ms, context);
     }
     return answer;
+  }
+
+  /**
+   * The moment an agent's work would end (§13.3 l.1458): the run-end hooks, with the run's scope and
+   * the agent. A hook's block gives the reason the agent goes on with, for one more call.
+   */
+  async atRunEnd(scope: RunScope, who: HookWho, signal?: AbortSignal): Promise<string | undefined> {
+    return (await this.run("run-end", { scope: scopeJson(scope), agent: agentJson(who.agent) }, who, signal)).blocked?.reason;
   }
 }

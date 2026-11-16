@@ -15,8 +15,8 @@
 // beside it, and the log
 // names what failed. Every refusal says why, as a fact, for the call's end record. Every read and
 // search a call makes is saved whole in the turn's `queries/` (the session's, for a run with no turn).
-import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, JsonObject, Log, Places, RunScope, SwitchesPort, ToolContent } from "../contract";
-import type { Hooks } from "../external/hooks";
+import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Log, Places, RunScope, SwitchesPort, ToolContent } from "../contract";
+import { agentJson, type Hooks, scopeJson } from "../external/hooks";
 import type { RuleRun } from "../files/api";
 import type { Fired } from "../loop/rules";
 import type { ParentCall, RunTrace } from "../loop/trace";
@@ -55,11 +55,6 @@ export interface GateDeps {
   log: Log;
   /** His hooks before and after a tool; none runs none. */
   hooks?: Hooks;
-}
-
-/** A run's scope as a hook is sent it. */
-function scopeJson(scope: RunScope): JsonObject {
-  return { user: scope.user, session: scope.session, ...(scope.chat !== undefined ? { chat: scope.chat } : {}), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) };
 }
 
 export class TurnGate implements ToolGate {
@@ -103,7 +98,7 @@ export class TurnGate implements ToolGate {
     // His hooks before the call, one after another (R-200): a block is its answer, in the hook's words.
     let args = call.args;
     if (d.hooks !== undefined) {
-      const hooked = await d.hooks.run("before-tool", { scope: scopeJson(d.scope), agent: { id: d.agent.id, definition: d.agent.definition }, tool: call.tool, callId: call.callId, args }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
+      const hooked = await d.hooks.run("before-tool", { scope: scopeJson(d.scope), agent: agentJson(d.agent), tool: call.tool, callId: call.callId, args }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
       if (hooked.blocked !== undefined) return { refuse: answer(hooked.blocked.reason, true), refused: { by: "hook", hook: hooked.blocked.hook, reason: hooked.blocked.reason }, remind: [], ...(permission !== undefined ? { permission } : {}) };
       if (hooked.input !== undefined) args = hooked.input;
       if (hooked.added.length > 0) this.#added.set(call.callId, hooked.added);
@@ -140,7 +135,7 @@ export class TurnGate implements ToolGate {
     let read = result;
     if (d.hooks !== undefined) {
       const text = [...result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])), ...(result.reports ?? [])].join("\n");
-      const hooked = await d.hooks.run("after-tool", { scope: scopeJson(d.scope), agent: { id: d.agent.id, definition: d.agent.definition }, tool: call.tool, callId: call.callId, args: call.args, result: { text, ...(result.error === true ? { error: true } : {}) } }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
+      const hooked = await d.hooks.run("after-tool", { scope: scopeJson(d.scope), agent: agentJson(d.agent), tool: call.tool, callId: call.callId, args: call.args, result: { text, ...(result.error === true ? { error: true } : {}) } }, { agent: d.agent, ...(d.parent !== undefined ? { parent: d.parent } : {}), callId: call.callId }, signal);
       hookAdded.push(...hooked.added);
       if (hooked.blocked !== undefined) {
         await this.#keep(call, text);

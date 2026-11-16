@@ -103,6 +103,8 @@ export interface TeamDeps {
   signal?: AbortSignal;
   /** A sub-agent ended before its run did (at the reply, §13.4): its session closes now. */
   end?(agent: AgentRef): void;
+  /** His run-end hooks for an agent the team made, at the moment its work would end (§5.4, §13.3): a block's reason, which it goes on with for one more call. None asks nothing. */
+  atRunEnd?(agent: AgentRef, parent: ParentCall | undefined): Promise<string | undefined>;
 }
 
 interface Member {
@@ -343,6 +345,7 @@ export class Team implements TeamWork {
       ...(questions !== undefined ? { questions } : {}),
       gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),
+      ...(d.atRunEnd !== undefined ? { atRunEnd: () => d.atRunEnd?.(ref, origin.parent) ?? Promise.resolve(undefined) } : {}),
       // A run that goes on past an edit (a job's agent; one continued) is told what of its block no
       // longer stands, against its block made again from the files as they stand (R-128).
       changed: async () => {

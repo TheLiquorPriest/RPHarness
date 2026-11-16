@@ -17,6 +17,7 @@ import { Transcripts } from "./transcripts";
 import { RunSessions } from "../sessions/runs";
 import type { SessionBook } from "../sessions/book";
 import type { CompactFacts } from "../sessions/compact";
+import type { Hooks } from "../external/hooks";
 
 export interface AgentRunDeps {
   env: Environment;
@@ -39,6 +40,8 @@ export interface AgentRunDeps {
   ran?(call: GateCall, result: LoopToolResult, tool: HeldTool | undefined): void;
   /** The session files, where each sub-agent's and job's agent's run is kept as a session of its own (§13.4); none keeps none. */
   book?: SessionBook;
+  /** His hooks, which run before and after each tool of the run's agents; none runs none. */
+  hooks?: Hooks;
 }
 
 /** What every agent of one run is made with: its gate, its kept requests, its transcript, its session. */
@@ -100,6 +103,7 @@ export class AgentRuns {
       words: d.words,
       tools,
       ...(clip !== undefined ? { clipChars: clip } : {}),
+      ...(d.hooks !== undefined ? { hooks: d.hooks } : {}),
     });
     const ran = d.ran;
     return {

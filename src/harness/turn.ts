@@ -43,6 +43,7 @@ import type { External } from "../external";
 import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type SceneMap, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
+import { agentJson, hookSettings, Hooks, scopeJson } from "../external/hooks";
 import type { LiveHub } from "./live";
 import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
 import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
@@ -186,6 +187,10 @@ export class Turn {
   #judges: Judges | undefined;
   /** The facts the turn's rules test, which the briefing names too. */
   #facts: Facts | undefined;
+  /** His hooks for the turn's run (§5.4 "Hooks"), once its settings are read. */
+  #hooks: Hooks | undefined;
+  /** What his turn-start hooks added, for the briefing. */
+  #hooked = "";
   #intentWritten = false;
   /** The lead's last message that ended whole with any text outside every mark, that text, trimmed: what a run with no reply hands the host. */
   #lastText: string | undefined;
@@ -314,6 +319,8 @@ export class Turn {
     this.#c.book.held = settings.sessions.held;
     this.#roleMark = roleMark(roleNote);
     this.#places = places;
+    const hooks = new Hooks({ hooks: () => guidance.hooks(), switches: env.switches, user: scope.user, settings: hookSettings(settings), trace: this.#trace, log: env.log });
+    this.#hooks = hooks;
     this.#runs = new AgentRuns({
       env,
       scope,
@@ -327,6 +334,7 @@ export class Turn {
       tools: () => this.#registry?.all() ?? [],
       tell: (written) => void this.#tell(written),
       book: this.#c.book,
+      hooks,
     });
     // The turn's first entry in the session file: after the session's latest turn when the request names no parent, after no turn when it names none (null), and a swipe after the entry before the turn it replaces (§11).
     // A continue is the same turn, extended (§10.10): a turn the file holds already is not begun again, and its work goes on from the turn's newest entry.
@@ -435,6 +443,7 @@ export class Turn {
       session: (agent, kind, by) => this.#agentRuns().session(agent, kind, by),
       compacted: (agent, summary, facts) => this.#agentRuns().compacted(agent, summary, facts),
       compaction: () => this.#settings.compaction,
+      atRunEnd: (agent, parent) => hooks.atRunEnd(scope, { agent, ...(parent !== undefined ? { parent } : {}) }),
       slice,
       numbers: session.handles,
       signal: this.#stopping.signal,
@@ -494,6 +503,10 @@ export class Turn {
 
     const due = await rules.turnStart(this.#lead);
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
+    // His turn-start hooks, before the lead's first call (§5.4): what they add goes into the briefing; a block ends the turn with the hook's reason.
+    const started = await hooks.run("turn-start", { scope: scopeJson(scope), turn: { kind: req.kind, lead: req.lead }, agent: agentJson(this.#lead) }, { agent: this.#lead });
+    if (started.blocked !== undefined) return this.#outcome({ status: "failed", error: { code: "hook", hook: started.blocked.hook, detail: started.blocked.reason } });
+    this.#hooked = joined(started.added);
     // A request that carries no prompt (a run asked for to settle a turn's records, say) leaves the prompt's record as it was: nothing of it is compared, kept or saved, no view of it is written over the turn's, and its prompt tools find none.
     if (req.prompt.length > 0) {
       const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, by: this.#lead, sceneMap: this.#sceneMap() });
@@ -661,6 +674,8 @@ export class Turn {
       channel,
       ...this.#keeper(this.#lead),
       listSize,
+      // His run-end hooks, once a stretch, at the moment its work would end.
+      atRunEnd: () => hooks.atRunEnd(scope, { agent: this.#lead }),
     };
     if (earlierTurns?.left() === true) {
       const ratio = settings.tokens.charsPerToken;
@@ -783,6 +798,8 @@ export class Turn {
       ...(await this.#cacheFields(places)),
       // The session's file could not be read, or some of its lines (§17.2): why, so the lead knows what it holds of the scene is short.
       ...(this.#unreadable !== undefined ? { session_unreadable: "reason" in this.#unreadable ? { reason: this.#unreadable.reason } : { lines: this.#unreadable.lines } } : {}),
+      // What his turn-start hooks added (§5.4 "Hooks").
+      ...(this.#hooked !== "" ? { hooks: this.#hooked } : {}),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;
@@ -1205,6 +1222,7 @@ export class Turn {
       gate: this.#agentRuns().gate(ref, parent),
       channel,
       ...this.#keeper(ref),
+      ...(this.#hooks !== undefined ? { atRunEnd: () => this.#hooks?.atRunEnd(this.scope, { agent: ref, parent }) ?? Promise.resolve(undefined) } : {}),
     });
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: writer, tools: runner.leftOut });
     // Each later stretch of the writer's work, which a message sets going, ends its run as well: its draft is kept, and its session let go.

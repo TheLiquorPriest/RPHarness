@@ -24,7 +24,9 @@
 //   is stopped after the time given, so a host's own searches (RPE's grep) never refuse a pattern
 //   for being slow and never stall its process.
 // - `renderTemplate`: the one template renderer (R-44), with which RPH renders every shipped part, so
-//   a host's own texts (an engine's answers, a world state's layout) lay out exactly as RPH's do.
+//   a host's own texts (an engine's answers, a world state's layout) lay out exactly as RPH's do;
+//   `templateOf` reads a text once and renders it with one set of fields after another, the same
+//   renders, for a host that words many lines by one text.
 // - `SHIPPED_GUIDANCE`: where RPH's shipped files are, fixed where the package is installed, for a
 //   host to serve through its own file port as the lowest level.
 
@@ -35,5 +37,5 @@ export { parseDefinition } from "./files/definitions";
 export { OWNER_ONLY } from "./owner";
 export { placeOf } from "./model/place";
 export { runPattern, type PatternRun } from "./files/pattern";
-export { renderTemplate } from "./files/template";
+export { renderTemplate, templateOf, type TemplateRender } from "./files/template";
 export { SHIPPED_GUIDANCE } from "./harness/shipped";

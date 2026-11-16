@@ -8,7 +8,7 @@ beside this page.
 
 A host imports only `rp-harness` (`createHarness` and the contract's types), `rp-harness/contract`,
 `rp-harness/helpers` (the settings list and its check, the owner-only list, `placeOf`, `runPattern`,
-`renderTemplate`, `SHIPPED_GUIDANCE`), `rp-harness/hosts/folder`, `rp-harness/testing/rig` and
+`renderTemplate`, `templateOf`, `SHIPPED_GUIDANCE`), `rp-harness/hosts/folder`, `rp-harness/testing/rig` and
 `rp-harness/testing/kit`.
 
 ## The contract and how it changes

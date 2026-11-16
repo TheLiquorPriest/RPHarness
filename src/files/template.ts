@@ -190,13 +190,29 @@ export const parseTemplate: ParseTemplate = (text, at) => {
   return { template, problems };
 };
 
+/** What a text rendered with fields gives: its text and the fields it put in that had no value; or, where the text does not parse, no text and why. */
+export interface TemplateRender {
+  text?: string;
+  missing: string[];
+  problems: Problem[];
+}
+
+/**
+ * A text read once as a template, to render with one set of fields after another (`rp-harness/helpers`):
+ * each render is what `renderTemplate` gives for the text and those fields, without reading the text
+ * again, so a host that words many lines by one text reads it once.
+ */
+export function templateOf(text: string, at: At = { path: "" }): (fields?: Fields) => TemplateRender {
+  const { template, problems } = parseTemplate(text, { ...at, firstLine: 1 });
+  if (template === undefined) return () => ({ missing: [], problems });
+  return (fields = {}) => ({ ...template.render(fields), problems });
+}
+
 /**
  * A text rendered with `fields` exactly as every shipped part is (§5.4 l.560, R-44): the one renderer
  * of both repositories, which a host renders its own texts through (`rp-harness/helpers`). Its text
  * and the fields it put in that had no value; or, where the text does not parse, no text and why.
  */
-export function renderTemplate(text: string, fields: Fields = {}, at: At = { path: "" }): { text?: string; missing: string[]; problems: Problem[] } {
-  const parsed = parseTemplate(text, { ...at, firstLine: 1 });
-  if (parsed.template === undefined) return { missing: [], problems: parsed.problems };
-  return { ...parsed.template.render(fields), problems: parsed.problems };
+export function renderTemplate(text: string, fields: Fields = {}, at: At = { path: "" }): TemplateRender {
+  return templateOf(text, at)(fields);
 }

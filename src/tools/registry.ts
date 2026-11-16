@@ -1,7 +1,9 @@
 // The tool registry (§6.8, §13.1): RPH's own tools and the host's, by name. An agent holds exactly
 // the tools its definition lists; a name nobody registered is left out and reported, never an error.
-import type { HostTool, Switchable, ToolTier } from "../contract";
-import type { LoopTool } from "../loop/types";
+// A lead's session holds the list it opened with (`opened`): RPH, not the host, holds what its
+// requests carry, so a tool the host withdraws mid-session stays declared and answers that it is gone.
+import type { HostTool, JsonSchema, Switchable, ToolTier } from "../contract";
+import type { LoopTool, LoopToolResult } from "../loop/types";
 import type { OwnTool } from "./kit";
 
 /** A tool as an agent holds it, with what the user's permissions are judged by. */
@@ -59,5 +61,28 @@ export class Registry {
       else tools.push(tool);
     }
     return { tools, missing };
+  }
+
+  /**
+   * The tools a session declared as it opened (§6.8), in that order, each as declared then whatever
+   * the registry holds now. One the host no longer offers (withdrawn, or its file switched off)
+   * answers with `withdrawn` and runs nothing; `withdrawn` names them. A name the session never
+   * declared stays out, as it was at the opening.
+   */
+  opened(names: readonly string[], declared: Readonly<Record<string, { description: string; parameters: JsonSchema }>>, withdrawn: (name: string) => Promise<LoopToolResult>): { tools: HeldTool[]; withdrawn: string[] } {
+    const tools: HeldTool[] = [];
+    const gone: string[] = [];
+    for (const name of new Set(names)) {
+      const as = Object.hasOwn(declared, name) ? declared[name] : undefined;
+      if (as === undefined) continue;
+      const now = this.#tools.get(name);
+      if (now !== undefined) {
+        tools.push({ ...now, description: as.description, parameters: as.parameters });
+        continue;
+      }
+      gone.push(name);
+      tools.push({ name, description: as.description, parameters: as.parameters, run: () => withdrawn(name), family: "withdrawn", tier: "read", from: "host" });
+    }
+    return { tools, withdrawn: gone };
   }
 }

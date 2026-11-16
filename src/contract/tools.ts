@@ -92,8 +92,10 @@ export interface HostTool {
 
 export interface ToolsPort {
   /**
-   * The host's tools for this scope. The list does not change within a session (§6.8: "the list
-   * itself never changes in a session"), so the cached front of every prompt holds.
+   * The host's tools for this scope, as it offers them now. RPH holds what a session's requests
+   * carry (§6.8: "the list itself never changes in a session"): a lead's tools stay declared as its
+   * session opened them, so the cached front of every prompt holds, and a tool the host no longer
+   * offers is answered as withdrawn when it is called. The next session's list leaves it out.
    */
   all(scope: Scope): Promise<HostTool[]>;
 }

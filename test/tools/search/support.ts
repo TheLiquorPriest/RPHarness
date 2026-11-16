@@ -192,7 +192,7 @@ export async function bench(files: Readonly<Record<string, string>> = {}): Promi
     guidance,
     texts,
     notices,
-    deps: (reach, extra = {}) => ({ reach, guidance, notices, texts, schemaShown: 600, hits: DEFAULT_SETTINGS.searchHits, ...extra }),
+    deps: (reach, extra = {}) => ({ reach, guidance, notices, texts, schemaShown: 600, hits: DEFAULT_SETTINGS.searchHits, perCall: DEFAULT_SETTINGS.perCall, ...extra }),
     async close() {
       await host.close();
       await rm(place, { recursive: true, force: true });

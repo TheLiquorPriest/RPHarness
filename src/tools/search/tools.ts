@@ -36,6 +36,8 @@ export interface ToolSearchDeps {
   texts: ReadonlyMap<string, ToolText>;
   /** The most tools one search gives when the agent names no limit (the user's `tools.search`). */
   hits: number;
+  /** The most one call takes (the user's `tools.perCall`): a limit the agent names is held to it. */
+  perCall: number;
   /** How the tools a search covers are ordered; `plainRank` when absent. */
   rank?: Rank;
 }
@@ -74,7 +76,7 @@ export function toolSearch(deps: ToolSearchDeps): OwnTool {
       }
       const ranked = (deps.rank ?? plainRank)(covered, asked);
       const found = ranked.filter((tool) => !waitingOn.has(tool));
-      const shown = found.slice(0, whole(given, "limit") ?? deps.hits);
+      const shown = found.slice(0, Math.min(whole(given, "limit") ?? deps.hits, deps.perCall));
       // Each thing that waits once, with its tools the words found, in the order they were ranked.
       const waiting = new Map<string, { name: string; tools: string[] }>();
       for (const tool of ranked) {

@@ -226,6 +226,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       notices: words,
       texts: own,
       hits: settings.searchHits,
+      perCall: settings.perCall,
       schemaShown: settings.schemaShown,
     }),
   ];

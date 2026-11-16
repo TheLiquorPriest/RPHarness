@@ -4,4 +4,5 @@ export const TOOLS_WORDS = {
   "tools.gapCheck": { name: "Hits a gap check takes", about: "Hits gap_check takes from each place it searches when the agent asks for no number." },
   "tools.perCall": { name: "The most one tool call takes", about: "Messages chat_read gives, entries lore_read reads, hits a search asks each place for, and messages a stretch of the chat an agent is given holds." },
   "tools.schemaShown": { name: "Schema shown with a call that does not fit", about: "Characters of a tool's schema shown whole in the answer to a call that does not fit it; a longer schema is left out of that answer." },
+  "tools.fixedTokens": { name: "Size of an agent's tool list", about: "Tokens an agent's fixed list of tools, as its requests carry it, should stay under; a list over it is marked in the live view and on the Turn page, and still runs." },
 };

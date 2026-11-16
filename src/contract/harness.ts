@@ -10,6 +10,7 @@ import type { ModelsApi, ToolsAs } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
 import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
+import type { JsonSchema } from "./json";
 
 // ---------------------------------------------------------------- jobs
 
@@ -358,6 +359,25 @@ export interface ListedDefinition extends DefinitionView {
 }
 
 /**
+ * What an agent's requests carry as its fixed list (§6.8, Appendix D.1), as `definitions.declared`
+ * gives it: each tool's name, description and schema exactly as declared, `closing` among its
+ * arguments, and the whole's size in tokens as the model layer counts a call's tools; `most` is the
+ * user's `tools.fixedTokens`, and a list over it is marked where it shows (nothing is refused).
+ */
+export interface DeclaredTools {
+  tools: { name: string; description: string; parameters: JsonSchema }[];
+  tokens: number;
+  most: number;
+}
+
+/** A tool the registry holds for a scope, as `definitions.tools` lists it (C-T14): its name, its family, and whose it is. */
+export interface RegisteredTool {
+  name: string;
+  family: string;
+  from: "rph" | "host";
+}
+
+/**
  * What an agent definition's body may name (§5.4). Its instructions are a template, and a sub-agent's
  * run (one `delegate` starts, a job's agent, the writer `write_reply` starts) fills it with these
  * fields and no others when it starts: `agent`, its handle this run (`gm-1`); `definition`, its
@@ -425,6 +445,14 @@ export interface DefinitionsApi {
    * is left as it is.
    */
   apply(scope: Scope): Promise<void>;
+  /**
+   * What `agent`'s requests carry as its fixed list for a scope, built as a run builds it: for a lead
+   * whose session is open, the list as the session opened it; else its definition's list as the
+   * registry holds it now. With its size in tokens.
+   */
+  declared(scope: Scope, agent: string): Promise<DeclaredTools>;
+  /** Every tool the registry holds for a scope, built as a run builds it (RPH's own and the host's, a host tool under one of RPH's names left out), each name once, in name order (C-T14). A read. */
+  tools(scope: Scope): Promise<RegisteredTool[]>;
 }
 
 // ---------------------------------------------------------------- what a model call was sent

@@ -21,6 +21,8 @@ export const TOOLS = worded(
     // own file tools are; a tool of many arguments, whose schema costs more to read than the call cost
     // to write, is answered with what did not fit alone.
     schemaShown: { key: "tools.schemaShown", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, at: "schemaShown" },
+    // Appendix D.1: the fixed list's tools under 8,000 tokens. A list over it is marked, never refused.
+    fixedTokens: { key: "tools.fixedTokens", takes: { type: "whole", least: 1 }, default: 8_000, perConnection: false, at: "fixedTokens" },
   },
   TOOLS_WORDS,
 );

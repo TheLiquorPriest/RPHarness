@@ -18,7 +18,7 @@ agents: {{agent}} was not started: this turn has started {{value}} agents, and t
 ended: {{agent}} ended when this turn's reply went out, so it cannot be messaged now.
 too_large: {{agent}} was not started: what it is given is {{size}} tokens, and its model has room for {{room}}.{{#attachments}} {{name}} is {{tokens}} tokens.{{/attachments}}
 nobody_to_ask: There is no one above you to ask.
-chat_message: #{{index}} {{name}}{{#hidden}} (hidden){{/hidden}}{{#summarized}} (summarized){{/summarized}}: {{text}}
+chat_message: #{{index}} {{name}}{{#hidden}} (hidden){{/hidden}}{{#summarized}} (summarized){{/summarized}}{{#outside_story}} (outside the story){{/outside_story}}: {{text}}
 lore_entry: {{title}} ({{source}})
 lore_known_by: Known only to {{names}}.
 lore_gate: Known only to whoever passes its gate, {{gate}}, which {{#open}}holds{{/open}}{{^open}}does not hold{{/open}} now.

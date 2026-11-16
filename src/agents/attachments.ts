@@ -134,6 +134,7 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
           ...(message.text !== undefined ? { text: message.text } : {}),
           ...(message.hidden === true ? { hidden: true } : {}),
           ...(message.summarized === true ? { summarized: true } : {}),
+          ...(message.story === false ? { outside_story: true } : {}),
         }) ?? "",
     );
     return joined(laid);

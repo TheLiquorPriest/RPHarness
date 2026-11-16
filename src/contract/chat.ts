@@ -42,6 +42,11 @@ export interface ChatMessage {
   summarized?: true;
   /** When it was sent, in milliseconds since 1970, where the host knows. */
   at?: number;
+  /**
+   * The host's story choice (whose messages are the chat's story, R-176) leaves this message out of
+   * the story; absent where it is the story's, or the host keeps no such choice.
+   */
+  story?: false;
 }
 
 /** The chat as a whole. */
@@ -77,6 +82,11 @@ export interface ChatHit {
   snippet: string;
   /** How it matched: by the words given, or by meaning where the host has that set up. */
   how: "words" | "meaning";
+  /**
+   * The host's story choice (whose messages are the chat's story, R-176) leaves this message out of
+   * the story; absent where it is the story's, or the host keeps no such choice.
+   */
+  story?: false;
 }
 
 export interface ChatPort {

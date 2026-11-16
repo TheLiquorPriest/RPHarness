@@ -3,10 +3,10 @@ description: The words RPH's base tools answer with - chat_read, chat_search, lo
 format: lines
 ---
 none_found: Nothing found.
-chat_range: Messages #{{from}} to #{{to}} of {{length}}.{{#most}} One read gives at most {{most}}.{{/most}}
-chat_message: #{{index}} ({{id}}) {{name}}{{#hidden}} (hidden){{/hidden}}{{#summarized}} (summarized){{/summarized}}: {{text}}
-chat_withheld: #{{index}} ({{id}}) {{name}} (hidden): the chat's setting keeps its text from agents.
-chat_hit: #{{index}} ({{id}}) {{name}}: {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
+chat_range: Messages #{{from}} to #{{to}} of {{length}}.{{#most}} One read gives at most {{most}}.{{/most}}{{#left_out}} {{left_out}} of them, outside the story, are left out.{{/left_out}}
+chat_message: #{{index}} ({{id}}) {{name}}{{#hidden}} (hidden){{/hidden}}{{#summarized}} (summarized){{/summarized}}{{#outside_story}} (outside the story){{/outside_story}}: {{text}}
+chat_withheld: #{{index}} ({{id}}) {{name}} (hidden){{#outside_story}} (outside the story){{/outside_story}}: the chat's setting keeps its text from agents.
+chat_hit: #{{index}} ({{id}}) {{name}}{{#outside_story}} (outside the story){{/outside_story}}: {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
 chat_empty: The chat has no messages yet.
 chat_outside: The chat has {{length}} messages, #0 to #{{last}}, and none of them is in the stretch asked for.
 no_message: There is no message {{id}} in this chat.

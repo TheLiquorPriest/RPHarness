@@ -222,3 +222,11 @@ test("the job tools' guides say what each does, and name the arguments each take
   expect((await shippedTool("job_list")).description).toContain("job_read");
   expect((await shippedTool("job_cancel")).description).toContain("the player's to stop");
 });
+
+test("a tool no longer offered and arguments that are not JSON are each told as what is so, and arguments that are not JSON are not blamed on a field", async () => {
+  const part = await lines();
+  expect(part.line("withdrawn", { tool: "world_query" })).toBe("world_query was not run: it is not offered any more. It was among your tools when this session began.");
+  expect(part.line("invalid", { tool: "world_query", arguments: '{"id": ', unparsed: true, parameters: '{"type":"object"}' })).toBe('world_query was not run: the arguments you sent are not JSON, so none could be read. It takes {"type":"object"}. What was sent: {"id": ');
+  expect(part.line("invalid", { tool: "world_query", arguments: '{"id": 4}', misfits: [{ argument: "id", missing: false }] })).toBe("world_query was not run: the arguments you sent do not fit what it takes. id does not fit.");
+  for (const said of [part.line("withdrawn", { tool: "x" }) ?? "", part.line("invalid", { tool: "x", arguments: "{", unparsed: true }) ?? ""]) expect({ said, asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ said, asks: false, unfilled: false });
+});

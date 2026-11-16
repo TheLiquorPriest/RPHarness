@@ -7,7 +7,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { TurnRequest } from "../../src/contract";
-import { loadGuidance, SHIPPED_GUIDANCE } from "../../src/index";
+import { loadGuidance } from "../../src/files";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { briefingAround, CONTRACT_MARK, contractFor, gate, PROMPT, request, said, type Stage, stage, textOf, WatchedSink } from "./support";
 
 let open: Stage | undefined;

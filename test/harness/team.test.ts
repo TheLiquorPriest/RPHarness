@@ -6,7 +6,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { gate, request, said, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;

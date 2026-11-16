@@ -567,6 +567,8 @@ export interface Guidance {
   manifestFiles(): Promise<ManifestRead[]>;
   /** His MCP servers (`<tools>/mcp.json`, every level's, a nearer server replacing a farther one of its name), broken ones too. */
   mcpServers(): Promise<McpRead[]>;
+  /** A prompt part's, a tool description's or a skill's file as the levels give it (`Harness.parts.read`, C17): its text, where it is, whether it is switched off, and whether it reads whole. */
+  layered(kind: PartKind | "skills", name: string): Promise<{ text: string; path: string; level: LayerLevel; off: boolean; broken: boolean } | undefined>;
 
   /** Every rule file, examples and broken ones included, as the Rules page lists them; a rule's command with where it stands as `switches` say (none: off). */
   rules(switches?: SwitchesPort): Promise<RuleView[]>;
@@ -578,8 +580,13 @@ export interface Guidance {
 
 // ---------------------------------------------------------------- the ways in (each exported from `./index` by this name)
 
+/** What a guidance read is given besides its files: told each time one of its parts is rendered, with the values it was rendered with (of a part of lines, the line's name too), for `Harness.parts.lastFields` (C17). */
+export interface GuidanceOptions {
+  rendered?(kind: PartKind, name: string, fields: Fields, line?: string): void;
+}
+
 /** `loadGuidance`: the guidance of a scope. Nothing is read until it is asked for. */
-export type LoadGuidance = (files: FilesPort, scope: Scope | UserScope) => Guidance;
+export type LoadGuidance = (files: FilesPort, scope: Scope | UserScope, options?: GuidanceOptions) => Guidance;
 
 /** `createFacts`: RPH's own facts, read by `own` at each moment, and the host's through its port. */
 export type CreateFacts = (host: FactsPort, own: OwnFactsReader) => Facts;

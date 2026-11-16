@@ -11,7 +11,7 @@ import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
 import type { Carry, LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 import type { ListedFact } from "./facts";
-import type { JsonSchema } from "./json";
+import type { JsonObject, JsonSchema } from "./json";
 import type { PromptMapApi } from "./prompt";
 import type { ExternalApi, SwitchState } from "./switches";
 
@@ -328,6 +328,53 @@ export interface RulesApi {
   facts(scope: Scope): Promise<ListedFact[]>;
 }
 
+// ---------------------------------------------------------------- the chat's own parts
+
+/** Which of the chat's own layered files `parts` reads (C17): a prompt part (`.prompts/`), a tool's description (`.tools/<name>.md`), or a skill. Definitions, rules and notes have members of their own. */
+export type PartFileKind = "prompt" | "tool" | "skill";
+
+/** A layered file as the chat's levels give it: the nearest level's. */
+export interface PartRead {
+  kind: PartFileKind;
+  name: string;
+  /** The file's whole text, header and body. */
+  text: string;
+  path: string;
+  level: LayerLevel;
+  /** In force: not switched off (`off:`), and it reads whole. */
+  inForce: boolean;
+  /** Why not, where it is not. */
+  why?: "off" | "broken";
+}
+
+/** A part rendered (C17, C-12): the fields it takes, its text with the values given, and what keeps it from reading. */
+export interface PartPreview {
+  /** Every field it names, put in or tested, in the order first named; of a part of lines, every line's. */
+  fields: string[];
+  /** Its render; absent where the text does not parse. A part of lines renders as its lines, `name: text`, one a line. */
+  text?: string;
+  /** The fields it put in that had no value. */
+  missing: string[];
+  /** Why the text does not read, or what of it is shown as written, each with its line. */
+  problems: { line?: number; message: string }[];
+}
+
+/**
+ * The chat's own layered parts (C17, C-12): read as the levels give them, rendered, previewed from a
+ * draft, and the values each was last rendered with for an agent of the chat. Reads only: nothing
+ * here changes which level wins. A skill is read and never rendered (it has no fields).
+ */
+export interface PartsApi {
+  /** The file of that kind and name as the chat's levels give it; undefined when no level has one. */
+  read(scope: Scope, kind: PartFileKind, name: string): Promise<PartRead | undefined>;
+  /** A part in force rendered with the values given; undefined when none is in force. */
+  render(scope: Scope, kind: "prompt" | "tool", name: string, fields: JsonObject): Promise<PartPreview | undefined>;
+  /** A part's text, as saved (no `text`) or as drafted, rendered with `fields`, else with the values it was last rendered with for an agent of this chat. */
+  preview(scope: Scope, kind: "prompt" | "tool", name: string, text?: string, fields?: JsonObject): Promise<PartPreview>;
+  /** The values the part was last rendered with for an agent of this chat (a part of lines: each line's, by its name); undefined before it ever was. */
+  lastFields(scope: Scope, kind: "prompt" | "tool", name: string): Promise<JsonObject | undefined>;
+}
+
 // ---------------------------------------------------------------- the live view
 
 /** A run going on now. */
@@ -597,6 +644,8 @@ export interface Harness {
   promptMap: PromptMapApi;
   /** Everything a scope's files name that runs a command or calls out, with where each stands (C3): what the pages and `rpe allow` list as waiting. */
   external: ExternalApi;
+  /** The chat's own layered parts, for the Prompts page and its preview (C17). */
+  parts: PartsApi;
   /**
    * An agent's kept request (the file its `call_started` names, C-17) rebuilt exactly as it was sent,
    * from the pointers into the turn's files it holds; undefined when there is no such file.

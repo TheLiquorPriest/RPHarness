@@ -20,8 +20,8 @@ test("a host finds RPH's helpers in rp-harness/helpers alone: the contract holds
   // The folder host, the rig and the kit are entries of their own, for a second host and for tests.
   expect(Object.keys(manifest.exports).sort()).toEqual([".", "./contract", "./helpers", "./hosts/folder", "./package.json", "./testing/kit", "./testing/rig"]);
   expect(Object.keys(contract)).toEqual([]);
-  // The root also offers the two values hosts took from it before the helpers module existed; they are recorded so that nothing joins them.
-  expect(Object.keys(root).sort()).toEqual(["SHIPPED_GUIDANCE", "createHarness", "loadGuidance"]);
+  // The root offers `createHarness` alone besides the contract's types (CONTRACT condition 4).
+  expect(Object.keys(root).sort()).toEqual(["createHarness"]);
 
   // Every helper is pure: a function, or data no host can change under RPH, which reads the same values.
   expect(Object.keys(helpers).length).toBeGreaterThan(0);

@@ -8,7 +8,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { ApprovalsPort, JsonValue } from "../../src/contract";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { LEAD_FILE } from "../lead-file";
 import { request, said, type Stage, stage, textOf } from "./support";
 

@@ -4,8 +4,8 @@
 // descriptions, the rules as the Rules page lists them, and one run's rule engine. Each file is read
 // and parsed once.
 
-import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, Refused, RuleView, Scope, StackLeft, SwitchesPort, UserScope } from "../contract/index";
-import type { AgentDefinition, Guidance, LoadGuidance, ManifestRead, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
+import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, LayerLevel, Refused, RuleView, Scope, StackLeft, SwitchesPort, UserScope } from "../contract/index";
+import type { AgentDefinition, Fields, Guidance, GuidanceOptions, LoadGuidance, ManifestRead, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import { normalized, problemAt, WrittenItems } from "./header";
@@ -75,20 +75,22 @@ interface RuleState {
   why?: "off" | "needs" | "broken";
 }
 
-export const loadGuidance: LoadGuidance = (files, scope) => new TreeGuidance(files, scope);
+export const loadGuidance: LoadGuidance = (files, scope, options) => new TreeGuidance(files, scope, options);
 
 class TreeGuidance implements Guidance {
   readonly scope: Scope | UserScope;
   readonly #files: FilesPort;
   readonly #tree: Tree;
+  readonly #options: GuidanceOptions;
   /** What parsing found, each file's once. */
   readonly #problems: Problem[] = [];
   readonly #memo = new Map<string, Promise<unknown>>();
 
-  constructor(files: FilesPort, scope: Scope | UserScope) {
+  constructor(files: FilesPort, scope: Scope | UserScope, options: GuidanceOptions = {}) {
     this.scope = scope;
     this.#files = files;
     this.#tree = new Tree(files, scope);
+    this.#options = options;
   }
 
   #once<T>(key: string, make: () => Promise<T>): Promise<T> {
@@ -137,10 +139,39 @@ class TreeGuidance implements Guidance {
   }
 
   #part(kind: PartKind, name: string): Promise<Found<PromptPart> | undefined> {
+    const rendered = this.#options.rendered;
     return this.#found(kind, name, (file, replaces) => {
       const { part, problems } = parsePart(file, name, kind, replaces);
-      return { item: part, problems };
+      if (part === undefined || rendered === undefined) return { item: part, problems };
+      // Each render tells the values it was rendered with, so the page previews the part with them (C17).
+      if (part.format === "template")
+        return {
+          item: {
+            ...part,
+            render: (fields?: Fields) => {
+              rendered(kind, name, fields ?? {});
+              return part.render(fields);
+            },
+          },
+          problems,
+        };
+      return {
+        item: {
+          ...part,
+          line: (line: string, fields?: Fields) => {
+            rendered(kind, name, fields ?? {}, line);
+            return part.line(line, fields);
+          },
+        },
+        problems,
+      };
     });
+  }
+
+  async layered(kind: PartKind | "skills", name: string): Promise<{ text: string; path: string; level: LayerLevel; off: boolean; broken: boolean } | undefined> {
+    const found = kind === "skills" ? await this.#skill(name) : await this.#part(kind, name);
+    if (found === undefined) return undefined;
+    return { text: found.file?.text ?? "", path: found.ref.path, level: found.ref.level, off: found.off, broken: found.item === undefined };
   }
 
   #manifest(name: string): Promise<Found<ToolManifest> | undefined> {
@@ -661,7 +692,7 @@ class TreeGuidance implements Guidance {
     const scope = this.scope;
     if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
     // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
-    const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope).#triggered();
+    const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope, this.#options).#triggered();
     const { facts, memory, window, patternTime, ranOut, stops, command, commandFailed } = options;
     return createRuleRun({ scope, rules: await this.#triggered(), read, facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}) });
   }

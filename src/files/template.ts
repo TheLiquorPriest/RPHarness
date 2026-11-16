@@ -3,7 +3,7 @@
 // Nothing else, so a template holds no logic. Blocks follow Mustache's rule for a line that holds
 // only a block's tag: the line leaves nothing behind, which is how the drafted parts are written.
 
-import type { ParseTemplate, Problem, Rendered, Template } from "./api";
+import type { Fields, ParseTemplate, Problem, Rendered, Template } from "./api";
 import type { At } from "./header";
 import { problemAt } from "./header";
 
@@ -189,3 +189,14 @@ export const parseTemplate: ParseTemplate = (text, at) => {
   NODES.set(template, root);
   return { template, problems };
 };
+
+/**
+ * A text rendered with `fields` exactly as every shipped part is (§5.4 l.560, R-44): the one renderer
+ * of both repositories, which a host renders its own texts through (`rp-harness/helpers`). Its text
+ * and the fields it put in that had no value; or, where the text does not parse, no text and why.
+ */
+export function renderTemplate(text: string, fields: Fields = {}, at: At = { path: "" }): { text?: string; missing: string[]; problems: Problem[] } {
+  const parsed = parseTemplate(text, { ...at, firstLine: 1 });
+  if (parsed.template === undefined) return { missing: [], problems: parsed.problems };
+  return { ...parsed.template.render(fields), problems: parsed.problems };
+}

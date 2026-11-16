@@ -2,7 +2,7 @@
 // its definition's `reads` lists the parts, its definition fifth and once, then the reply contract.
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { request, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;

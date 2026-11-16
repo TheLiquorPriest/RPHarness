@@ -7,7 +7,7 @@
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
 import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
-import { createFacts, loadGuidance } from "../files";
+import { createFacts, loadGuidance, partFields } from "../files";
 import { AgentRuns } from "../harness/agent-run";
 import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
@@ -93,7 +93,8 @@ export interface JobHearing {
 export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJob | LoopToolResult> {
   const { env } = core;
   const { scope } = ask;
-  const guidance = loadGuidance(env.files, scope);
+  // Each part rendered for the job's agents keeps the values it was rendered with, for the Prompts page's preview (C17).
+  const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
   const [settings, places, toolNotices, goOn] = await Promise.all([readSettings(guidance, env.files, scope, env.log), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule")]);
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);

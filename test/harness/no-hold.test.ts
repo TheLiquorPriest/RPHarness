@@ -7,7 +7,7 @@ import { afterEach, expect, test } from "bun:test";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { JsonValue, PromptMessage, TurnEvents } from "../../src/contract";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { textHash } from "../../src/prompt/text";
 import { play, played, S1, SAVE, SAVE_RULE, said, TIDE, turn } from "../sessions/support";
 import { CHAT, gate, PROMPT, request, type Stage, stage, USER, WatchedSink } from "./support";

@@ -7,7 +7,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { TurnOutcome } from "../../src/contract";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import type { Answer } from "../../src/testing/rig";
 import { type RecordedRequest, type Stage, stage, textOf } from "../harness/support";
 import { play, played, S1, SAVE, SAVE_RULE, SAVE_TEXT, said, TIDE, turn } from "./support";

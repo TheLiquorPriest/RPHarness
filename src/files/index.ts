@@ -6,6 +6,7 @@ export * from "./api";
 export { type Checked, checkRule, type Looked } from "./check";
 export { createFacts, listFacts, OWN_FACTS } from "./facts";
 export { loadGuidance } from "./guidance";
+export { partFields, partsApi } from "./preview";
 export { changes, changesText, holdsNothing, snapshot } from "./stack";
 export { type PatternRun, runPattern } from "./pattern";
 export { parseTemplate } from "./template";

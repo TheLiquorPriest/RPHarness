@@ -22,7 +22,7 @@ import { userMessage } from "../../src/harness/prompt";
 import { callTerms, readSettings } from "../../src/harness/settings";
 import { UsageBook } from "../../src/harness/usage";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
-import { SHIPPED_GUIDANCE } from "../../src/index";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { layLead } from "../lead-file";
 import { type AgentOutcome, AgentRunner, Budget, type ParentCall, type RunnerTexts, RunTrace, type Work } from "../../src/loop";
 import { type FileToolsDeps, fileFind, fileRead, fileWrite, type HeldTool, Registry, type ToolText, type Words } from "../../src/tools";

@@ -85,10 +85,10 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const { env } = core;
   const { scope } = ask;
   const guidance = loadGuidance(env.files, scope);
-  const [settings, places, toolNotices, goOn, closing] = await Promise.all([readSettings(guidance, env.files, scope, env.log), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule"), guidance.tool("closing")]);
+  const [settings, places, toolNotices, goOn] = await Promise.all([readSettings(guidance, env.files, scope, env.log), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule")]);
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);
-  const texts = runnerTexts(words, template(goOn), template(closing)?.render().text.trimEnd(), settings.schemaShown);
+  const texts = runnerTexts(words, template(goOn), settings.schemaShown);
   const trace = new RunTrace(core.hub.tee(env.trace, scope, () => settings.liveBacklog), scope, ask.id, env.clock, core.hub.hold(ask.id));
   const todos = new TodoLists();
   const rules = await guidance.ruleRun({
@@ -189,7 +189,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       return () => working.delete(entry);
     },
     gauge: (agent, limits) => core.usage.gauge(scope, ask.id, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
-    keep: (agent) => runs.keep(agent),
+    keep: (agent, kind) => runs.keep(agent, kind),
+    // A job's agents are compacted at any call that would not fit, as a turn's are (§11).
+    compaction: () => settings.compaction,
     job: ask.id,
   });
   const own = new Map<string, ToolText>();

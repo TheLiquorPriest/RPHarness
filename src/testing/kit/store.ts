@@ -140,7 +140,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
   const outcome = { status: "released" as const, released: true, usage: NO_USAGE };
   return {
     run_started: { kind: "run_started", run: "turn", turn: "new", lead: "author" },
-    agent_started: { kind: "agent_started", definition: agent.definition, connection: "kit-connection", model: "kit-model", effort: "low", session: "kit-session", given: ["prompt:persona"] },
+    agent_started: { kind: "agent_started", definition: agent.definition, connection: "kit-connection", model: "kit-model", effort: "low", session: "kit-session", given: ["prompt:persona"], tools: { tokens: 1_200, most: 8_000 } },
     intent_began: { kind: "intent_began" },
     intent: { kind: "intent", text: "Wants: a quiet answer." },
     call_started: { kind: "call_started", call: 1, connection: "kit-connection", model: "kit-model", sampling: { temperature: 0.7 }, maxTokens: 512, messages: 6, tools: 3 },
@@ -163,8 +163,9 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
     said: { kind: "said", call: 2, text: "Keep it short." },
     released: { kind: "released", release: { by: agent, form: "tags", length: 10 } },
     progress_missing: { kind: "progress_missing", time: 540_000 },
-    compacted: { kind: "compacted", session: "kit-session", before: 90_000, after: 12_000, keptTurns: 3 },
+    compacted: { kind: "compacted", session: "kit-session", reason: "fold", of: "turns", before: 90_000, after: 12_000, keptTurns: 3 },
     session: { kind: "session", session: "kit-session", change: "opened" },
+    tool_unheld: { kind: "tool_unheld", tool: "kit_missing", definition: agent.definition, reason: "unregistered" },
     job: { kind: "job", job: { id: "kit-job-1", agent: "indexer", brief: "Index the lore.", state: "running", scope: { user: "kit-user", chat: "kit-chat", session: "kit-job-session", turn: "kit-turn-1" }, startedBy: agent, started: 0, usage: NO_USAGE } },
     agent_ended: { kind: "agent_ended", status: "done", usage: NO_USAGE },
     run_ended: { kind: "run_ended", outcome },

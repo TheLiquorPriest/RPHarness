@@ -14,7 +14,7 @@
 // A stretch of the chat is given whole, however long: read page by page of the user's
 // `tools.perCall` messages, in order, nothing cut (§10.5: "each in full").
 // Messages and entries are laid out by lines of a file; nothing here adds a word.
-import type { AgentRef, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
+import type { AgentRef, AttachMoment, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
 import type { LinesPart } from "../files/api";
 
 /** A name an agent is given, and where it was named: its definition's `given:`, or the call that started it. */
@@ -38,6 +38,8 @@ export interface AttachDeps {
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
   /** How many messages one read of the chat asks for (the user's `tools.perCall`): a stretch is read in pages of so many, all of them. */
   most: number;
+  /** The moment the items are for (C-T13, R-144): the task the brief gave the agent, and on a continuation the message that continues it; told to the host with the list. */
+  moment: AttachMoment;
 }
 
 /** A stretch of the chat as a name gives it. */
@@ -172,7 +174,7 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
   let hosted: ContextBlock[] = [];
   if (refs.length > 0) {
     try {
-      hosted = await env.events.attachments(scope, reader, refs);
+      hosted = await env.events.attachments(scope, reader, refs, deps.moment);
     } catch (error) {
       env.log.error("The host could not be told what an agent is given, or give its part of it.", { agent: reader.id, error: error instanceof Error ? error.message : String(error) });
     }

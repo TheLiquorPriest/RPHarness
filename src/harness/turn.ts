@@ -681,7 +681,7 @@ export class Turn {
     if (form === "tags" && tags === undefined) return "no-tags";
     const held = registry.hold(definition.tools);
     const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const items = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: settings.perCall, slice }, this.#lead, definition.opening.map((ref) => ({ ref, from: "opening" as const })));
+    const items = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: settings.perCall, moment: { task: "" }, slice }, this.#lead, definition.opening.map((ref) => ({ ref, from: "opening" as const })));
     if (items.missing.length > 0) env.log.warn("What the lead's definition gives as its session opens could not be found.", { agent: definition.name, missing: items.missing });
     // The skills in the block stand as the session opened it, and the briefing says when the list no longer does.
     const block = await openingOf({ guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => registry.has(name), ...(contract !== undefined ? { contract: { part: contract, form } } : {}), items: { given: items, layout: template(layout) }, log: env.log });
@@ -766,7 +766,7 @@ export class Turn {
    */
   async #given(guidance: Guidance, reader: AgentRef, wanted: readonly Wanted[], slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<{ text: string; handed: string[] }> {
     const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const given = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, slice }, reader, wanted);
+    const given = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: this.#settings.perCall, moment: { task: "" }, slice }, reader, wanted);
     const handed = given.blocks.map((block) => block.name);
     const part = template(layout);
     if (part === undefined) return { text: joined(given.blocks.map((block) => block.text)), handed };

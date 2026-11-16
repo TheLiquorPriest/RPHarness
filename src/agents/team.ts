@@ -275,7 +275,7 @@ export class Team implements TeamWork {
     // What its definition names, what the call that starts it attaches, and each file pinned for it, read whole now (R-174).
     const wanted: Wanted[] = [...definition.given.map((name) => ({ ref: name, from: "definition" as const })), ...call.attach.map((name) => ({ ref: name, from: "delegate" as const })), ...(await pinsOf(d.guidance, definition.name, d.env.log))];
     const slice = d.slice?.bind(d);
-    const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
+    const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: call.brief }, ...(slice !== undefined ? { slice } : {}) }, ref, wanted);
     const attachments = given.blocks.map((block) => ({ name: block.name, text: block.text }));
     // A job the user started has nobody above its agent: its brief has a frame of its own. Without the frame, the brief and what it is given go as they are, one after another.
     const frame = origin.agent === undefined ? loaded.jobBrief : loaded.brief;

@@ -115,7 +115,7 @@ test("a given item marked for the opening is in the Author's opening block once;
     files: { ...TREE, ".agents/chief.md": CHIEF("opening: [map:drawn]\n") },
     events: (inner) => ({
       ...inner,
-      attachments: async (scope, agent, refs) => [...(await inner.attachments(scope, agent, refs)), ...refs.filter((ref) => ref.ref === "map:drawn").map((ref) => ({ name: ref.ref, text: drawn }))],
+      attachments: async (scope, agent, refs, moment) => [...(await inner.attachments(scope, agent, refs, moment)), ...refs.filter((ref) => ref.ref === "map:drawn").map((ref) => ({ name: ref.ref, text: drawn }))],
     }),
     answers: [RELEASE, RELEASE],
   }));

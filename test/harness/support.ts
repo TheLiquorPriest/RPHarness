@@ -245,7 +245,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
     };
     return {
       intent: (scope, text) => tell("intent", scope, text, () => inner.intent(scope, text)),
-      attachments: (scope, agent, refs) => tell("attachments", scope, refs, () => inner.attachments(scope, agent, refs)),
+      attachments: (scope, agent, refs, moment) => tell("attachments", scope, refs, () => inner.attachments(scope, agent, refs, moment)),
       consent: (scope, grant) => tell("consent", scope, grant, () => inner.consent(scope, grant)),
       gapCheck: (scope, check) => tell("gapCheck", scope, check, () => inner.gapCheck(scope, check)),
       dropStaged: (scope, agent) => tell("dropStaged", scope, agent, () => inner.dropStaged(scope, agent)),

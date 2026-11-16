@@ -217,9 +217,9 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
   // The folder host keeps the list and has no views of its own; the stage's host gives these.
   const events: TurnEvents = {
     ...host.events,
-    async attachments(scope, agent, refs) {
+    async attachments(scope, agent, refs, moment) {
       told.push({ kind: "attachments", agent, refs });
-      await host.events.attachments(scope, agent, refs);
+      await host.events.attachments(scope, agent, refs, moment);
       return refs.flatMap((ref) => (!ref.own && Object.hasOwn(views, ref.ref) ? [{ name: ref.ref, text: views[ref.ref] ?? "" }] : []));
     },
     async consent(scope, grant) {

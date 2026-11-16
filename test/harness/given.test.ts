@@ -25,7 +25,7 @@ test("the lead is given each other name it names, after the briefing, as a sub-a
     ],
     events: (inner) => ({
       ...inner,
-      attachments: async (scope, agent, refs) => [...(await inner.attachments(scope, agent, refs)), ...refs.filter((ref) => ref.ref === "fixture-view").map((ref) => ({ name: ref.ref, text: "Fixture view: the storm is an hour off." }))],
+      attachments: async (scope, agent, refs, moment) => [...(await inner.attachments(scope, agent, refs, moment)), ...refs.filter((ref) => ref.ref === "fixture-view").map((ref) => ({ name: ref.ref, text: "Fixture view: the storm is an hour off." }))],
     }),
     answers: [{ pieces: [{ text: "<reply>No boat tonight.</reply>" }] }],
   }));

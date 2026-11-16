@@ -9,7 +9,7 @@
 #   {"input": {...}}                        before a tool only: the arguments the call is to go with
 # A hook that exits with the code hooks.blockExit (2 as shipped) blocks too, and what it wrote on its standard error is the reason. Any other failure, an answer longer than hooks.answerMax, or running past its timeout blocks nothing; the Files page shows what happened.
 #
-# RPH runs turn-start, before-tool, after-tool, run-end, job-start and job-end today; before-release, after-release, session-close and before-compaction are read from the file and kept for when it runs them.
+# RPH runs turn-start, before-tool, after-tool, after-release, run-end, before-compaction, job-start and job-end today; before-release and session-close are read from the file and kept for when it runs them.
 
 # At a turn's start, before the agent's first call. What `context` says is shown to the lead in its briefing, under what your hooks added.
 turn-start:
@@ -40,7 +40,7 @@ run-end:
   - name: nothing-left-open
     command: sh /path/to/check-todos.sh
 
-# When a session closes, and just before a session's earlier turns are compacted.
+# When a session closes, and just before a session's earlier turns are compacted. A hook before a compaction may answer {"summary": "..."} to stand in place of the summary that would be written.
 session-close:
   - name: keep-a-copy
     command: sh /path/to/copy-session.sh

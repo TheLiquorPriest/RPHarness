@@ -96,11 +96,11 @@ export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }
       await deps.env.prompt.saveMap(ctx.scope, learned.map, ctx.agent);
       prompt.remap(learned.map);
       const name = learned.map.preset.name ?? learned.map.preset.id;
-      const unclaimed = prompt.slices.filter((s) => s.from === "unclaimed").map((s) => s.marker);
+      // What changed, then the map as it now stands, laid out as `prompt` lays it out (the player's kept slices and any text of no slice among it), so no read is needed after (§6.8).
       const said = [
         words("write_saved", { preset: name, count: learned.map.slices.length }),
         learned.kept.length > 0 ? words("write_kept", { markers: learned.kept }) : undefined,
-        unclaimed.length > 0 ? words("write_unclaimed", { names: unclaimed }) : undefined,
+        listing(prompt, words),
       ].filter((line): line is string => line !== undefined && line !== "");
       return answer(said.length === 0 ? undefined : said.join("\n"));
     },

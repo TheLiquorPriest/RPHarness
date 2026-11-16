@@ -71,7 +71,11 @@ export interface HostTool {
    * tier, which is under it whatever lane it names.
    */
   lane?: string;
-  /** What it does and when to use it. The text is the host's editable file (§5.4 "Tools"). */
+  /**
+   * What it does and what it takes (§6.8): the body of the host's editable file for it (§5.4
+   * "Tools") and nothing else. When an agent uses a tool is said by its definition and the guides,
+   * never by a description.
+   */
   description: string;
   /** Its arguments, as an object schema. */
   parameters: JsonSchema;

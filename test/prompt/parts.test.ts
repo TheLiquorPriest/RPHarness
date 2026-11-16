@@ -286,3 +286,12 @@ test("each refusal of the owner's edit of the prompt map says what is so and fil
   }
   expect(map.line("edit_no_words", fields["edit_no_words"] ?? {})).toBe('The text of style does not hold "At dusk" past its start, so it cannot be split there.');
 });
+
+test("an agent that ended with the reply and an agent given more than its model has room for are each told what is so", async () => {
+  const part = await shippedParts().part("delegation");
+  if (part?.format !== "lines") throw new Error("delegation is a lines part");
+  expect(part.line("ended", { agent: "gm-1" })).toBe("gm-1 ended when this turn's reply went out, so it cannot be messaged now.");
+  const said = part.line("too_large", { agent: "gm-1", size: 90000, room: 32000, attachments: [{ name: "chat:history[scene]", tokens: 60000 }, { name: "file:plan.md", tokens: 8000 }] }) ?? "";
+  expect(said).toBe("gm-1 was not started: what it is given is 90000 tokens, and its model has room for 32000. chat:history[scene] is 60000 tokens. file:plan.md is 8000 tokens.");
+  expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
+});

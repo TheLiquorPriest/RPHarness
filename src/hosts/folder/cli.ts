@@ -24,13 +24,14 @@
 // so a job a cut-off process left under way is kept as interrupted, and says so; and before it ends
 // it waits for the jobs it left running, which an interrupt leaves to be resumed.
 
-import { appendFile, readdir } from "node:fs/promises";
+import { access, appendFile, cp, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { ChatRole, Harness, JobLimits, JobView, JobRefusal, PromptMessage, ReplySink, Scope, SwitchableKind, SwitchState } from "../../contract/index";
 import { isRecord } from "../../contract/json";
 import { loadGuidance } from "../../files/index";
 import { createHarness } from "../../harness/index";
 import { readSettings } from "../../harness/settings/index";
+import { SHIPPED_GUIDANCE } from "../../harness/shipped";
 import { placeOf } from "../../model/place";
 import { readJson, readLines, readText, writeJson, writeWhole } from "./disk";
 import { createFolderHost, type FolderHost } from "./index";
@@ -452,6 +453,13 @@ async function run(argv: readonly string[]): Promise<number> {
   if (dir === undefined || command === undefined) throw new Usage(USAGE);
   const chat = await chatOf(dir, flags);
   const { user, character } = await userOf(dir, chat, flags);
+  // A folder that has no shipped level yet is given RPH's own shipped files as it (remove `files/defaults/` to take a newer RPH's), and the chat its own folder.
+  const shipped = join(dir, "files", "defaults");
+  if (!(await access(shipped).then(() => true, () => false))) {
+    await cp(SHIPPED_GUIDANCE, shipped, { recursive: true });
+    err(`RPH's shipped files are laid in ${shipped}.`);
+  }
+  await mkdir(join(dir, "files", "chats", character, chat), { recursive: true });
   const manifest = flags.get("manifest");
   const host = await createFolderHost({ dir, user, ...(manifest !== undefined ? { manifest } : {}) });
   const p = new Played(dir, user, chat, character, host, flags);

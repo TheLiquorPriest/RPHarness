@@ -6,7 +6,7 @@
 import type { ActivatedLore, Environment, PresetRef, PromptMap, PromptMessage, PromptNotice, PromptRole, RawLayout, Scope, SliceBehaviour, SliceKind } from "../contract";
 import { type Cut, cut, namePlaces, type Piece } from "./cut";
 import { SLICE_KINDS } from "./names";
-import { locate } from "./locate";
+import { type How, locate } from "./locate";
 import { noticesOf, type PromptRecord } from "./shape";
 import { mergedSpans, messageText, type Span, spannedText } from "./text";
 
@@ -29,6 +29,10 @@ export interface Slice {
   block?: { name: string; type: string };
   /** For a history message: the chat message, by id and place on the path, and the speaker's name where the prompt gave one. */
   source?: { id: string; index: number; name?: string };
+  /** For a history message: the chat application put a summary here in place of messages. */
+  summarized?: true;
+  /** For a slice of the learned map: how it was found, what the breakdown names its text, and whether its finder's block name was corrected (`locate`). */
+  how?: How;
 }
 
 /** Where the turn's prompt facts come from. */
@@ -88,6 +92,19 @@ export class TurnPrompt {
   remap(map: PromptMap): void {
     this.facts.map = map;
     this.#slices = this.#find();
+  }
+
+  /**
+   * The learned map with each finder the breakdown corrected (`How.corrected`) given the block name
+   * the breakdown now has at its text, so the next prompt finds it by that name; undefined where
+   * nothing was corrected.
+   */
+  corrected(): PromptMap | undefined {
+    const map = this.facts.map;
+    if (map === undefined || !this.mapped) return undefined;
+    const fixes = new Map(this.#slices.flatMap((slice) => (slice.from === "map" && slice.how?.corrected === true && slice.how.hint !== undefined ? [[slice.marker, slice.how.hint] as const] : [])));
+    if (fixes.size === 0) return undefined;
+    return { ...map, slices: map.slices.map((slice) => (fixes.has(slice.marker) ? { ...slice, find: { ...slice.find, block: fixes.get(slice.marker) as string } } : slice)) };
   }
 
   /** Whether the slices are the learned map's: there is one, and the layout told this prompt's text apart. */
@@ -154,6 +171,7 @@ export class TurnPrompt {
     map.slices.forEach((learned, at) => {
       const spans = found.spans.get(at);
       if (spans === undefined || spans.length === 0) return;
+      const how = found.how.get(at);
       const merged = mergedSpans(this.texts, spans);
       const block = this.cut.pieces.find((piece) => piece.kind === "block" && merged.some((span) => span.message === piece.span.message && span.start <= piece.span.start && piece.span.end <= span.end));
       const raw = block?.block === undefined ? undefined : blocks[block.block];
@@ -167,6 +185,7 @@ export class TurnPrompt {
         line: learned.line,
         behaviour: learned.behaviour,
         ...(raw !== undefined ? { block: { name: raw.name, type: raw.type } } : {}),
+        ...(how !== undefined ? { how } : {}),
       });
     });
     for (const span of found.unclaimed) {
@@ -184,7 +203,7 @@ export class TurnPrompt {
     switch (piece.kind) {
       case "history": {
         const name = this.sources.messages[piece.span.message]?.name;
-        return { ...base, kind: "history", from: "history", ...(piece.source !== undefined ? { source: { ...piece.source, ...(name !== undefined ? { name } : {}) } } : {}) };
+        return { ...base, kind: "history", from: "history", ...(piece.source !== undefined ? { source: { ...piece.source, ...(name !== undefined ? { name } : {}) } } : {}), ...(piece.summarized === true ? { summarized: true as const } : {}) };
       }
       case "lore":
         return { ...base, kind: "lore", from: "lore" };

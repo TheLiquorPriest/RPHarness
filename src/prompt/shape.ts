@@ -85,9 +85,13 @@ export function noticesOf(prompt: TurnPrompt, before: PromptRecord | undefined):
     if (old !== undefined && old.hash !== textHash(prompt.text(slice))) notices.push({ kind: "changed", marker: slice.marker });
   }
   for (const marker of baseline) if (!markers.includes(marker)) notices.push({ kind: "gone", marker });
+  // Text of no slice is a notice on the turn it first appears (R-17): a stretch whose text the turn before held anywhere is no change, so a map saved with text left unclaimed brings no notice on every turn.
+  const held = new Set(before?.slices.flatMap((slice) => slice.spans.map((span) => span.hash)) ?? []);
   for (const slice of prompt.slices) {
     const span = slice.spans[0];
-    if (slice.from === "unclaimed" && span !== undefined) notices.push({ kind: "unclaimed", message: span.message, start: span.start, end: span.end });
+    if (slice.from !== "unclaimed" || span === undefined) continue;
+    if (held.has(textHash((prompt.texts[span.message] ?? "").slice(span.start, span.end)))) continue;
+    notices.push({ kind: "unclaimed", message: span.message, start: span.start, end: span.end });
   }
   const shifted = moved(baseline, markers);
   if (shifted.length > 0) notices.push({ kind: "order", markers: shifted });
@@ -147,7 +151,8 @@ export function locatedOf(prompt: TurnPrompt, before: PromptRecord | undefined):
     preset: prompt.preset,
     slices: prompt.slices.filter(named).map((slice) => {
       const text = prompt.text(slice);
-      return { marker: slice.marker, kind: slice.kind, at: slice.spans.map((span) => ({ ...span })), length: text.length, hash: textHash(text) };
+      const how = slice.how;
+      return { marker: slice.marker, kind: slice.kind, at: slice.spans.map((span) => ({ ...span })), length: text.length, hash: textHash(text), ...(how !== undefined ? { found: how.found, ...(how.hint !== undefined ? { hint: how.hint } : {}), ...(how.corrected === true ? { corrected: true as const } : {}) } : {}) };
     }),
     unclaimed: prompt.slices.filter((slice) => !named(slice)).flatMap((slice) => slice.spans.map((span) => ({ ...span }))),
     notices: noticesOf(prompt, before),

@@ -21,6 +21,8 @@ export interface Piece {
   block?: number;
   /** For a history message: the chat message, by id and place on the path. */
   source?: { id: string; index: number };
+  /** For a history message: a summary the chat application put in place of messages (`RawPart.summarized`). */
+  summarized?: true;
 }
 
 /** The prompt as its raw layout cuts it. */
@@ -96,7 +98,7 @@ export function cut(texts: readonly string[], roles: readonly PromptRole[], layo
       for (const part of raw.parts) {
         const span = { message, start: part.start, end: part.end };
         if (part.kind === "history" && part.source !== undefined) {
-          named.push({ name: `history[#${part.source.index}]`, kind: "history", span, role: part.role, source: { id: part.source.id, index: part.source.index } });
+          named.push({ name: `history[#${part.source.index}]`, kind: "history", span, role: part.role, source: { id: part.source.id, index: part.source.index }, ...(part.summarized === true ? { summarized: true as const } : {}) });
           continue;
         }
         if (part.kind === "lore") {

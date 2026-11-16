@@ -23,8 +23,8 @@ export type Item =
   | { type: "slice"; slice: Slice; text: string }
   /** A lore entry, as the reader may read it. */
   | { type: "entry"; entry: LoreEntry }
-  /** A piece of the raw layout. */
-  | { type: "piece"; piece: Piece; length: number; block?: { name: string; type: string } };
+  /** A piece of the raw layout: a free piece (a block of the breakdown, a loose stretch) with its whole text (§4.8 L363), history and lore by name and length alone. */
+  | { type: "piece"; piece: Piece; length: number; block?: { name: string; type: string }; text?: string };
 
 /** The kinds a slice can have (§4.8 "Kinds"). */
 export const SLICE_KINDS: readonly SliceKind[] = ["instructions", "style", "character", "persona", "world", "note", "lore", "history", "other"];
@@ -111,7 +111,7 @@ function images(prompt: TurnPrompt, index: number): { images?: number } {
   return count !== undefined && count > 0 ? { images: count } : {};
 }
 
-/** Each message's head, then the pieces the raw layout cut it into. */
+/** Each message's head, then the pieces the raw layout cut it into: each free piece with its text whole, so a mapper maps the prompt from it in one call; history and lore, addressed by message and entry and never mapped, by name and length. */
 function layout(prompt: TurnPrompt): Item[] {
   const items: Item[] = [];
   prompt.texts.forEach((text, index) => {
@@ -119,7 +119,8 @@ function layout(prompt: TurnPrompt): Item[] {
     for (const piece of prompt.cut.pieces) {
       if (piece.span.message !== index) continue;
       const block = piece.block === undefined ? undefined : prompt.facts.layout?.blocks[piece.block];
-      items.push({ type: "piece", piece, length: piece.span.end - piece.span.start, ...(block !== undefined ? { block: { name: block.name, type: block.type } } : {}) });
+      const free = piece.kind === "block" || piece.kind === "loose";
+      items.push({ type: "piece", piece, length: piece.span.end - piece.span.start, ...(block !== undefined ? { block: { name: block.name, type: block.type } } : {}), ...(free ? { text: text.slice(piece.span.start, piece.span.end) } : {}) });
     }
   });
   return items;

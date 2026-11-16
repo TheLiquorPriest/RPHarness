@@ -5,10 +5,16 @@ import { expect, test } from "bun:test";
 import { findName } from "../../src/prompt/names";
 import { A_MAP, A_TEXT, B_MAP, B_TEXT, LEAD, memoryHost, PRESET_A, presetA, presetB, texts, turnOf, write } from "./support";
 
+/** The first `lines` lines of a write's answer, and whether it is an error: the map as it now stands follows them. */
+async function headOf(answer: Promise<{ text: string; error: boolean }>, lines = 1): Promise<{ text: string; error: boolean }> {
+  const { text, error } = await answer;
+  return { text: text.split("\n").slice(0, lines).join("\n"), error };
+}
+
 test("preset A: the mapper's map is kept for the preset, and every part of the prompt belongs to a named slice with a kind", async () => {
   const host = memoryHost();
   const prompt = await turnOf(host, presetA({ history: 4, lore: ["e-1"] }), ["e-1"]);
-  expect(await write(host, prompt, A_MAP)).toEqual({ text: "The map of River Tales is saved: 5 slices.", error: false });
+  expect(await headOf(write(host, prompt, A_MAP))).toEqual({ text: "The map of River Tales is saved: 5 slices.", error: false });
   const saved = host.maps.get(PRESET_A.id);
   expect(saved?.slices.map((slice) => [slice.marker, slice.kind, slice.behaviour, slice.find.block])).toEqual([
     ["preset.main", "instructions", "fixed", "Main Prompt"],
@@ -39,7 +45,7 @@ test("preset A: the mapper's map is kept for the preset, and every part of the p
 test("preset B: a slice can begin partway through a part, and the one before it ends there", async () => {
   const host = memoryHost();
   const prompt = await turnOf(host, presetB({ history: 4, lore: ["e-3"] }), ["e-3"]);
-  expect(await write(host, prompt, B_MAP)).toEqual({ text: "The map of Fog City is saved: 5 slices.", error: false });
+  expect(await headOf(write(host, prompt, B_MAP))).toEqual({ text: "The map of Fog City is saved: 5 slices.", error: false });
   expect(prompt.slices.filter((slice) => slice.from === "unclaimed")).toEqual([]);
   expect(prompt.slices.every((slice) => slice.kind !== "other")).toBe(true);
   expect(texts(await findName(prompt, "rules", LEAD))).toEqual([B_TEXT.rules]);
@@ -50,10 +56,9 @@ test("preset B: a slice can begin partway through a part, and the one before it 
 test("text the map leaves out is named in the answer; a map that cannot be made is not saved, and the answer says why", async () => {
   const host = memoryHost();
   const prompt = await turnOf(host, presetA({ history: 2, lore: ["e-1"] }), ["e-1"]);
-  expect(await write(host, prompt, A_MAP.slice(0, 4))).toEqual({
-    text: "The map of River Tales is saved: 4 slices.\nText that belongs to no slice: message[6]. Read it with prompt, and write the map again to give it a slice.",
-    error: false,
-  });
+  const saved = await write(host, prompt, A_MAP.slice(0, 4));
+  expect({ head: saved.text.split("\n")[0], error: saved.error }).toEqual({ head: "The map of River Tales is saved: 4 slices.", error: false });
+  expect(saved.text).toContain("message[6]");
   const other = memoryHost();
   const fresh = await turnOf(other, presetA({ history: 2, lore: ["e-1"] }), ["e-1"]);
   const bad = await write(other, fresh, [
@@ -85,7 +90,7 @@ test("the player's rename survives a new mapping", async () => {
   host.maps.set(PRESET_A.id, { ...map, slices: map.slices.map((slice) => (slice.marker === "card" ? { ...slice, marker: "card.wren", line: "Wren, as the player sees her.", edited: true as const } : slice)) });
   // A later turn, and the mapper maps the prompt again, calling it `card` once more.
   const later = await turnOf(host, presetA({ history: 6, lore: ["e-2"] }), ["e-2"]);
-  expect(await write(host, later, A_MAP)).toEqual({ text: "The map of River Tales is saved: 5 slices.\nThe player's own slices are kept as the player left them: card.wren.", error: false });
+  expect(await headOf(write(host, later, A_MAP), 2)).toEqual({ text: "The map of River Tales is saved: 5 slices.\nThe player's own slices are kept as the player left them: card.wren.", error: false });
   const saved = host.maps.get(PRESET_A.id);
   expect(saved?.slices.map((slice) => slice.marker)).toEqual(["preset.main", "persona", "card.wren", "preset.style", "preset.after"]);
   expect(saved?.slices.find((slice) => slice.marker === "card.wren")).toMatchObject({ line: "Wren, as the player sees her.", edited: true, kind: "character" });

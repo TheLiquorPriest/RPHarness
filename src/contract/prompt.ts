@@ -56,6 +56,8 @@ export interface RawPart {
   kind: "history" | "lore" | "other" | "unknown";
   /** For history: the chat message, by id and place on the path. Lore carries no entry id: the activated entries come through `LorePort.activated`. */
   source?: { id: string; index: number };
+  /** For history: the chat application put a summary of messages here in their place (§4.2: a summary is marked as a summary). */
+  summarized?: true;
   /** Where each block's text (`RawLayout.blocks[block]`) was found inside this part, as offsets into the message. */
   blocks: { block: number; start: number; end: number }[];
 }
@@ -157,6 +159,16 @@ export interface LocatedSlice {
   /** Its length in this prompt. */
   length: number;
   hash: TextHash;
+  /**
+   * How a slice of the learned map was found (§4.8 "What makes a marker evergreen"): by its
+   * signature, by the chat application's block name, or by its place between the slices around it.
+   * Absent for history, lore and the pieces of a prompt not mapped yet.
+   */
+  found?: "signature" | "block" | "place";
+  /** What the chat application's breakdown says of the text found: the name of its block there; absent where it names none. */
+  hint?: string;
+  /** The map's finder named another block, or none, where the breakdown's block now is: it was corrected to `hint`, and the map saved. */
+  corrected?: true;
 }
 
 /**

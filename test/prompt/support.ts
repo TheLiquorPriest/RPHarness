@@ -31,9 +31,25 @@ async function shippedPart(kind: PartKind, name: string, text?: string): Promise
   return parsed.part;
 }
 
-/** The shipped prompt parts, as the guidance gives them; `edits` in place of a part's file. */
+/** The tests' own `notices.md`: the notices about the prompt's shape are lines of the host's file of notices. */
+const NOTICES = [
+  "---",
+  "description: The tests' notices about the prompt's shape.",
+  "format: lines",
+  "---",
+  "notice_unmapped: This preset's prompt has not been mapped yet. The whole prompt is in front of you as always. Its parts are named by place until it is mapped.",
+  "notice_incomplete: The chat application joined parts of this prompt in a way that cannot be told apart, so its parts cannot be found by name this turn.",
+  "notice_changed: The text of {{marker}}, which the map says is fixed, has changed since the turn before.",
+  "notice_gone: {{marker}} is not in this prompt.",
+  "notice_unclaimed: Text that belongs to no part of the map: {{#name}}{{name}}{{/name}}{{^name}}in message[{{message}}]{{/name}}, {{length}} characters.",
+  "notice_order: {{markers}} moved: the prompt's parts are in a different order than the turn before.",
+  "notice_preset: This prompt is from {{#now}}{{now.name}}{{#now.revision}}, revision {{now.revision}}{{/now.revision}}{{/now}}{{^now}}a preset the chat application did not name{{/now}}, where the turn before was from {{#was}}{{was.name}}{{#was.revision}}, revision {{was.revision}}{{/was.revision}}{{/was}}{{^was}}a preset it did not name{{/was}}.",
+  "",
+].join("\n");
+
+/** The shipped prompt parts, as the guidance gives them; `edits` in place of a part's file; the notices the tests' own unless edited. */
 export function shippedParts(edits: Readonly<Record<string, string>> = {}): Pick<Guidance, "part"> {
-  return { part: (name) => shippedPart("prompts", name, edits[name]) };
+  return { part: (name) => shippedPart("prompts", name, edits[name] ?? (name === "notices" ? NOTICES : undefined)) };
 }
 
 /** A tool's shipped file as the harness reads it: its description and its arguments'. */
@@ -211,7 +227,7 @@ export function presetB(shape: TurnShape<typeof B_TEXT>): BuiltPrompt {
 // ---------------------------------------------------------------- a host in memory
 
 export interface MemoryHost {
-  env: Pick<Environment, "prompt" | "lore" | "log" | "store">;
+  env: Pick<Environment, "prompt" | "lore" | "log" | "store" | "files">;
   /** The layout and the lore of the prompt the next turn reads. */
   set(prompt: BuiltPrompt, activated: readonly string[]): void;
   /** Maps as saved, by preset id; what each turn was found to hold; the log. */
@@ -292,6 +308,14 @@ export function memoryHost(): MemoryHost {
         });
       },
       jobs: memoryJobs(),
+    },
+    // Every turn's folder is kept: a turn before is always there to be compared with, and its listing stops short, so nothing is let go.
+    files: {
+      layers: async () => [],
+      read: async (_scope, path) => ({ status: "missing", path }),
+      write: async (_scope, path) => ({ status: "refused", path, reason: "outside", writable: [] }),
+      places: async (scope) => ({ notes: "persistent-workspace/", session: `sessions/${scope.session}/`, writable: [] }),
+      find: async (_scope, query) => (query.by === "glob" ? { status: "found", hits: [{ path: "sessions/s/turns/t/briefing.md", type: "file", level: "chat", kind: "generated" }] } : { status: "found", hits: [], stopped: { limit: { max: 0 } } }),
     },
   };
   return {

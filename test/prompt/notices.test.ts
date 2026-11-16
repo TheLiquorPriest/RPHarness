@@ -7,14 +7,14 @@ import { expect, test } from "bun:test";
 import type { PromptNotice } from "../../src/contract";
 import { promptTurn } from "../../src/prompt/memory";
 import { noticeLines, promptWords } from "../../src/prompt/words";
-import { A_MAP, B_MAP, type BuiltPrompt, memoryHost, type MemoryHost, presetA, presetB, SCOPE, shippedParts, write } from "./support";
+import { A_MAP, B_MAP, type BuiltPrompt, LEAD, memoryHost, type MemoryHost, presetA, presetB, SCOPE, shippedParts, write } from "./support";
 
 const LORE = [["e-1"], ["e-2", "e-3"], ["e-3"], ["e-1", "e-4"], ["e-2"], ["e-4"], ["e-1", "e-2", "e-3"], ["e-3", "e-1"], ["e-2"], ["e-4", "e-2"]];
 
 /** One turn of the chat: the host holds `built`, and the turn follows `parent`. */
 async function play(host: MemoryHost, turn: string, built: BuiltPrompt, lore: string[], parent?: string) {
   host.set(built, lore);
-  return promptTurn({ env: host.env, scope: { ...SCOPE, turn }, messages: built.messages, parent, keep: 50 });
+  return promptTurn({ env: host.env, scope: { ...SCOPE, turn }, messages: built.messages, parent, by: LEAD });
 }
 
 /** A chat on preset A mapped at its first turn and played for ten more, each turn with more history and other lore. */
@@ -47,7 +47,7 @@ test("preset A: ten turns in which the history grows and the lore changes give n
   const revised = presetA(shape);
   revised.layout.preset = { id: "preset-a", name: "River Tales", revision: "2" };
   host2.set(revised, ["e-2"]);
-  const { located } = await promptTurn({ env: host2.env, scope: { ...SCOPE, turn: "revised" }, messages: revised.messages, parent: "t-10", keep: 50 });
+  const { located } = await promptTurn({ env: host2.env, scope: { ...SCOPE, turn: "revised" }, messages: revised.messages, parent: "t-10", by: LEAD });
   expect(located.notices).toEqual([{ kind: "preset", was: { id: "preset-a", name: "River Tales", revision: "1" }, now: { id: "preset-a", name: "River Tales", revision: "2" } }]);
 });
 

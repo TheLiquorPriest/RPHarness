@@ -8,7 +8,7 @@ import { answer, argumentsOf, fieldsOf, type OwnTool, text, type ToolText } from
 import { BEHAVIOURS, learn, type WrittenSlice } from "./learn";
 import { findName, promptName, SLICE_KINDS } from "./names";
 import type { TurnPrompt } from "./prompt";
-import { laid, listing, promptWords } from "./words";
+import { laid, listing, noticeWords, promptWords } from "./words";
 
 /** The names of these tools, whose files the harness reads with its other tools' (`.tools/<name>.md`). */
 export const PROMPT_TOOLS = ["prompt", "prompt_map_write"] as const;
@@ -33,11 +33,11 @@ export function promptTool(deps: PromptToolsDeps): OwnTool {
     description: own?.description ?? "",
     parameters: argumentsOf({ names: { type: "array", items: { type: "string" } } }, [], own),
     async run(args, ctx) {
-      const [prompt, words] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance)]);
+      const [prompt, words, notices] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance), noticeWords(deps.guidance)]);
       if (prompt === undefined) return answer(words("no_prompt"), true);
       const given = fieldsOf(args)["names"];
       const names = [...new Set(Array.isArray(given) ? given.filter((name): name is string => typeof name === "string" && name.trim() !== "") : [])];
-      if (names.length === 0) return answer(listing(prompt, words));
+      if (names.length === 0) return answer(listing(prompt, words, notices));
       const found = await Promise.all(names.map(async (name) => ({ name, items: await findName(prompt, name, ctx.agent) })));
       const texts = found.map(({ name, items }) => (items === undefined ? words("no_part", { name }) : laid(items, words)));
       const shown = texts.filter((text): text is string => text !== undefined && text !== "");
@@ -86,7 +86,7 @@ export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }
     description: own?.description ?? "",
     parameters: argumentsOf({ slices: { type: "array", items: slice } }, ["slices"], own),
     async run(args, ctx) {
-      const [prompt, words] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance)]);
+      const [prompt, words, notices] = await Promise.all([deps.prompt(ctx), promptWords(deps.guidance), noticeWords(deps.guidance)]);
       if (prompt === undefined) return answer(words("no_prompt"), true);
       const learned = learn(prompt, writtenOf(args), deps.signatureHead);
       if ("problems" in learned) {
@@ -100,7 +100,7 @@ export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }
       const said = [
         words("write_saved", { preset: name, count: learned.map.slices.length }),
         learned.kept.length > 0 ? words("write_kept", { markers: learned.kept }) : undefined,
-        listing(prompt, words),
+        listing(prompt, words, notices),
       ].filter((line): line is string => line !== undefined && line !== "");
       return answer(said.length === 0 ? undefined : said.join("\n"));
     },

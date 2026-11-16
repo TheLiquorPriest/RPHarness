@@ -8,4 +8,4 @@ export { type PromptFacts, type PromptSources, type Slice, type SliceFrom, TurnP
 export { locatedOf, noticesOf, type PromptRecord, recordOf } from "./shape";
 export { PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, type PromptToolsDeps } from "./tools";
 export { type PromptView, promptViews, type ViewWrites, writeViews } from "./views";
-export { laid, noticeLines, PROMPT_PART, promptWords } from "./words";
+export { laid, noticeLines, NOTICES_PART, noticeWords, PROMPT_PART, promptWords } from "./words";

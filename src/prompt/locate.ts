@@ -44,9 +44,17 @@ function signedOf(signature: string | undefined): Signed[] | undefined {
   }
 }
 
-/** Where each slice of the map was found (by its place in `map.slices`), and the free text no slice claims. */
+/** How a slice of the map was found, what the breakdown names its text, and whether its finder's block name was wrong for it. */
+export interface How {
+  found: "signature" | "block" | "place";
+  hint?: string;
+  corrected?: true;
+}
+
+/** Where each slice of the map was found (by its place in `map.slices`), how, and the free text no slice claims. */
 export interface Found {
   spans: Map<number, Span[]>;
+  how: Map<number, How>;
   /** Free text no slice claims, trimmed, in prompt order. */
   unclaimed: Span[];
 }
@@ -76,9 +84,11 @@ export function locate(texts: readonly string[], pieces: readonly Piece[], map: 
   const regions = freeRegions(texts, pieces);
   const claimed: Span[] = [];
   const found = new Map<number, Span[]>();
+  const ways = new Map<number, How["found"]>();
   const isFree = (span: Span) => regions.some((r) => r.message === span.message && r.start <= span.start && span.end <= r.end) && !claimed.some((c) => overlaps(c, span));
-  const claim = (at: number, spans: Span[]) => {
+  const claim = (at: number, spans: Span[], way: How["found"]) => {
     found.set(at, spans);
+    ways.set(at, way);
     claimed.push(...spans);
   };
 
@@ -94,14 +104,14 @@ export function locate(texts: readonly string[], pieces: readonly Piece[], map: 
       spans.push(hit);
       after = hit;
     }
-    claim(at, spans);
+    claim(at, spans, "signature");
   });
 
   // 2. By the chat application's name for its block, where the block is in this prompt and free.
   map.slices.forEach((slice, at) => {
     if (found.has(at) || slice.find.block === undefined) return;
     const piece = pieces.find((p) => p.kind === "block" && blockName(p) === slice.find.block && isFree(p.span));
-    if (piece !== undefined) claim(at, [piece.span]);
+    if (piece !== undefined) claim(at, [piece.span], "block");
   });
 
   // 3. By place: the free text between the slices found on either side of those still missing, on
@@ -125,11 +135,20 @@ export function locate(texts: readonly string[], pieces: readonly Piece[], map: 
     const between = unclaimedNow().filter((span) => (before === undefined || !isBefore(span, before)) && (next === undefined || isBefore(span, next)));
     const group = map.slices.slice(at, end);
     const only = group.length === 1 && group[0] !== undefined ? between.filter((span) => fits(group[0] as PromptSlice, span)) : [];
-    if (only.length > 0) claim(at, only);
-    else if (group.length === between.length && group.every((slice, n) => between[n] !== undefined && fits(slice, between[n] as Span))) between.forEach((span, n) => claim(at + n, [span]));
+    if (only.length > 0) claim(at, only, "place");
+    else if (group.length === between.length && group.every((slice, n) => between[n] !== undefined && fits(slice, between[n] as Span))) between.forEach((span, n) => claim(at + n, [span], "place"));
     at = end;
   }
-  return { spans: found, unclaimed: unclaimedNow() };
+  // The breakdown beside the result: the block the chat application names at the text found confirms the finder's block name, or corrects it.
+  const how = new Map<number, How>();
+  for (const [at, way] of ways) {
+    const spans = found.get(at) ?? [];
+    const piece = pieces.find((p) => p.kind === "block" && spans.some((span) => overlaps(span, p.span)));
+    const hint = piece === undefined ? undefined : blockName(piece);
+    const named = map.slices[at]?.find.block;
+    how.set(at, { found: way, ...(hint !== undefined ? { hint } : {}), ...(hint !== undefined && hint !== named ? { corrected: true as const } : {}) });
+  }
+  return { spans: found, how, unclaimed: unclaimedNow() };
 }
 
 /** The first free place after `after` where a stretch's first words begin and its whole text has its hash. */

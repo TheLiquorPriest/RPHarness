@@ -309,9 +309,10 @@ export class UsageBook implements UsageApi {
     return runUsageOf(await this.#d.store.get({ user }, `${RUNS}${run}`), run);
   }
 
-  /** What the user's agents spent over the last 24 hours. */
-  async day(user: string): Promise<Usage> {
-    return (await this.spend(user)).all();
+  /** What the user's agents spent over the last 24 hours; with `"jobs"`, his jobs' agents' alone. */
+  async day(user: string, of?: "jobs"): Promise<Usage> {
+    const spend = await this.spend(user);
+    return of === "jobs" ? spend.jobs() : spend.all();
   }
 
   /** The user's spend over the last 24 hours, as it stands each time it is asked: what the daily caps hold every turn and job to. */

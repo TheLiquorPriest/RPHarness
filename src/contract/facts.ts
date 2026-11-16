@@ -24,6 +24,15 @@ export interface FactDef {
   fields?: string[];
 }
 
+/**
+ * A fact as the Rules page lists it (`RulesApi.facts`): RPH's own or the host's. Each fact has one
+ * writer: a host fact named like one of RPH's own is listed marked `clash`, and rules read RPH's.
+ */
+export interface ListedFact extends FactDef {
+  from: "rph" | "host";
+  clash?: true;
+}
+
 /** A fact's value now. */
 export interface FactValue {
   count: number;

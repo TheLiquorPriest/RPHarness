@@ -10,6 +10,7 @@ import type { ModelsApi, ToolsAs } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
 import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
+import type { ListedFact } from "./facts";
 import type { JsonSchema } from "./json";
 import type { PromptMapApi } from "./prompt";
 
@@ -273,6 +274,8 @@ export interface RulesApi {
   list(scope: Scope): Promise<RuleView[]>;
   /** Runs one rule against a past turn's record (§5.4: "the Rules page can run any rule against a past turn"). Absent until the harness has it; a host offers the page's button only when it is there. */
   test?(scope: Scope, rule: string, turn: string): Promise<RuleTest>;
+  /** Every fact a rule can name (§5.4 "Facts"), RPH's own and the host's, each with what it counts, its groups and its fields; a host fact named like one of RPH's is marked, and told to the log. */
+  facts(scope: Scope): Promise<ListedFact[]>;
 }
 
 // ---------------------------------------------------------------- the live view

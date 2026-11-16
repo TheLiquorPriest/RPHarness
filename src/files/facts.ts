@@ -1,7 +1,7 @@
 // Facts a rule can test (§5.4 "Facts"): RPH's own and the host's, each a neutral count with fields;
 // the small expression a rule's `fact:` line holds; and the facts laid out as a rule text's fields.
 
-import type { FactDef, FactValue, JsonObject, JsonValue } from "../contract/index";
+import type { FactDef, FactsPort, FactValue, JsonObject, JsonValue, ListedFact } from "../contract/index";
 import type { CreateFacts, Fields, OwnFactName } from "./api";
 
 /** RPH's own facts, as the Rules page lists them. Their values come from whoever keeps them, at each moment. */
@@ -45,6 +45,11 @@ export const createFacts: CreateFacts = (host, own) => {
     },
   };
 };
+
+/** Every fact a rule can name, RPH's own first, then the host's; a host fact named like one of RPH's is marked `clash`, as rules read RPH's. */
+export function listFacts(host: Pick<FactsPort, "defs">): ListedFact[] {
+  return [...OWN_FACTS.map((d): ListedFact => ({ ...d, from: "rph" })), ...host.defs().map((d): ListedFact => ({ ...d, from: "host", ...(OWN_NAMES.has(d.name) ? { clash: true as const } : {}) }))];
+}
 
 // ---------------------------------------------------------------- `fact:`
 

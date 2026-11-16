@@ -4,7 +4,7 @@
 
 export * from "./api";
 export { type Checked, checkRule, type Looked } from "./check";
-export { createFacts, OWN_FACTS } from "./facts";
+export { createFacts, listFacts, OWN_FACTS } from "./facts";
 export { loadGuidance } from "./guidance";
 export { changes, changesText, holdsNothing, snapshot } from "./stack";
 export { type PatternRun, runPattern } from "./pattern";

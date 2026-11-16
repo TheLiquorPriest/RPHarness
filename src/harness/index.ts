@@ -9,7 +9,7 @@
 // the host's store, so a restart, or a session open again after a close, goes on with both. A job a
 // restart cut off is found in the host's store.
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
-import { loadGuidance } from "../files";
+import { listFacts, loadGuidance } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
@@ -148,6 +148,12 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
 
     rules: {
       list: (scope) => loadGuidance(env.files, scope).rules(),
+      // One writer per fact: a host fact under one of RPH's names is listed marked, and said in the log.
+      facts: async () => {
+        const facts = listFacts(env.facts);
+        for (const fact of facts) if (fact.clash === true) env.log.warn("A host fact takes the name of one of RPH's own facts; rules read RPH's.", { fact: fact.name });
+        return facts;
+      },
     },
 
     live: hub,

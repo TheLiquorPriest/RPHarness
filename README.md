@@ -27,8 +27,8 @@ What it has:
   - **HTTP tools:** `.tools/<name>.json` names an address; a call posts the arguments as JSON there, with headers whose values are secrets kept apart from the files, and the JSON answered is the result.
   - **MCP servers:** `.tools/mcp.json` names each server, started by a command or reached at an address; its tools are found by `tool_search` and called with a timeout.
   - **Rule commands:** a rule's `command:` is asked yes or no at the moment its `at:` names.
-
-What it does not have yet: hooks.
+  - **Hooks:** `hooks.yml` names commands run at the moments of a turn (a tool call, the release, a run's end, a session's close, a job's start and end, ...), each able to add context, change a tool's input, keep a run going, or block with a reason.
+- **A tag check** per connection: simple turns played on it measure whether it keeps the reply's tags, and set its reply form.
 
 ## Layout
 
@@ -58,7 +58,45 @@ const harness = createHarness(env);                        // env: the host's si
 const outcome = await harness.answer(request, sink, signal); // the reply goes to the sink as it is written
 ```
 
-`env` is the host's implementation of `src/contract/`: the chat, lore, files, models, a store, a log, the host's own tools, and the events through which it is told what happens while a turn runs. `request` says which chat and turn to answer and what the chat application assembled for it. `src/hosts/folder/` is a whole host in a few files, and `src/testing/kit/` is what a host's implementation must pass.
+`env` is the host's implementation of `src/contract/`: the chat, lore, files, models, a store, a log, the host's own tools, and the events through which it is told what happens while a turn runs. `request` says which chat and turn to answer and what the chat application assembled for it. `src/hosts/folder/` is a whole host in a few files, and `src/testing/kit/` is what a host's implementation must pass. [docs/hosts.md](docs/hosts.md) goes through it port by port.
+
+## A first reply, on the folder host
+
+From a fresh clone, with a key for one of the providers (here DeepSeek):
+
+```sh
+bun install
+mkdir -p play/host/chats/harbor play/files/.agents
+echo '{ "character": "wren", "preset": null, "user": "me" }' > play/host/chats/harbor/chat.json
+echo 'You are Wren Hale, keeper of the lighthouse. Write in the second person.' > play/host/chats/harbor/system.md
+cat > play/files/.agents/lead.md <<'EOF'
+---
+name: lead
+description: The lead of the roleplay. It gives the one reply the player sees.
+model: default
+tools: [chat_read, file_read, file_write]
+reads: [rules]
+given:
+  - prompt:*
+  - session:carry
+  - briefing
+---
+You are the lead of this roleplay: read what the player wrote and everything you were given, and write the reply.
+EOF
+echo 'lead: lead' > play/files/config.yml
+printf %s "$DEEPSEEK_API_KEY" | bun src/hosts/folder/cli.ts play connect main --provider deepseek --model deepseek-chat
+bun src/hosts/folder/cli.ts play say "I climb the stairs to the lamp room."
+```
+
+The reply streams as it is written and is kept in `play/host/chats/harbor/messages.jsonl`; `say` again
+goes on, `swipe` plays the turn again. The first command lays RPH's shipped files in `play/files/defaults/`.
+
+## Docs
+
+- [docs/files.md](docs/files.md): every kind of file you write, and its format.
+- [docs/settings.md](docs/settings.md): every setting, its default, and where it may be set.
+- [docs/folder-host.md](docs/folder-host.md): the folder host's directory and its command line.
+- [docs/hosts.md](docs/hosts.md): writing a host, port by port, and checking it with the kit.
 
 ## Develop
 

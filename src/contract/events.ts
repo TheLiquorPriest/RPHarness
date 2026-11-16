@@ -135,9 +135,13 @@ export interface RuleFiring {
 export interface Suggestion {
   /** What it would change: a file (a path in the agents' view), a lore entry by id, or a new lore entry. */
   target: { file: string } | { lore: string } | { newLore: true };
-  /** The proposed text. */
+  /** The proposed text: a file's or a new entry's whole text, or an edited entry's passage as it would be. */
   text: string;
   reason: string;
+  /** For a new lore entry (C-L1, §9.5): the book it goes in, its title and its keys, beside `text`, where the agent gave them. */
+  draft?: { book?: string; title?: string; keys?: string[] };
+  /** For an edit of a lore entry: the passage as it stands, which `text` would replace. */
+  was?: string;
 }
 
 /** RPH tells the host. None of these returns a decision. */

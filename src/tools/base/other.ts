@@ -52,7 +52,11 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
     family: "suggestions",
     tier: "read",
     description: own?.description ?? "",
-    parameters: argumentsOf({ file: { type: "string" }, lore: { type: "string" }, new_lore: { type: "boolean" }, text: { type: "string" }, reason: { type: "string" } }, ["text", "reason"], own),
+    parameters: argumentsOf(
+      { file: { type: "string" }, lore: { type: "string" }, new_lore: { type: "boolean" }, text: { type: "string" }, reason: { type: "string" }, book: { type: "string" }, title: { type: "string" }, keys: { type: "array", items: { type: "string" } }, was: { type: "string" } },
+      ["text", "reason"],
+      own,
+    ),
     async run(args, ctx) {
       const given = fieldsOf(args);
       const file = text(given, "file")?.trim() || undefined;
@@ -70,7 +74,13 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
         if (read.status === "refused") return answer((await noticesOf(deps.guidance))(`refused_${read.reason}`, { path: read.path, writable: read.writable }), true);
         handed = { file: read.path };
       }
-      await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "" });
+      // A lore suggestion carries its draft whole (§9.5): a new entry's book, title and keys; an edit's passage as it stands.
+      const book = text(given, "book")?.trim() || undefined;
+      const title = text(given, "title")?.trim() || undefined;
+      const keys = textsOf(given["keys"]).map((key) => key.trim()).filter((key) => key !== "");
+      const draft = "newLore" in handed ? { ...(book !== undefined ? { book } : {}), ...(title !== undefined ? { title } : {}), ...(keys.length > 0 ? { keys } : {}) } : {};
+      const was = "lore" in handed ? text(given, "was") : undefined;
+      await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "", ...(Object.keys(draft).length > 0 ? { draft } : {}), ...(was !== undefined && was !== "" ? { was } : {}) });
       return answer(words("suggested"));
     },
   };

@@ -34,6 +34,18 @@ export interface OpenedEntry extends EntryBase {
   summary?: string;
 }
 
+/**
+ * The host's word on the summary the session opens with from then on (S-6), given after it opened:
+ * a scene before's summary written or corrected later (bootstrap, a migrated chat's filing, a later
+ * turn). The newest in the order of the file stands, in place of the one it opened with; an empty one
+ * says it opens with none. A mark of the host's word: it belongs to no turn, and is never the leaf.
+ */
+export interface OpensWithEntry extends EntryBase {
+  type: "opensWith";
+  summary: string;
+  turn?: undefined;
+}
+
 /** A turn began: the request's turn, its kind, its lead, and the turn it follows as the request named it. */
 export interface TurnEntry extends EntryBase {
   type: "turn";
@@ -182,7 +194,7 @@ export interface SpentEntry extends EntryBase {
   ms: number;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
+export type SessionEntry = OpeningEntry | OpenedEntry | OpensWithEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -231,6 +243,8 @@ function isEntry(v: Record<string, unknown>): boolean {
     case "compact":
     case "applied":
       return v["turn"] === undefined;
+    case "opensWith":
+      return v["turn"] === undefined && str(v["summary"]);
     case "opening":
       return v["turn"] === undefined && str(v["lead"]) && isMapping(v["opening"]);
     case "spent": {
@@ -324,6 +338,8 @@ export class SessionLog {
   readonly #spent = new Map<string, SpentEntry>();
   /** The owner's undo of each closing he took back, by the closing. */
   readonly #reopened = new Map<string, ReopenedEntry>();
+  /** The host's newest word on the summary the session opens with, in the order of the file. */
+  #opensWith: OpensWithEntry | undefined;
 
   constructor(entries: readonly SessionEntry[] = []) {
     for (const entry of entries) this.add(entry);
@@ -386,6 +402,9 @@ export class SessionLog {
       case "reopened":
         if (!this.#reopened.has(entry.closing)) this.#reopened.set(entry.closing, entry);
         return;
+      case "opensWith":
+        this.#opensWith = entry;
+        return;
       default: {
         if (entry.type === "compacted" && entry.of === undefined) this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
@@ -406,6 +425,11 @@ export class SessionLog {
 
   get opened(): OpenedEntry | undefined {
     return this.#opened;
+  }
+
+  /** The host's newest word on the summary the session opens with, given after it opened. */
+  get opensWith(): OpensWithEntry | undefined {
+    return this.#opensWith;
   }
 
   /** The host's mark asking for a compaction, while none has been written since. */

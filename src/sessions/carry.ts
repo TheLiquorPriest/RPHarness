@@ -129,7 +129,8 @@ function fieldsOf(carry: Carry, opened: string | undefined, compacted: string | 
 export async function carriedFields(input: CarriedInput): Promise<Fields | undefined> {
   const { carry, tree, from } = input;
   const path = tree.path(from);
-  const opened = path.findLast((entry) => entry.type === "opened")?.summary;
+  // What the session opens with: the host's newest word given after it opened, else the summary it opened with (S-6).
+  const opened = tree.opensWith?.summary ?? path.findLast((entry) => entry.type === "opened")?.summary;
   if (carry === "nothing") return fieldsOf(carry, opened, undefined, []);
   const compacted = input.compacted ?? newestSummary(tree, path);
   const turns = unsummarized(tree, turnsOn(tree, path), path, compacted);

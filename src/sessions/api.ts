@@ -66,11 +66,20 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
   return {
     open: (scope, opening) =>
       book.with(scope, async (file) => {
-        // Opened once: the summary it opened with stays the one it carries (§11).
+        // Opened once: the summary it opened with stays the one it carries (§11), until the host says another (`opensWith`).
         if (file.log.opened !== undefined) return view(file);
         file.add({ type: "opened", parent: file.log.leaf, ...(opening?.summary !== undefined && opening.summary !== "" ? { summary: opening.summary } : {}) });
         await file.settled();
         d.told(scope, { session: scope.session, change: "opened", ...turnOf(scope) });
+        return view(file);
+      }),
+
+    opensWith: (scope, summary) =>
+      book.with(scope, async (file) => {
+        // The host's newest word stands; the summary the session already opens with writes nothing.
+        const now = file.log.opensWith?.summary ?? file.log.opened?.summary ?? "";
+        if (summary !== now) file.add({ type: "opensWith", parent: file.log.leaf, summary });
+        await file.settled();
         return view(file);
       }),
 
@@ -128,6 +137,9 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
             const undo = entry.type === "closed" ? source.log.reopened(entry.id) : undefined;
             if (undo !== undefined) entries.push(undo);
           }
+          // And the host's newest word on what the session opens with, so the branch opens with it too.
+          const opens = source.log.opensWith;
+          if (opens !== undefined) entries.push({ ...opens, parent: tip });
           target.copy(entries, { chat: from.chat, session: from.session, turn: from.turn });
           await target.settled();
           d.told(to, { session: to.session, change: "forked", from: from.session, turn: from.turn });

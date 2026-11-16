@@ -14,6 +14,7 @@ import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
 import { withClosing } from "../loop";
+import { promptMapApi } from "../prompt";
 import { Jobs } from "../jobs";
 import { closingOf, type SessionChange, sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
@@ -199,6 +200,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     },
 
     models: layer.api,
+    promptMap: promptMapApi(env),
 
     rebuildRequest(scope, file) {
       return rebuildRequest(env.files, scope, file);

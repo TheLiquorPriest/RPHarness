@@ -2,7 +2,8 @@
 // once): a turn and a job each make their agents' gates and keep their requests here, so a fix to
 // one is a fix to both. Every write of a run is handed to the run (`tell`), so a run's end waits for
 // its request files and transcripts as a turn's does. Every agent of a run made here writes its
-// transcript (`transcripts.ts`).
+// transcript (`transcripts.ts`), and each sub-agent and job's agent its own session's file
+// (`sessions/runs.ts`), closed at the run's end (`close`).
 import type { AgentRef, Environment, Places, Scope } from "../contract";
 import type { Guidance, RuleRun } from "../files/api";
 import type { ParentCall, RunTrace } from "../loop/trace";
@@ -13,6 +14,8 @@ import { TurnGate } from "./gate";
 import { type PointedFile, pointerForm, requestPath, sentMessages } from "./requests";
 import type { Settings } from "./settings";
 import { Transcripts } from "./transcripts";
+import { RunSessions } from "../sessions/runs";
+import type { SessionBook } from "../sessions/book";
 
 export interface AgentRunDeps {
   env: Environment;
@@ -33,18 +36,41 @@ export interface AgentRunDeps {
   sources?(): Promise<readonly PointedFile[]>;
   /** Told of each call that ran, as its gate takes it after the tool: a job's record of its writes. */
   ran?(call: GateCall, result: LoopToolResult, tool: HeldTool | undefined): void;
+  /** The session files, where each sub-agent's and job's agent's run is kept as a session of its own (§13.4); none keeps none. */
+  book?: SessionBook;
 }
 
-/** What every agent of one run is made with: its gate, its kept requests, its transcript. */
+/** What every agent of one run is made with: its gate, its kept requests, its transcript, its session. */
 export class AgentRuns {
   readonly #d: AgentRunDeps;
   /** Calls of a write tool that ran without failing, by any agent of the run: the loop's count of the same call starts again after one. */
   #writes = 0;
+  /** The sessions of the run's agents that are sessions of their own. */
+  readonly #sessions: RunSessions | undefined;
 
   constructor(deps: AgentRunDeps) {
     this.#d = deps;
     const { env, scope, places } = deps;
     new Transcripts({ files: env.files, scope, folder: places.turn ?? places.session, log: env.log, tell: (written) => deps.tell(written) }).follow(deps.trace);
+    if (deps.book !== undefined) {
+      this.#sessions = new RunSessions({ book: deps.book, scope, run: deps.trace.run, log: env.log, tell: (written) => deps.tell(written) });
+      this.#sessions.follow(deps.trace);
+    }
+  }
+
+  /** An agent's run is a session of its own: a sub-agent's (`agent`), or a job's first agent (`job`); `by` the call that started it, none for a job the owner started. */
+  session(agent: AgentRef, kind: "agent" | "job", by: ParentCall | undefined): void {
+    this.#sessions?.open(agent, kind, by);
+  }
+
+  /** A summary of such an agent's own older calls (§11), kept in its session's file. */
+  compacted(agent: AgentRef, summary: string): void {
+    this.#sessions?.compacted(agent, summary);
+  }
+
+  /** The run ended, whatever the end: each of its agents' sessions is closed and written. */
+  async close(): Promise<void> {
+    await this.#sessions?.close();
   }
 
   /** The gate around each tool call of an agent (§13.3), which counts the run's writes. */

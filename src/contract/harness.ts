@@ -166,11 +166,28 @@ export interface JobsApi {
 
 // ---------------------------------------------------------------- sessions
 
-/** A session (§11): one scene of the story, as a file of entries in a tree. */
+/**
+ * Who started a run that is a session of its own (S-5, §13.4): the agent and tool call that started
+ * it, in the session and turn they worked in; or the owner, for a job he started.
+ */
+export type SessionParent = { session?: string; turn?: string; agent: string; call: string } | { owner: true };
+
+/**
+ * A session (§11): one scene of the story, or one agent's run (§13.4: each sub-agent, job and talk
+ * thread is a session of its own), as a file of entries in a tree.
+ */
 export interface SessionView {
   id: string;
   user: string;
   chat: string;
+  /** What it is (S-5): a scene's, a sub-agent's run, a job's run, or a talk thread. */
+  kind: "scene" | "agent" | "job" | "talk";
+  /** For an agent's, a job's or a talk's: what started it (S-5). */
+  parent?: SessionParent;
+  /** For an agent's, a job's or a talk's: the agent's definition. */
+  agent?: string;
+  /** An agent's run whose turn has left the path (a swipe, a delete): its file is kept, and a branch reads it where it was played. */
+  offPath?: true;
   state: "open" | "closed";
   opened: number;
   /** The turn that closed it; closing belongs to that turn (§11). For the owner's own close, the chat's newest turn when he closed it, after which the closing hangs. */

@@ -83,6 +83,10 @@ export interface TeamDeps {
   keep?(agent: AgentRef, kind?: "call" | "save"): KeepRequest | undefined;
   /** The run's compaction settings (§11): each agent the team makes is compacted at any call that would not fit, as the lead is. None: its requests go out as set. */
   compaction?(): { reserve: number; overflowTries: number; keepRecent: number; saveCalls: number };
+  /** An agent the team made is a session of its own (§13.4): a sub-agent (`agent`), or a job's first agent (`job`); `by` the call that started it, none for a job the owner started. None: no file is kept. */
+  session?(agent: AgentRef, kind: "agent" | "job", by: ParentCall | undefined): void;
+  /** A summary of such an agent's own older calls (§11), kept in its session's file as its run's compaction. */
+  compacted?(agent: AgentRef, summary: string): void;
   /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
   job?: string;
 }
@@ -220,6 +224,7 @@ export class Team implements TeamWork {
     const member: Member = { ref: made.ref, runner: made.runner, level, parent, messages: 0, waiting: false, ...(made.most !== undefined ? { most: made.most } : {}) };
     const fields = fieldsOf(member.ref);
     this.#members.set(member.ref.id, member);
+    d.session?.(member.ref, "agent", parent);
     d.gauge?.(member.ref, made.limits);
     d.progress?.("delegate", fields);
     const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
@@ -239,6 +244,7 @@ export class Team implements TeamWork {
     const made = await this.#make(call, { ...(by !== undefined ? { agent: by.id } : {}), ...(parent !== undefined ? { parent } : {}) }, await this.#load());
     if (!("runner" in made)) return made;
     this.#d.gauge?.(made.ref, made.limits);
+    this.#d.session?.(made.ref, "job", parent);
     return { ref: made.ref, runner: made.runner, given: made.given, missing: made.missing };
   }
 
@@ -331,6 +337,7 @@ export class Team implements TeamWork {
             keep: (agent) => d.keep?.(agent),
             track: (entry) => d.track(entry),
             stopped: () => false,
+            written: (summary) => d.compacted?.(ref, summary),
             before: (request) => {
               const saving = d.keep?.(ref, "save");
               return saveBeforeCompaction(request, { options, rules, saveCalls: compaction.saveCalls, ...(saving !== undefined ? { keep: saving } : {}), track: (entry) => d.track(entry), stopped: () => request.signal.aborted });

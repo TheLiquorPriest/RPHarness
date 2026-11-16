@@ -36,6 +36,9 @@ function viewOf(file: SessionFile, now: number): SessionView {
     id: scope.session,
     user: scope.user,
     chat: scope.chat,
+    kind: header?.kind ?? "scene",
+    ...(header?.parent !== undefined ? { parent: header.parent } : {}),
+    ...(header?.agent !== undefined ? { agent: header.agent } : {}),
     state: closing === undefined ? "open" : "closed",
     opened: log.opened?.at ?? header?.at ?? now,
     ...(closing?.turn !== undefined ? { closedBy: closing.turn } : {}),
@@ -63,6 +66,14 @@ export interface SessionsDeps {
 export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
   const view = (file: SessionFile): SessionView => viewOf(file, d.now());
   const turnOf = (scope: Scope): { turn?: string } => (scope.turn !== undefined ? { turn: scope.turn } : {});
+  // An agent's run is off the path with the turn it was played in (a swipe, a delete), as that turn's session says; its file is kept.
+  const placed = async (seen: SessionView): Promise<SessionView> => {
+    const parent = seen.parent;
+    if (parent === undefined || "owner" in parent || parent.session === undefined || parent.turn === undefined) return seen;
+    const turn = parent.turn;
+    const left = await book.with({ user: seen.user, chat: seen.chat, session: parent.session }, (file) => file.log.left(turn));
+    return left ? { ...seen, offPath: true } : seen;
+  };
   return {
     open: (scope, opening) =>
       book.with(scope, async (file) => {
@@ -155,7 +166,10 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
         return view(file);
       }),
 
-    get: (scope) => book.with(scope, (file) => (file.header === undefined && file.log.entries.length === 0 ? undefined : view(file))),
+    get: async (scope) => {
+      const seen = await book.with(scope, (file) => (file.header === undefined && file.log.entries.length === 0 ? undefined : view(file)));
+      return seen === undefined ? undefined : placed(seen);
+    },
 
     async list(user, chat) {
       const scope: Scope = { user, chat, session: ANY_SESSION };
@@ -170,7 +184,7 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
       });
       // One file at a time, each let go once its view is made: a chat's sessions are never in memory all at once.
       const views: SessionView[] = [];
-      for (const session of ids) views.push(await book.with({ user, chat, session }, view));
+      for (const session of ids) views.push(await placed(await book.with({ user, chat, session }, view)));
       return views.sort((a, b) => a.opened - b.opened);
     },
   };

@@ -6,10 +6,14 @@
 //
 // Which entries are on the path is worked out from the file alone, by reading it in order, so a
 // harness that starts again finds the session as it stood.
-import type { JsonObject, JsonValue, TurnKind, Usage } from "../contract";
+import type { JsonObject, JsonValue, SessionParent, TurnKind, Usage } from "../contract";
 import { isMapping } from "../files/header";
 
-/** The file's first line: which session, whose, when it began, and for a branch, where it was forked from. */
+/**
+ * The file's first line: which session, whose, when it began, and for a branch, where it was forked
+ * from. For an agent's run that is a session of its own (§13.4): `kind` (absent: a scene's), what
+ * started it (`parent`), and the agent's definition (`agent`).
+ */
 export interface SessionHeader {
   type: "session";
   version: 1;
@@ -18,6 +22,9 @@ export interface SessionHeader {
   chat: string;
   at: number;
   from?: { chat: string; session: string; turn: string };
+  kind?: "agent" | "job" | "talk";
+  parent?: SessionParent;
+  agent?: string;
 }
 
 interface EntryBase {

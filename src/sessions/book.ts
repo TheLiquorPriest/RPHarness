@@ -65,6 +65,14 @@ export class SessionFile {
     return full;
   }
 
+  /** Begins the file of an agent's run that is a session of its own: its first line names what it is and what started it. A file begun already is left as it is. */
+  begin(run: Required<Pick<SessionHeader, "kind" | "parent" | "agent">>): void {
+    if (this.#begun) return;
+    this.#begun = true;
+    this.header = { type: "session", version: 1, id: this.scope.session, user: this.scope.user, chat: this.scope.chat, at: this.#d.now(), ...run };
+    this.#write(lineOf(this.header));
+  }
+
   /** Begins the file as a branch: its first line names where it was forked from, then the entries it starts from, written as one. */
   copy(entries: readonly SessionEntry[], from: NonNullable<SessionHeader["from"]>): void {
     this.#begun = true;

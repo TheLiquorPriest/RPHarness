@@ -30,6 +30,7 @@ import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, pathTurns, recordsTokens } from "../sessions/carry";
 import { Compactor, type EarlierTurns, saveBeforeCompaction } from "../sessions/compact";
+import { entryOf } from "../sessions/runs";
 import { answer, type OwnTool, Registry, TodoLists, type ToolText, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
@@ -43,7 +44,7 @@ import { type Connection, connectionOf, lines, runnerTexts, template } from "./m
 import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
 import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
-import { callTerms, DEFAULT_SETTINGS, formFor, readSettings, type Settings } from "./settings";
+import { callTerms, DEFAULT_SETTINGS, formFor, interruptFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
@@ -237,6 +238,8 @@ export class Turn {
     if (begun !== undefined) this.#file?.add({ type: "spent", parent: begun.id, turn: begun.turn, usage: { ...this.#budget.used }, rounds: this.#budget.rounds, ms: (this.#earlier?.ms ?? 0) + env.clock.now() - this.#startedAt });
     this.#keep?.stop();
     if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
+    // Each sub-agent's session closes with the turn's end.
+    await this.#runs?.close();
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
     await this.#tell(env.events.ended(this.scope, outcome));
@@ -292,6 +295,7 @@ export class Turn {
       words: (name, fields) => this.#words(name, fields),
       tools: () => this.#registry?.all() ?? [],
       tell: (written) => void this.#tell(written),
+      book: this.#c.book,
     });
     // The turn's first entry in the session file: after the session's latest turn when the request names no parent, after no turn when it names none (null), and a swipe after the entry before the turn it replaces (§11).
     // A continue is the same turn, extended (§10.10): a turn the file holds already is not begun again, and its work goes on from the turn's newest entry.
@@ -338,7 +342,22 @@ export class Turn {
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
     // The rules go on from what they remembered where this run starts in the session file, or at the turn it follows in the scene before, so a swipe starts where the attempt it replaces did, and a continue where its turn left off.
     const memory = await memoryAt(session, env, scope, file.log, from, req.parent);
-    const rules = await guidance.ruleRun({ facts, window: settings.ruleWindow, ...(memory !== undefined ? { memory } : {}) });
+    const rules = await guidance.ruleRun({
+      facts,
+      ...(settings.ruleWindow !== undefined ? { window: settings.ruleWindow } : {}),
+      patternTime: settings.patternTime,
+      // A pattern that ran out of time on a text counted as no match: the trace and the log say so.
+      ranOut: (agent, rule, length) => {
+        this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "time", length });
+        env.log.warn("A rule's pattern ran out of time on a text; that check counted as no match.", { turn: scope.turn, rule: rule.rule, path: rule.path, length });
+      },
+      // Whether a rule that interrupts stops the agent's call, by its connection's setting (`remind` reminds instead).
+      stops: async (agent) => {
+        const own = agent.id === this.#lead.id ? definition : await guidance.definition(agent.definition);
+        return interruptFor(settings, own === undefined ? { id: null, name: null } : await this.#connection(own)) === "stop";
+      },
+      ...(memory !== undefined ? { memory } : {}),
+    });
     this.#rules = rules;
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
 
@@ -369,6 +388,8 @@ export class Turn {
       gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
       progress: (name, fields) => this.#say(name, fields),
       keep: (agent, kind) => this.#keeper(agent, kind).keep,
+      session: (agent, kind, by) => this.#agentRuns().session(agent, kind, by),
+      compacted: (agent, summary) => this.#agentRuns().compacted(agent, summary),
       compaction: () => this.#settings.compaction,
       slice,
     });
@@ -1135,28 +1156,8 @@ export class Turn {
   #record(record: AgentRecord): void {
     const file = this.#file;
     if (file === undefined || record.agent.id !== this.#lead.id) return;
-    const turn = this.scope.turn;
-    const parent = file.log.tip(turn) ?? null;
-    const { event } = record;
-    switch (event.kind) {
-      case "intent":
-        file.add({ type: "intent", parent, turn, text: event.text });
-        return;
-      case "call_ended":
-        file.add({ type: "message", parent, turn, call: event.call, text: event.text, stop: event.stop, ...(event.error !== undefined ? { error: event.error } : {}) });
-        return;
-      case "tool_started":
-        file.add({ type: "call", parent, turn, callId: event.callId, tool: event.tool, args: event.args, ...(event.closing ? { closing: true as const } : {}), ...(event.via !== undefined ? { via: event.via } : {}) });
-        return;
-      case "tool_ended": {
-        const { result } = event;
-        const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("");
-        file.add({ type: "result", parent, turn, callId: event.callId, tool: event.tool, text, ...(result.reports !== undefined && result.reports.length > 0 ? { reports: result.reports } : {}), ...(result.error === true ? { error: true as const } : {}) });
-        return;
-      }
-      default:
-        return;
-    }
+    const entry = entryOf(record.event, this.scope.turn, file.log.tip(this.scope.turn) ?? null);
+    if (entry !== undefined) file.add(entry);
   }
 
   /**

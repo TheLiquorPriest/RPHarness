@@ -244,7 +244,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
     await host.givePrompt(scope, { messages: [{ role: "user", content: message }] });
     const guidance = loadGuidance(env.files, scope);
     const settings = await readSettings(guidance, env.files, scope, env.log);
-    const rules = await guidance.ruleRun({ facts: createFacts(env.facts, () => ({})), window: settings.ruleWindow });
+    const rules = await guidance.ruleRun({ facts: createFacts(env.facts, () => ({})), ...(settings.ruleWindow !== undefined ? { window: settings.ruleWindow } : {}), patternTime: settings.patternTime });
     const run = new RunTrace(hub.tee(env.trace, scope), scope, turn, clock);
     run.watch((record) => usage.record(record));
     usage.begin(turn);

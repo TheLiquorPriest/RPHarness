@@ -25,6 +25,8 @@ repeat: once per turn
 # at: run-end
 # Goes with `at` or `every`. A fact of the turn and a test of it, such as `todo.open > 0` or `limits.left <= 2`: the rule fires only while it holds.
 # fact: todo.open > 0
+# Goes with `at`: a command, in quotes, that the rule asks yes or no at that moment. It is given the moment's facts, the agent and its place as JSON on its standard input, `{moment, agent: {id, definition, plays?}, place: {chat, session, turn?}, facts}`, and answers `yes` or `no` (or JSON true or false); a yes fires the rule as a fact that holds would. A command that fails, or runs past `rules.commandTimeout` (10 seconds), shows the rule as unable to work. It runs only once the player has switched commands on from the server, as a `rule-command`.
+# command: "./check-budget"
 # TRIGGER, a count of turns, in place of `condition`. A whole number: the rule fires every that many turns. It may carry a `fact`.
 # every: 10
 # With no trigger at all, in place of the fields above: the situations the rule is handed over for in the briefing, such as swipe. Left out, it is given for every turn.

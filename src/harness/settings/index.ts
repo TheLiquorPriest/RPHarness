@@ -33,11 +33,12 @@ import { PROMPT } from "./prompt";
 import { REPLY } from "./reply";
 import { RULES } from "./rules";
 import { TOOLS } from "./tools";
+import { SESSIONS } from "./sessions";
 import { TRACE, TRACE_GONE } from "./trace";
 import { USAGE } from "./usage";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION] as const;
+export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE, ...TRACE_GONE };

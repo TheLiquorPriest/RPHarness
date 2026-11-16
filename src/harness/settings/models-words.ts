@@ -16,4 +16,7 @@ export const MODELS_WORDS = {
   "throttles.connections.<connection>.tokensPerMinute": { name: "Tokens a minute on a connection", about: "Tokens sent and written on this connection over any minute; a call waits for room, and one bigger than the whole minute is not made." },
   "throttles.connections.<connection>.atOnce": { name: "Calls at once on a connection", about: "Calls on this connection under way at the same time; one past it waits in line, first come first served." },
   "throttles.atOnce": { name: "Calls at once on any connection", about: "Calls under way at the same time on each connection that sets no number of its own." },
+  "embedding.connection": { name: "Embedding connection", about: "The connection, by its name or id, that makes the vectors a search by meaning compares; none: nothing is searched by meaning. Its provider must offer embeddings (OpenAI, Google Gemini, Mistral, an OpenAI-compatible server)." },
+  "embedding.model": { name: "Embedding model", about: "The model on the embedding connection that makes the vectors, such as text-embedding-3-small; the connection's own chat model makes none." },
+  "embedding.batch": { name: "Texts per embedding request", about: "Texts sent in one request for their vectors; more go in further requests." },
 };

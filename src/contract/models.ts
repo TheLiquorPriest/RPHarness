@@ -173,6 +173,8 @@ export interface ProviderOffer {
   apis: string[];
   /** A connection of it must give its address (a compatible server). */
   needsBaseUrl: boolean;
+  /** It makes embeddings (`ModelsApi.embed`), for a connection of it that signs with a key or with nothing: one signed in makes none. */
+  embeds: boolean;
 }
 
 /** The Connections page's list. */
@@ -190,6 +192,18 @@ export interface ModelChoice {
   id: string;
   name: string;
 }
+
+/**
+ * Vectors made on the user's embedding connection (C-M6; the settings `embedding.connection` and
+ * `embedding.model`, at the levels every chat shares): one per text, in the order given, with the
+ * connection and the model that made them. `none`: no embedding connection is set, so nothing is
+ * searched by meaning. `failed`: the one set can't make them (gone, its provider offers none, no
+ * model named, its key waits) or its provider failed; `words` say what to do, with no secret in them.
+ */
+export type Embedded =
+  | { status: "embedded"; connection: string; model: string; vectors: number[][] }
+  | { status: "none"; words: string }
+  | { status: "failed"; words: string };
 
 /** One limit of a model, in tokens, and where it came from. */
 export interface ModelLimit {
@@ -319,8 +333,13 @@ export interface ModelsApi {
    * `tokens.charsPerToken`. Rejects, in words that say what to do, where the connection can't be used.
    */
   count(scope: Scope, connection: string | null, prompt: readonly PromptMessage[]): Promise<number>;
-  // `embed`, for search by meaning (§9.4, §10.5), comes here with the search lane, so a host's
-  // indexes are built through RPH's model layer and never by the host calling a model.
+  /**
+   * The vectors of `texts` for a search by meaning (§9.4, §10.5; C-M6), made on the user's embedding
+   * connection through the layer, so a host never calls a model to build its index. Sent in batches
+   * of `embedding.batch` under the rules every call keeps: no redirect followed, a key only to its
+   * place, the provider wait, a call that met nothing or 429 or 5xx made again, its connection's throttle.
+   */
+  embed(user: string, texts: readonly string[], signal?: AbortSignal): Promise<Embedded>;
   /** The user's sign-ins: their tokens are his alone. */
   signIn(user: string): SignInApi;
   /** Passes a request through to the user's connection and streams the answer to `sink`. Resolves after `finish` or `error`. */

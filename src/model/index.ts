@@ -9,7 +9,8 @@
 //   call is shaped from the agent's connection as it stands at the time of the call;
 // - the host's way in (the contract's `ModelsApi`): the connections as the Connections page keeps
 //   them, a connection's test call and its models, each model's limits, the sign-ins to Anthropic
-//   and OpenAI, and requests passed through, each for the user it names;
+//   and OpenAI, requests passed through, and the vectors of texts for a host's search by meaning
+//   (embed.ts), each for the user it names;
 // - the end of an agent session's prompt cache (`ended`), the user's session alone;
 // - a turn's start (`turnStarting`): the user's connections are read again through the host, so that
 //   a hand edit made since holds from the turn's first call.
@@ -38,6 +39,7 @@ import type { Connection } from "./book";
 import { Book } from "./book";
 import type { CallDeps } from "./call";
 import { agentShapeOf, makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
+import { embed } from "./embed";
 import { isRecord } from "./json";
 import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
@@ -290,7 +292,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       const { book } = deskOf(user);
       const chosen = await book.defaultId();
       const views = await Promise.all((await book.connections()).map((c) => viewOf(book, c, chosen)));
-      return { connections: views, default: chosen, providers: KINDS.map((k) => ({ id: k.id, name: k.name, auth: [...k.auth], apis: [...k.apis], needsBaseUrl: k.needsBaseUrl })) };
+      return { connections: views, default: chosen, providers: KINDS.map((k) => ({ id: k.id, name: k.name, auth: [...k.auth], apis: [...k.apis], needsBaseUrl: k.needsBaseUrl, embeds: k.embeddings !== undefined })) };
     },
     async save(user, input, key, id) {
       const { book } = deskOf(user);
@@ -347,6 +349,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       const { charsPerToken } = await deps.settings(scope);
       return promptTokens(promptMessages(prompt, model, 0).messages, charsPerToken);
     },
+    embed: (user, texts, signal) => embed(deskOf(user).calls, texts, signal),
     signIn: (user) => deskOf(user).signIn,
     pass: (user, request, sink, signal) => passRequest(deskOf(user).calls, request, sink, signal),
   };

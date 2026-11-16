@@ -6,8 +6,10 @@
 // from which a secret is looked for anywhere in them; the wait before a failed call is made again,
 // and how many times where its connection says nothing; how long a
 // provider is asked to keep a prompt in its cache; how long a connection's model that refused
-// native tools is offered them as text; and each connection's throttle (§13.2): its requests and
-// tokens a minute and its calls at once, with the calls at once of a connection that sets none.
+// native tools is offered them as text; each connection's throttle (§13.2): its requests and
+// tokens a minute and its calls at once, with the calls at once of a connection that sets none; and
+// the connection and model a host's search by meaning has its vectors made on (§9.4, §10.5), none
+// until he names one, with how many texts go in each of its requests.
 // Times are in seconds, that last in minutes, the list in megabytes.
 //
 // What these govern often has no chat in view (a connection's test, a sign-in, a request passed
@@ -53,6 +55,11 @@ export const MODELS = worded(
     tokensPerMinute: { key: "throttles.connections.<connection>.tokensPerMinute", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.tokensPerMinute" },
     connectionAtOnce: { key: "throttles.connections.<connection>.atOnce", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "as every connection", perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.atOnce" },
     atOnce: { key: "throttles.atOnce", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, levels: SHARED, at: "calls.throttles.atOnce" },
+    // §9.4, §10.5: nothing is searched by meaning until he names a connection for it, and a model on it.
+    embeddingConnection: { key: "embedding.connection", takes: { type: "text" }, default: null, orNone: true, none: "no search by meaning", perConnection: false, levels: SHARED, at: "calls.embedding.connection" },
+    embeddingModel: { key: "embedding.model", takes: { type: "text" }, default: null, orNone: true, none: "none named", perConnection: false, levels: SHARED, at: "calls.embedding.model" },
+    // A few dozen texts a request: well under every provider's own most (Google's is 100).
+    embeddingBatch: { key: "embedding.batch", takes: { type: "whole", least: 1 }, default: 64, perConnection: false, levels: SHARED, at: "calls.embedding.batch" },
   },
   MODELS_WORDS,
 );

@@ -65,6 +65,12 @@ export interface ProviderKind {
    * wherever another address would redirect it.
    */
   ownAddress?: true;
+  /**
+   * How its embeddings are asked for, where it offers them (§9.4, §10.5): on OpenAI's shape (an
+   * `input` list, a `data` list of vectors back) at `path` under its address, or on Google's batch
+   * call. pi-ai has none, so the layer speaks these itself (embed.ts). Absent: it offers none.
+   */
+  embeddings?: { shape: "openai"; path: string } | { shape: "google" };
 }
 
 export const SAMPLING_NAMES: readonly SamplingName[] = ["temperature", "top_p", "top_k", "min_p", "frequency_penalty", "presence_penalty", "repetition_penalty", "seed", "stop"];
@@ -77,14 +83,14 @@ export const SAMPLING_NAMES: readonly SamplingName[] = ["temperature", "top_p", 
  */
 export const KINDS: readonly ProviderKind[] = [
   { id: "anthropic", name: "Anthropic", auth: ["key", "signin"], apis: ["anthropic-messages"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "stop"] },
-  { id: "openai", name: "OpenAI", auth: ["key", "signin"], apis: ["openai-responses"], needsBaseUrl: false, sampling: ["temperature", "top_p"] },
-  { id: "google", name: "Google Gemini", auth: ["key"], apis: ["google-generative-ai"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "seed", "stop"], ownAddress: true },
+  { id: "openai", name: "OpenAI", auth: ["key", "signin"], apis: ["openai-responses"], needsBaseUrl: false, sampling: ["temperature", "top_p"], embeddings: { shape: "openai", path: "/embeddings" } },
+  { id: "google", name: "Google Gemini", auth: ["key"], apis: ["google-generative-ai"], needsBaseUrl: false, sampling: ["temperature", "top_p", "top_k", "seed", "stop"], ownAddress: true, embeddings: { shape: "google" } },
   { id: "openrouter", name: "OpenRouter", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false, sampling: SAMPLING_NAMES },
   { id: "deepseek", name: "DeepSeek", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false, sampling: ["temperature", "top_p", "frequency_penalty", "presence_penalty", "stop"] },
   { id: "xai", name: "xAI", auth: ["key"], apis: ["openai-responses"], needsBaseUrl: false, sampling: ["temperature", "top_p"] },
   { id: "groq", name: "Groq", auth: ["key"], apis: ["openai-completions"], needsBaseUrl: false, sampling: ["temperature", "top_p", "frequency_penalty", "presence_penalty", "seed", "stop"] },
-  { id: "mistral", name: "Mistral", auth: ["key"], apis: ["mistral-conversations"], needsBaseUrl: false, sampling: ["temperature", "top_p", "frequency_penalty", "presence_penalty", "seed", "stop"] },
-  { id: "openai-compatible", name: "OpenAI-compatible", auth: ["key", "none"], apis: ["openai-completions", "openai-responses"], needsBaseUrl: true, sampling: SAMPLING_NAMES, borrows: "openai" },
+  { id: "mistral", name: "Mistral", auth: ["key"], apis: ["mistral-conversations"], needsBaseUrl: false, sampling: ["temperature", "top_p", "frequency_penalty", "presence_penalty", "seed", "stop"], embeddings: { shape: "openai", path: "/v1/embeddings" } },
+  { id: "openai-compatible", name: "OpenAI-compatible", auth: ["key", "none"], apis: ["openai-completions", "openai-responses"], needsBaseUrl: true, sampling: SAMPLING_NAMES, borrows: "openai", embeddings: { shape: "openai", path: "/embeddings" } },
   { id: "anthropic-compatible", name: "Anthropic-compatible", auth: ["key", "none"], apis: ["anthropic-messages"], needsBaseUrl: true, sampling: ["temperature", "top_p", "top_k", "stop"], borrows: "anthropic" },
 ];
 

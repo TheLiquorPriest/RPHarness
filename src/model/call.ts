@@ -148,7 +148,7 @@ export interface CallAsk {
 }
 
 /** A connection's throttle as the user's settings give it, each figure by the connection's id, else its name; its calls at once its own, else every connection's. */
-function throttleOf(settings: ModelSettings, connection: Connection): Throttle {
+export function throttleOf(settings: ModelSettings, connection: Connection): Throttle {
   const set = settings.throttles.connections;
   const own = [connection.id, connection.name].flatMap((key) => (Object.hasOwn(set, key) ? [set[key]] : []));
   const requestsPerMinute = own.find((t) => t?.requestsPerMinute !== undefined)?.requestsPerMinute;

@@ -56,7 +56,7 @@ test("as attachments: what delegate and a definition name is found the same way,
     events: { attachments: async (_scope: unknown, _agent: unknown, refs: AttachmentRef[]) => (told.push(refs), []) } as unknown as Environment["events"],
   };
   const gm: AgentRef = { id: "gm-1", definition: "gm", parent: "lead" };
-  const given = await attach({ env, scope: SCOPE, lines: undefined, most: 50, slice: promptSlice(async () => prompt, shippedParts()) }, gm, [
+  const given = await attach({ env, scope: SCOPE, lines: undefined, most: 50, slice: promptSlice(async () => prompt, shippedParts()), moment: { task: "" } }, gm, [
     { ref: "prompt:Style Guide", from: "definition" },
     { ref: "prompt:history[-1:]", from: "delegate" },
     { ref: "prompt:persona.card", from: "delegate" },

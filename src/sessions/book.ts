@@ -14,6 +14,9 @@ type Unsaved<E> = E extends SessionEntry ? Omit<E, "id" | "at"> : never;
 /** An entry as it is asked for: everything but its id and when, which the file gives it. */
 export type NewEntry = Unsaved<SessionEntry>;
 
+/** Why a session file could not be read: as a whole (the host's or the error's words), or some of its lines. */
+export type Unreadable = { reason: string } | { lines: number[] };
+
 export interface BookDeps {
   files: FilesPort;
   log: Log;
@@ -39,8 +42,14 @@ export class SessionFile {
   #queued = "";
   /** The appends under way, until the queue is empty or one fails. */
   #writing: Promise<void> | undefined;
+  /**
+   * Why the file could not be read, where it could not: refused or failed as a whole (`reason`, the
+   * host's or the error's words), or lines that do not parse (`lines`, from 1). The turn is told, and
+   * goes on from what was read.
+   */
+  readonly unreadable: Unreadable | undefined;
 
-  constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean) {
+  constructor(d: BookDeps, scope: Scope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean, unreadable?: Unreadable) {
     this.#d = d;
     this.scope = scope;
     this.path = path;
@@ -48,6 +57,7 @@ export class SessionFile {
     this.log = new SessionLog(entries);
     this.#begun = begun;
     this.#cut = cut;
+    this.unreadable = unreadable;
   }
 
   /** Adds an entry: in the tree at once, on disk after every entry before it. The file is begun with its first line if it has none yet. */
@@ -143,10 +153,19 @@ interface Kept {
   holds: number;
 }
 
-/** The session files something is working on, by user, chat and session. */
+/**
+ * The session files something is working on, by user, chat and session, and the ones used last
+ * kept read between their turns (`held`, the user's `sessions.held`): a session's next turn reads
+ * nothing again, and past that many the one used least recently is let go, to be read whole when
+ * next asked for. A file that could not be read is never kept: the next to ask reads it again.
+ */
 export class SessionBook {
   readonly #d: BookDeps;
   readonly #files = new Map<string, Kept>();
+  /** The files nothing holds now that are kept read, by key, the one used least recently first. */
+  readonly #idle = new Set<string>();
+  /** How many files nothing holds are kept read between their turns (`sessions.held`), as the latest turn read the setting. */
+  held = 8;
 
   constructor(d: BookDeps) {
     this.#d = d;
@@ -160,6 +179,7 @@ export class SessionBook {
       kept = { file: this.#read({ user: scope.user, chat: scope.chat, session: scope.session }), holds: 0 };
       this.#files.set(key, kept);
     }
+    this.#idle.delete(key);
     kept.holds += 1;
     const held = kept;
     let file: SessionFile;
@@ -191,9 +211,11 @@ export class SessionBook {
   }
 
   /**
-   * One holder fewer: with none left, the file is let go once its lines are written, unless
-   * something holds it again by then. A file whose lines an append could not write is kept, so the
-   * next to hold it finds its tree whole, and those lines go out first with the next it writes.
+   * One holder fewer: with none left, the file is kept read among the idle ones once its lines are
+   * written, unless something holds it again by then; the idle past `held` are let go, the least
+   * recently used first. A file whose lines an append could not write is kept, so the next to hold it
+   * finds its tree whole, and those lines go out first with the next it writes; one that could not be
+   * read is let go, so the next to ask reads it again.
    */
   #let(key: string, kept: Kept): void {
     kept.holds -= 1;
@@ -203,8 +225,22 @@ export class SessionBook {
     };
     void kept.file.then(async (file) => {
       await file.settled();
-      if (!file.unwritten) drop();
+      if (file.unwritten || kept.holds > 0 || this.#files.get(key) !== kept) return;
+      if (file.unreadable !== undefined && "reason" in file.unreadable) return drop();
+      this.#idle.delete(key);
+      this.#idle.add(key);
+      this.#trim();
     }, drop);
+  }
+
+  /** Lets go of the idle files past `held`, the least recently used first. */
+  #trim(): void {
+    for (const key of this.#idle) {
+      if (this.#idle.size <= this.held) return;
+      this.#idle.delete(key);
+      const kept = this.#files.get(key);
+      if (kept !== undefined && kept.holds === 0) this.#files.delete(key);
+    }
   }
 
   /** Resolves once every line given so far, to every file, is written, or its failure logged: lines an append could not write are tried once more. */
@@ -221,17 +257,18 @@ export class SessionBook {
     try {
       read = await files.read(scope, path);
     } catch (error) {
-      // Nothing of it can be known: the session goes on from nothing, and what is added is put after whatever the file holds, on a line of its own.
-      log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, error: error instanceof Error ? error.message : String(error) });
-      return new SessionFile(this.#d, scope, path, undefined, [], true, true);
+      // Nothing of it can be known: the session goes on from nothing, the turn is told, and what is added is put after whatever the file holds, on a line of its own.
+      const reason = error instanceof Error ? error.message : String(error);
+      log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, error: reason });
+      return new SessionFile(this.#d, scope, path, undefined, [], true, true, { reason });
     }
     if (read.status === "missing") return new SessionFile(this.#d, scope, path, undefined, [], false, false);
     if (read.status === "refused") {
       log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, reason: read.reason });
-      return new SessionFile(this.#d, scope, path, undefined, [], true, true);
+      return new SessionFile(this.#d, scope, path, undefined, [], true, true, { reason: read.reason });
     }
     const parsed = parseSession(read.text);
     if (parsed.unread.length > 0) log.warn("Lines of the session file could not be read and are passed over.", { session: scope.session, path, lines: parsed.unread });
-    return new SessionFile(this.#d, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"));
+    return new SessionFile(this.#d, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"), parsed.unread.length > 0 ? { lines: parsed.unread } : undefined);
   }
 }

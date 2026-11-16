@@ -20,8 +20,8 @@ function turn(id: string, extra: Partial<TurnRequest> = {}): TurnRequest {
   return request(id, { lead: "lead", carry: "continuing", ...extra });
 }
 
-test("a session file the host deletes between turns is begun anew by the next turn, which carries nothing from it", async () => {
-  const s = (open = await stage({ answers: [1, 2, 3].map((n) => said(`<intent>Intent ${n}.</intent><reply>Reply ${n}.</reply>`)) }));
+test("a session file the host deletes between turns is begun anew by the next turn, which carries nothing from it (with no session kept read between turns)", async () => {
+  const s = (open = await stage({ config: "sessions:\n  held: 0\n", answers: [1, 2, 3].map((n) => said(`<intent>Intent ${n}.</intent><reply>Reply ${n}.</reply>`)) }));
   for (const req of [turn("t1"), turn("t2", { parent: "t1" })]) expect((await s.turn(req)).outcome.status).toBe("released");
   expect((await s.harness.sessions!.list(USER, CHAT)).map((view) => view.id)).toEqual(["s1"]);
 

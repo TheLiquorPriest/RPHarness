@@ -5,7 +5,7 @@ import type { Environment } from "../contract";
 import type { Guidance } from "../files/api";
 import { JOB_START, jobStart, type JobsWork } from "../jobs/tool";
 import { JOB_SEARCHED, jobTools } from "../jobs/tools";
-import { PROMPT_TOOLS, promptMapWrite, promptTool, type TurnPrompt } from "../prompt";
+import { PROMPT_TOOLS, promptMapWrite, promptTool, type SceneMap, type TurnPrompt } from "../prompt";
 import { fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, replyRelease, type ReplyWork, todo, type TodoDeps, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import type { BaseToolsDeps } from "../tools/base/deps";
@@ -48,6 +48,8 @@ export interface OwnToolsDeps {
   reach: ToolReach;
   /** Each lore entry an agent read in full, for the session's cache (§11); none keeps none. */
   keepLore?: NonNullable<BaseToolsDeps["keepLore"]>;
+  /** The scene's copy of the prompt map, which a map the agent saves replaces (§11, §4.8); none keeps none. */
+  sceneMap?: SceneMap;
 }
 
 export function ownTools(d: OwnToolsDeps): OwnTool[] {
@@ -68,7 +70,7 @@ export function ownTools(d: OwnToolsDeps): OwnTool[] {
     ...jobTools(d.jobs, texts, settings.perCall),
     ...baseTools({ env, guidance, texts, ids: () => d.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}), ...(d.keepLore !== undefined ? { keepLore: d.keepLore } : {}) }),
     promptTool({ prompt: () => d.prompt(), guidance, texts, env }),
-    promptMapWrite({ prompt: () => d.prompt(), guidance, texts, env, signatureHead: settings.signatureHead }),
+    promptMapWrite({ prompt: () => d.prompt(), guidance, texts, env, signatureHead: settings.signatureHead, ...(d.sceneMap !== undefined ? { sceneMap: d.sceneMap } : {}) }),
     ...searchTools({
       reach: d.reach,
       ...(env.switches !== undefined ? { switches: env.switches } : {}),

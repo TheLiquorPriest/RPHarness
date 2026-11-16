@@ -28,7 +28,7 @@ import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
 import { SilentReply } from "../reply/silent";
-import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
+import type { HeldFile, SessionBook, SessionFile, Unreadable } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, pathTurns, recordsTokens } from "../sessions/carry";
 import { Compactor, type EarlierTurns, saveBeforeCompaction } from "../sessions/compact";
 import { entryOf } from "../sessions/runs";
@@ -37,7 +37,7 @@ import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { JobsWork } from "../jobs/tool";
-import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
+import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type SceneMap, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
@@ -171,6 +171,8 @@ export class Turn {
   #holding: Promise<HeldFile> | undefined;
   /** The session's turns on this turn's path, this one with them: the fact `session.turns`. */
   #sessionTurns = 0;
+  /** Why the session's file could not be read at this turn's start, where it could not (§17.2): the briefing says so. */
+  #unreadable: Unreadable | undefined;
   #draft: { text: string; by: AgentRef } | undefined;
   #released: { text: string; form: ReleaseForm } | undefined;
   /** The judging model of the `question:` rules, once the turn's rules are loaded. */
@@ -284,6 +286,8 @@ export class Turn {
       (this.#holding = this.#c.book.hold(scope)).then((held) => held.file),
     ]);
     this.#settings = settings;
+    // How many sessions the harness keeps read between their turns, as this turn reads the setting.
+    this.#c.book.held = settings.sessions.held;
     this.#roleMark = roleMark(roleNote);
     this.#places = places;
     this.#runs = new AgentRuns({
@@ -303,6 +307,11 @@ export class Turn {
     // The turn's first entry in the session file: after the session's latest turn when the request names no parent, after no turn when it names none (null), and a swipe after the entry before the turn it replaces (§11).
     // A continue is the same turn, extended (§10.10): a turn the file holds already is not begun again, and its work goes on from the turn's newest entry.
     this.#file = file;
+    // A file that could not be read is told, not hidden (§17.2): the trace and the live view have it, and the briefing says so; the turn goes on from what was read.
+    if (file.unreadable !== undefined) {
+      this.#unreadable = file.unreadable;
+      this.#trace.event(this.#lead, undefined, { kind: "session", session: scope.session, change: "unreadable", turn: scope.turn, reason: "reason" in file.unreadable ? file.unreadable.reason : `lines ${file.unreadable.lines.join(", ")}` });
+    }
     const continued = req.kind === "continue" ? file.log.turn(scope.turn) : undefined;
     const begun = continued ?? file.add({ type: "turn", parent: file.log.anchor(req.parent), turn: scope.turn, kind: req.kind, lead: req.lead, ...(typeof req.parent === "string" ? { follows: req.parent } : {}) });
     // Where this run's work starts on the path: before the turn, or after what a continued turn did already. What the session carries and what the rules remembered are read there.
@@ -457,7 +466,7 @@ export class Turn {
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
     // A request that carries no prompt (a run asked for to settle a turn's records, say) leaves the prompt's record as it was: nothing of it is compared, kept or saved, no view of it is written over the turn's, and its prompt tools find none.
     if (req.prompt.length > 0) {
-      const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, by: this.#lead });
+      const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, by: this.#lead, sceneMap: this.#sceneMap() });
       this.#prompt = prompt;
       this.#notices = located.notices.length;
       if (located.notices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: located.notices });
@@ -732,6 +741,8 @@ export class Turn {
       ...(block.contract !== undefined && block.contract !== "" ? { reply_contract: block.contract } : {}),
       // What the session's cache holds (§11 l.1361): what it has already looked up, and where each is.
       ...(await this.#cacheFields(places)),
+      // The session's file could not be read, or some of its lines (§17.2): why, so the lead knows what it holds of the scene is short.
+      ...(this.#unreadable !== undefined ? { session_unreadable: "reason" in this.#unreadable ? { reason: this.#unreadable.reason } : { lines: this.#unreadable.lines } } : {}),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;
@@ -776,6 +787,7 @@ export class Turn {
       prompt: async () => this.#prompt,
       reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
       keepLore: (ctx, entry) => this.#keepLore(ctx, entry),
+      sceneMap: this.#sceneMap(),
     });
   }
 
@@ -888,6 +900,24 @@ export class Turn {
     const places = this.#places;
     if (ctx.agent.plays !== undefined || file === undefined || places === undefined) return;
     void this.#tell(keepCached(file, this.#cacheDeps(places), this.scope.turn, loreKey(entry.id), entry.text, { id: entry.id, title: entry.title, source: entry.source, ...(entry.revision !== undefined ? { revision: entry.revision } : {}) }));
+  }
+
+  /** The scene's copy of the prompt map in the session's cache (§11, §4.8): read as it stands on this turn's path, and kept as this turn's work. */
+  #sceneMap(): SceneMap {
+    return {
+      standing: async () => {
+        const file = this.#file;
+        const places = this.#places;
+        const entry = file === undefined ? undefined : standing(file.log, file.log.tip(this.scope.turn) ?? null).get(PROMPT_MAP_KEY);
+        const text = entry === undefined || places === undefined ? undefined : await readCached(this.#cacheDeps(places), entry);
+        return text === undefined ? undefined : { text, ...(entry?.meta !== undefined ? { meta: entry.meta } : {}) };
+      },
+      keep: async (text, meta) => {
+        const file = this.#file;
+        const places = this.#places;
+        if (file !== undefined && places !== undefined) await keepCached(file, this.#cacheDeps(places), this.scope.turn, PROMPT_MAP_KEY, text, meta);
+      },
+    };
   }
 
   /** The briefing's `cache` field: the scratch files carried into this turn, the lore entries kept, the prompt map, and the host's own files there, each with where it is. */

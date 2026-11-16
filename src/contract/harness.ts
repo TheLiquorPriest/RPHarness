@@ -11,6 +11,7 @@ import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
 import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 import type { JsonSchema } from "./json";
+import type { PromptMapApi } from "./prompt";
 
 // ---------------------------------------------------------------- jobs
 
@@ -190,6 +191,13 @@ export interface SessionsApi {
    * the previous scene's session closed with.
    */
   open(scope: Scope, opening?: { summary?: string }): Promise<SessionView>;
+  /**
+   * The host's word on the summary an open session opens with from then on (S-6, §11), given after it
+   * opened: a scene before's summary written or corrected later. The newest given stands, in every
+   * mode and beside a compaction's summary, from the next turn that starts; the summary it already
+   * opens with writes nothing; an empty one, none.
+   */
+  opensWith(scope: Scope, summary: string): Promise<SessionView>;
   /**
    * Closes it, as the work of `scope.turn` (§11: if that turn is swiped or deleted, the session is
    * open again). With `by: "user"`, the owner's own close (S-3): hung after `scope.turn`, the chat's
@@ -514,6 +522,8 @@ export interface Harness {
   usage: UsageApi;
   definitions: DefinitionsApi;
   models: ModelsApi;
+  /** The prompt map as the Prompt page shows and edits it (C-9): RPH makes the owner's edits and keeps them when the map is learned again. */
+  promptMap: PromptMapApi;
   /**
    * An agent's kept request (the file its `call_started` names, C-17) rebuilt exactly as it was sent,
    * from the pointers into the turn's files it holds; undefined when there is no such file.

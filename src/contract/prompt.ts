@@ -211,3 +211,59 @@ export interface PromptPort {
   /** Keeps where RPH found each slice in this turn's prompt, and the notices, for the Turn and Prompt pages. */
   saveLocated(scope: Scope, located: LocatedSlices): Promise<void>;
 }
+
+// ---------------------------------------------------------------- the prompt map, as the Prompt page shows and edits it
+
+/** One of the owner's edits to the prompt map on the Prompt page (§4.8 L369; C-9). `split`: `at` is the words the second part begins with. */
+export type PromptMapEdit =
+  | { edit: "rename"; marker: string; to: string }
+  | { edit: "merge"; markers: string[]; as: string }
+  | { edit: "split"; marker: string; at: string; second: string }
+  | { edit: "line"; marker: string; line: string }
+  | { edit: "kind"; marker: string; to: SliceKind };
+
+/**
+ * A slice as the Prompt page shows it: as the map has it, its text in the turn's prompt, where it is,
+ * and, for a slice of the learned map, how it was found and what the breakdown said there
+ * (`breakdown`: its block there agrees with the map's finder, or the finder was corrected to it).
+ */
+export interface ShownSlice {
+  marker: string;
+  kind: SliceKind;
+  line?: string;
+  behaviour?: SliceBehaviour;
+  /** The owner changed it on the Prompt page; a new mapping keeps it. */
+  edited?: true;
+  text: string;
+  length: number;
+  at: { message: number; start: number; end: number }[];
+  found?: "signature" | "block" | "place";
+  breakdown?: "confirmed" | "corrected";
+  hint?: string;
+}
+
+/** The prompt map as found in a turn's prompt (`PromptMapApi.show`): its slices, the text of no slice, and the turn's notices and front as its located record has them. */
+export interface PromptMapShown {
+  turn: string;
+  preset: PresetRef | null;
+  /** The slices are the learned map's: there is one, and the layout told the prompt's text apart. */
+  mapped: boolean;
+  slices: ShownSlice[];
+  unclaimed: { message: number; start: number; end: number; text: string }[];
+  notices: PromptNotice[];
+  front: LocatedSlices["front"];
+}
+
+/** An edit made and the map saved for every chat on the preset; or why it was not made, in the words of `.prompts/prompt-map.md`. */
+export type PromptMapEdited = { status: "saved"; map: PromptMap } | { status: "refused"; words: string };
+
+/**
+ * The prompt map as the Prompt page shows and edits it (C-9). RPH makes each edit and keeps it with
+ * the preset, every slice it changes marked `edited`, so a later learn keeps it (§4.8 step 3).
+ */
+export interface PromptMapApi {
+  /** The map as found in the prompt of `scope.turn` (absent: the chat's newest turn RPH keeps), while the host keeps that turn's folder; undefined where none is kept. */
+  show(scope: Scope): Promise<PromptMapShown | undefined>;
+  /** Makes one edit on the map as found in that turn's prompt, writes each changed slice's finder from its text, and saves the map through `PromptPort.saveMap` under `by`. */
+  edit(scope: Scope, edit: PromptMapEdit, by: AgentRef): Promise<PromptMapEdited>;
+}

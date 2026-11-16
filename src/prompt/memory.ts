@@ -7,7 +7,7 @@
 import type { AgentRef, Environment, FilesPort, JsonValue, LocatedSlices, PromptMessage, Scope, StorePort } from "../contract";
 import { TurnPrompt } from "./prompt";
 import { locatedOf, type PromptRecord, recordOf } from "./shape";
-import { textHash } from "./text";
+import { messageText, textHash } from "./text";
 
 /** The store key of a chat's kept prompts. */
 function keyOf(scope: Scope): string {
@@ -64,17 +64,51 @@ export class PromptMemory {
     return found.record;
   }
 
-  /** Keeps what the turn `scope.turn` held, as the chat's newest; those whose turn folders the host no longer keeps are let go. */
-  async keep(scope: Scope, record: PromptRecord): Promise<void> {
+  /**
+   * Keeps what the turn `scope.turn` held, as the chat's newest, and the turn's prompt itself (each
+   * message's role, name and text) with where its slices were found, so a page or a job started from
+   * the turn reads it back (`held`); those whose turn folders the host no longer keeps are let go.
+   */
+  async keep(scope: Scope, record: PromptRecord, messages: readonly PromptMessage[], located: LocatedSlices): Promise<void> {
     const turn = scope.turn;
     if (turn === undefined) return;
     const folders = await this.#turnsKept(scope);
+    const gone: string[] = [];
     await this.#store.update(scope, keyOf(scope), (current) => {
-      const kept = keptOf(current).filter((k) => k.turn !== turn && (folders === undefined || folders.has(k.turn)));
+      const kept = keptOf(current).filter((k) => {
+        const stays = k.turn !== turn && (folders === undefined || folders.has(k.turn));
+        if (!stays && k.turn !== turn) gone.push(k.turn);
+        return stays;
+      });
       kept.push({ turn, record });
       return { turns: kept } as unknown as JsonValue;
     });
+    const texts = messages.map((m) => ({ role: m.role, content: messageText(m), ...(m.name !== undefined ? { name: m.name } : {}) }));
+    await this.#store.set(scope, heldKey(scope, turn), { messages: texts, located } as unknown as JsonValue);
+    await Promise.all(gone.map((old) => this.#store.delete(scope, heldKey(scope, old))));
   }
+
+  /** A turn's prompt as kept (`turn` absent: the chat's newest kept turn), while the host keeps the turn's folder; undefined where none is. */
+  async held(scope: Scope, turn?: string): Promise<HeldPrompt | undefined> {
+    const kept = keptOf(await this.#store.get(scope, keyOf(scope)));
+    const at = turn ?? kept.at(-1)?.turn;
+    if (at === undefined || !(await this.#folderKept(scope, at))) return undefined;
+    const value = await this.#store.get(scope, heldKey(scope, at));
+    if (typeof value !== "object" || value === null || Array.isArray(value) || !Array.isArray(value["messages"])) return undefined;
+    return { turn: at, messages: value["messages"] as unknown as PromptMessage[], located: value["located"] as unknown as LocatedSlices };
+  }
+}
+
+/** A turn's prompt as kept: the turn, its messages as text, and where its slices were found then. */
+export interface HeldPrompt {
+  turn: string;
+  messages: PromptMessage[];
+  located: LocatedSlices;
+}
+
+/** The store key of one turn's prompt. */
+function heldKey(scope: Scope, turn: string): string {
+  return `${keyOf(scope)}/${textHash(turn)}`;
 }
 
 /** What a turn starts with for its prompt. */
@@ -108,7 +142,7 @@ export async function promptTurn(input: PromptTurnInput): Promise<{ prompt: Turn
   const corrected = prompt.corrected();
   await Promise.all([
     env.prompt.saveLocated(scope, located).catch(told("The host could not keep where the prompt's slices were found.")),
-    memory.keep(scope, recordOf(prompt)).catch(told("What this turn's prompt held could not be kept.")),
+    memory.keep(scope, recordOf(prompt), input.messages, located).catch(told("What this turn's prompt held could not be kept.")),
     corrected === undefined ? undefined : env.prompt.saveMap(scope, corrected, input.by).catch(told("The host could not keep the prompt map as the breakdown corrected it.")),
   ]);
   return { prompt, located };

@@ -135,20 +135,30 @@ export function learn(prompt: TurnPrompt, written: readonly WrittenSlice[], head
   }
   if (problems.length > 0) return { problems };
 
-  // In prompt order, each with its finder from the text as it stands: its neighbours are the slices beside it, or the chat history where a chat message is next to it. The player's slices this prompt does not have keep theirs.
-  const placed = [...made, ...kept.filter((k) => k.spans.length > 0)].sort((a, b) => order(a.spans[0], b.spans[0]));
+  // In prompt order, each with its finder from the text as it stands. The player's slices this prompt does not have keep theirs.
+  const slices = withFinders(prompt, [...made, ...kept.filter((k) => k.spans.length > 0)], head);
+  for (const k of kept) if (k.spans.length === 0) slices.push(k.slice);
+  return { map: { format: 1, preset, slices }, kept: kept.map((k) => k.slice.marker) };
+}
+
+/**
+ * Slices of this prompt, each with where it is, given their finders from the text as it stands, in
+ * prompt order: the signature of its text, its block's name, its role, and its neighbours, the
+ * slices beside it, or the chat history where a chat message is next to it. Learning and the
+ * owner's edits (edit.ts) make finders alike.
+ */
+export function withFinders(prompt: TurnPrompt, given: readonly { slice: PromptSlice; spans: Span[] }[], head: number): PromptSlice[] {
+  const placed = [...given].sort((a, b) => order(a.spans[0], b.spans[0]));
   const besideHistory = (span: Span | undefined, side: "after" | "before") => {
     if (span === undefined) return false;
     const piece = side === "after" ? prompt.cut.pieces.findLast((p) => isBefore(p.span, span)) : prompt.cut.pieces.find((p) => isBefore(span, p.span));
     return piece?.kind === "history";
   };
-  const slices: PromptSlice[] = placed.map(({ slice, spans }, at) => {
+  return placed.map(({ slice, spans }, at) => {
     const after = besideHistory(spans[0], "after") ? HISTORY_ANCHOR : placed[at - 1]?.slice.marker;
     const next = besideHistory(spans.at(-1), "before") ? HISTORY_ANCHOR : placed[at + 1]?.slice.marker;
     return { ...slice, find: { ...finderOf(prompt, spans, head), ...(after !== undefined ? { after } : {}), ...(next !== undefined ? { before: next } : {}) } };
   });
-  for (const k of kept) if (k.spans.length === 0) slices.push(k.slice);
-  return { map: { format: 1, preset, slices }, kept: kept.map((k) => k.slice.marker) };
 }
 
 function order(a: Span | undefined, b: Span | undefined): number {

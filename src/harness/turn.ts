@@ -21,7 +21,8 @@ import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, LoreEntry, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { CACHE, type CacheDeps, GUIDES_KEY, hostCached, keepCached, loreKey, PROMPT_MAP_KEY, readCached, standing } from "../sessions/cache";
 import { createFacts, loadGuidance, partFields } from "../files";
-import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
+import type { AgentDefinition, Facts, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
+import { factFields, factsNamed } from "../files/facts";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
@@ -183,6 +184,8 @@ export class Turn {
   #released: { text: string; form: ReleaseForm } | undefined;
   /** The judging model of the `question:` rules, once the turn's rules are loaded. */
   #judges: Judges | undefined;
+  /** The facts the turn's rules test, which the briefing names too. */
+  #facts: Facts | undefined;
   #intentWritten = false;
   /** The lead's last message that ended whole with any text outside every mark, that text, trimmed: what a run with no reply hands the host. */
   #lastText: string | undefined;
@@ -375,6 +378,7 @@ export class Turn {
 
     const session = this.#c.sessions.of(scope);
     const facts = createFacts(env.facts, (_scope, agent) => this.#ownFacts(agent));
+    this.#facts = facts;
     // The rules go on from what they remembered where this run starts in the session file, or at the turn it follows in the scene before, so a swipe starts where the attempt it replaces did, and a continue where its turn left off.
     const memory = await memoryAt(session, env, scope, file.log, from, req.parent);
     const rules = await guidance.ruleRun({
@@ -755,7 +759,11 @@ export class Turn {
       hostParts[part.name] = part.text;
       hostParts[part.name.replaceAll("-", "_")] = part.text;
     }
+    // The facts the briefing's template names, as a rule text names them (`{{previous.run.stopped}}` its count, `{{story.from.range}}` a field), read for the lead now; the briefing's own fields stand over them.
+    const named = this.#facts === undefined ? [] : factsNamed(layout.template.fields, new Set(this.#facts.defs().map((def) => def.name)));
+    const factValues = named.length > 0 && this.#facts !== undefined ? await this.#facts.read(this.scope, this.#lead, named) : {};
     const fields: Fields = {
+      ...factFields(factValues),
       ...hostParts,
       turn: { kind: req.kind, ...(req.speaker !== undefined ? { speaker: req.speaker } : {}) },
       ...(req.asked !== undefined && req.asked.length > 0 ? { asked: req.asked } : {}),

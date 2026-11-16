@@ -104,7 +104,7 @@ describe("a job an agent starts", () => {
     const [one, two] = [...new Set(toldJobs(s).map((job) => job.id))];
     expect(answerTo(s, "start-1")).toBe(`Job ${one} was started: keeper works on it in the background.`);
     expect(answerTo(s, "start-2")).toBe(`Job ${two} was started: keeper works on it in the background once a place is free.`);
-    expect(answerTo(s, "start-3")).toBe("No job was started: 2 jobs were started today on fixture-line, and the player allows 2.");
+    expect(answerTo(s, "start-3")).toBe("No job was started: 2 jobs were started in the last day on fixture-line, and the player allows 2.");
     expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "jobs", per: "day", max: 2, value: 2, connection: "fixture-line" }]);
     expect(toldJobs(s).map((job) => `${job.id === one ? "one" : "two"}:${job.state}`)).toEqual(["one:queued", "one:running", "two:queued"]);
 
@@ -187,7 +187,7 @@ describe("a job an agent starts", () => {
 
     await s.turn(request("t2", { lead: "lead", parent: "t1" }));
 
-    expect(answerTo(s, "start-2")).toBe("No job was started: what jobs sent and wrote today counts as 350 tokens, and the player allows 300.");
+    expect(answerTo(s, "start-2")).toBe("No job was started: what jobs sent and wrote in the last day counts as 350 tokens, and the player allows 300.");
     expect(new Set(toldJobs(s).map((job) => job.id)).size).toBe(1);
   });
 
@@ -208,8 +208,8 @@ describe("a job an agent starts", () => {
       return answered;
     };
 
-    expect(await counted("jobs:\n  tokensPerDay: 1000\n")).toBe("No job was started: what jobs sent and wrote today counts as 1050 tokens, and the player allows 1000.");
-    expect(await counted("jobs:\n  tokensPerDay: 1000\nlimits:\n  cachedWeight: 1\n")).toBe("No job was started: what jobs sent and wrote today counts as 9150 tokens, and the player allows 1000.");
+    expect(await counted("jobs:\n  tokensPerDay: 1000\n")).toBe("No job was started: what jobs sent and wrote in the last day counts as 1050 tokens, and the player allows 1000.");
+    expect(await counted("jobs:\n  tokensPerDay: 1000\nlimits:\n  cachedWeight: 1\n")).toBe("No job was started: what jobs sent and wrote in the last day counts as 9150 tokens, and the player allows 1000.");
   });
 
   test("the day's job tokens hold across a restart, cached ones at their weight: a harness made again over the same store starts no job past them", async () => {

@@ -4,9 +4,9 @@ format: lines
 ---
 started: Job {{job}} was started: {{agent}} works on it in the background{{#queued}} once a place is free{{/queued}}.
 missing: {{agent}} was not given {{ref}}: it could not be found.
-day_limit: No job was started: {{value}} jobs were started today{{#connection}} on {{connection}}{{/connection}}, and the player allows {{max}}.
+day_limit: No job was started: {{value}} jobs were started in the last day{{#connection}} on {{connection}}{{/connection}}, and the player allows {{max}}.
 run_limit: No job was started: this {{#job}}job{{/job}}{{^job}}turn{{/job}} has started {{value}} jobs, and the player allows {{max}}.
-day_tokens: No job was started: what jobs sent and wrote today counts as {{value}} tokens, and the player allows {{max}}.
+day_tokens: No job was started: what jobs sent and wrote in the last day counts as {{value}} tokens, and the player allows {{max}}.
 off: No job was started: the player has switched jobs off.
 no_task: No job was started: it needs an agent and a task, or the job to start again.
 no_job: There is no job {{id}} in this chat.

@@ -2,7 +2,7 @@
 // answer in: the lines of the prompt part `base-tools`, read through the turn's guidance when a tool
 // is called. Each tool's description and its arguments' are its own file in `.tools/`, read by the
 // harness with its other tools' files (`BASE_TOOLS`).
-import type { Environment, JsonValue, WebSearchPort } from "../../contract";
+import type { Environment, JsonValue, LoreEntry, ToolCtx, WebSearchPort } from "../../contract";
 import type { Guidance } from "../../files/api";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, type ToolText, type Words } from "../kit";
@@ -33,6 +33,8 @@ export interface BaseToolsDeps {
    * agent names is held to it before the host is asked, and what comes back past it is not kept.
    */
   perCall: number;
+  /** Each lore entry an agent read in full, kept in the session's cache (§11, R-111); the turn keeps only what an agent that plays no character read. */
+  keepLore?(ctx: ToolCtx, entry: LoreEntry): void;
 }
 
 /** A lines part's lines as the guidance has them; a line the file does not have is no words. */

@@ -35,6 +35,8 @@ export function loreRead(deps: BaseToolsDeps): OwnTool {
       const [words, entries] = await Promise.all([wordsOf(deps.guidance), ids.length === 0 ? [] : deps.env.lore.read(ctx.scope, ids, ctx.agent)]);
       const left = unread.length > 0 ? words("lore_unread", { most: deps.perCall, ids: unread }) : undefined;
       if (entries.length === 0) return ids.length === 0 ? answer(words("none_found"), true) : linesAnswer([...ids.map((id) => words("no_entry", { id })), left], "\n", true);
+      // Each entry read in full is kept in the session's cache, where the turn keeps it (§11, R-111).
+      for (const entry of entries) deps.keepLore?.(ctx, entry);
       const byId = new Map(entries.map((entry) => [entry.id, entry]));
       // In the order asked: an entry the reader may not know is left out by the host, and said here as one it does not have.
       return linesAnswer(

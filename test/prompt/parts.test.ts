@@ -246,3 +246,19 @@ test("each family of RPH's tools that has no tool of its own name has a guide, a
   expect(await lines()).toBeDefined();
   expect((await lines()).line("invalid", { tool: "world_query", misfits: [{ argument: "kind", missing: false, choices: "places, quests" }] })).toBe("world_query was not run: the arguments you sent do not fit what it takes. kind does not fit; it takes one of places, quests.");
 });
+
+test("carried lays out an agent's own older work in its run: for a summary call, and as the summary that stands in its place; the turns it carries between turns are laid out as they were", async () => {
+  const part = await shippedParts().part("carried");
+  if (part?.format !== "template") throw new Error("carried is not a template");
+  const work = [{ items: [{ said: "I will look." }, { call: { tool: "roll", args: "{}", result: "A six." } }, { heard: "The player says: wait." }] }];
+  const compacting = part.render({ run: true, compacting: true, summary: "Earlier, in short.", turns: work }).text;
+  expect(compacting.startsWith("# This agent's earlier work in this run, to be summarized\n")).toBe(true);
+  for (const said of ["## The summary so far, which these turns follow", "Earlier, in short.", "The agent wrote:\n\nI will look.", "The agent called `roll` with {}.", "The agent was told:\n\nThe player says: wait."]) expect(compacting).toContain(said);
+  expect(compacting).not.toMatch(/## Turn|The lead called|You /);
+  const held = part.render({ run: true, summary: "In short.", turns: [{ items: [{ said: "Then I wrote." }, { heard: "A file changed." }] }] }).text;
+  expect(held).toBe("# Your earlier work in this run, in short\n\nIn short.\n\nYou wrote:\n\nThen I wrote.\n\nYou were told:\n\nA file changed.\n");
+  const turns = part.render({ continuing: true, summary: "Before.", turns: [{ n: 1, items: [{ intent: "One." }, { call: { tool: "roll", args: "{}", result: "A two." } }] }] }).text;
+  expect(turns).toBe("# Carried from earlier in this scene\n\nWhat you did in this scene's earlier turns, oldest first. This is your own work, already done, and what it read and found still stands. It is not part of the chat.\n\n## Before that, in short\n\nBefore.\n\n## Turn 1\n\nYour intent record:\n\nOne.\n\nYou called `roll` with {}.\nIt answered:\n\nA two.\n");
+  const lead = part.render({ compacting: true, turns: [{ n: 1, items: [{ call: { tool: "roll", args: "{}" } }] }] }).text;
+  expect(lead).toContain("The lead called `roll`");
+});

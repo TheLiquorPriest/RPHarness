@@ -1,7 +1,9 @@
 // One job's run (§13.5): a run of its own, with its own trace and the user's limits on a job's run.
 // Its first agent is made from a definition and a brief as `delegate` makes a sub-agent, and holds
 // what its definition lists of RPH's own tools and the host's, with the gate, the rules and the
-// sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools.
+// sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools. A
+// job started from a turn holds that turn's prompt (R-16): its prompt tools and `prompt:` names read
+// the prompt RPH kept for that turn, so a mapper run as a job maps it.
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
 import type { AgentRef, Environment, JobLimits, JobWrite, JsonValue, LimitHit, ModelsApi, Scope, ToolCtx, Usage } from "../contract";
@@ -19,9 +21,10 @@ import { BASE_TOOLS, baseTools } from "../tools/base";
 import { SEARCH_TOOLS, searchTools } from "../tools/search";
 import { JOB_START, jobStart, type JobsWork } from "./tool";
 import { JOB_SEARCHED, jobTools } from "./tools";
+import { keptPrompt, PROMPT_TOOLS, promptMapWrite, promptSlice, promptTool, type TurnPrompt } from "../prompt";
 
 /** RPH's own tools a job's agents may hold, each described by its file in `.tools/`. */
-const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED] as const;
+const JOB_TOOLS = ["file_read", "file_find", "file_write", "todo", ...AGENT_TOOLS, ...BASE_TOOLS, ...SEARCH_TOOLS, JOB_START, ...JOB_SEARCHED, ...PROMPT_TOOLS] as const;
 
 /** What every job's run shares: the harness's. */
 export interface JobCore {
@@ -164,6 +167,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     // A job has no briefing to hold a rule's text for.
     late: (agent, judged) => env.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent.id, rule: judged.fired.firing.rule }),
   });
+  // The prompt of the turn the job came from, read once when first asked for; a job of no turn has none.
+  let turnPrompt: Promise<TurnPrompt | undefined> | undefined;
+  const prompt = (): Promise<TurnPrompt | undefined> => (turnPrompt ??= scope.turn === undefined ? Promise.resolve(undefined) : keptPrompt(env, scope, scope.turn).then((kept) => kept?.prompt));
   const team = new Team({
     env,
     trace,
@@ -193,6 +199,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     // A job's agents are compacted at any call that would not fit, as a turn's are (§11).
     compaction: () => settings.compaction,
     job: ask.id,
+    slice: promptSlice(prompt, guidance),
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {
@@ -214,6 +221,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     agentDrop(team, own.get("agent_drop")),
     jobStart(core.jobs, own.get(JOB_START), settings.jobs.perRun),
     ...jobTools(core.jobs, own, settings.perCall),
+    promptTool({ prompt, guidance, texts: own, env }),
+    promptMapWrite({ prompt, guidance, texts: own, env, signatureHead: settings.signatureHead }),
     ...baseTools({ env, guidance, texts: own, ids: () => core.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
     ...searchTools({
       reach: {

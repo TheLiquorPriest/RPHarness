@@ -9,6 +9,9 @@
   "engines": {
     "bun": ">=1.4"
   },
+  "bin": {
+    "rph-folder": "./src/hosts/folder/cli.ts"
+  },
   "exports": {
     ".": "./src/index.ts",
     "./contract": "./src/contract/index.ts",

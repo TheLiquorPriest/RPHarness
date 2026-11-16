@@ -25,7 +25,7 @@ after-tool:
   - name: log-calls
     command: sh /path/to/log-call.sh
 
-# When the reply is about to go to the chat, and once it has gone. Given `reply`: `{form, text, by}`, the reply as it was written. Before it goes, nothing shows until the hook has seen it whole, and a block keeps it back: the agent gets the reason and writes the reply again. After it, `context` goes to the lead's run.
+# When the reply is about to go to the chat, and once it has gone. Before it goes, a hook is given `reply`, `{form, text, by}`, the reply as it was written; nothing shows until the hook has seen it whole, and a block keeps it back: the agent gets the reason and writes the reply again. After it has gone, a hook is given `release`, `{form, text, by}` in the same shape, and `context` goes to the lead's run.
 before-release:
   - name: check-the-reply
     command: sh /path/to/check-reply.sh

@@ -218,7 +218,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     job: ask.id,
     slice: promptSlice(prompt, guidance),
     session: (agent, kind, by) => runs.session(agent, kind, by),
-    compacted: (agent, summary) => runs.compacted(agent, summary),
+    compacted: (agent, summary, facts) => runs.compacted(agent, summary, facts),
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {

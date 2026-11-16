@@ -29,7 +29,7 @@
 // reminder) carries no `block`. Nothing of the request itself changes for it, and the trace not at all.
 import { createHash } from "node:crypto";
 import { contentText, getSystemMessageText, type Message } from "@earendil-works/pi-ai";
-import type { AgentRef, FilesPort, KeptMessage, RebuiltRequest, Scope } from "../contract";
+import type { AgentRef, FilesPort, KeptMessage, RebuiltMessage, RebuiltRequest, Scope } from "../contract";
 
 /** The folder of the turn's folder the transcripts and the requests are kept in (§5.3). */
 export const TRANSCRIPTS = "transcripts/";
@@ -108,7 +108,7 @@ function isKeptFile(value: unknown): value is KeptFile {
   return typeof value === "object" && value !== null && "sent" in value && typeof value.sent === "string" && "messages" in value && Array.isArray(value.messages) && "tools" in value && Array.isArray(value.tools);
 }
 
-/** A kept request rebuilt from the turn's folder, exactly as it was sent; undefined when the file is not there or not a kept request. */
+/** A kept request rebuilt from the turn's folder, exactly as it was sent, each message pointing into a file with that file's path in the agents' view; undefined when the file is not there or not a kept request. */
 export async function rebuildRequest(files: FilesPort, scope: Scope, path: string): Promise<RebuiltRequest | undefined> {
   const read = await files.read(scope, path);
   if (read.status !== "read") return undefined;
@@ -129,10 +129,10 @@ export async function rebuildRequest(files: FilesPort, scope: Scope, path: strin
     }
     return texts.get(file);
   };
-  const messages: KeptMessage[] = [];
+  const messages: RebuiltMessage[] = [];
   for (const line of kept.messages) {
     const text = "text" in line ? line.text : (await textOf(line.from.file))?.slice(line.from.at, line.from.at + line.from.length);
-    messages.push({ role: line.role, text: text ?? "", ...(line.block !== undefined ? { block: line.block } : {}) });
+    messages.push({ role: line.role, text: text ?? "", ...(line.block !== undefined ? { block: line.block } : {}), ...("from" in line ? { file: `${turn}${line.from.file}` } : {}) });
   }
   return { messages, tools: kept.tools, same: hashOf(messages) === kept.sent };
 }

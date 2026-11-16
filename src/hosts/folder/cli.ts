@@ -13,7 +13,8 @@
 //   waiting                  everything that runs a command or calls out, and where each stands
 //   allow <name>, deny <name>  the only way a command, an address, a server, a hook or a moved connection is switched on or off
 //   answer [<call> yes|no [reason]]  the questions a lane set to Confirm waits on, or an answer to one
-//   connections             the user's connections; connect <name> --provider <p> [--model m] [--base-url u] [--api a] [--auth key|none] [--default], the key on stdin
+//   connections             the user's connections, each with its newest tag check; connect <name> --provider <p> [--model m] [--base-url u] [--api a] [--auth key|none] [--default], the key on stdin
+//   tagcheck <connection>   whether a connection keeps the reply's tags: a job that plays `.prompts/tag-check.md`'s turns on it and sets its form
 //   secret <name>            a secret his tools and servers send, its value on stdin (nothing: taken away)
 //
 // The chat is `--chat`, or the one chat under `host/chats/`. The user is `--user`, or the one its
@@ -39,7 +40,7 @@ import { Site } from "./site";
 import { setSwitch } from "./switches";
 
 const USAGE = `rph-folder <dir> [--manifest <file>] [--chat <id>] [--user <name>] [--lead <definition>] [--carry continuing|records|nothing] <command>
-commands: say "<message>" | swipe | jobs [list|start|hold|letgo|again|resume|cancel|carry|answer] | sessions [list|close|reopen|compact] | waiting | allow <name> | deny <name> | answer [<call> yes|no [reason]] | connections | connect <name> --provider <p> | secret <name>`;
+commands: say "<message>" | swipe | jobs [list|start|hold|letgo|again|resume|cancel|carry|answer] | sessions [list|close|reopen|compact] | waiting | allow <name> | deny <name> | answer [<call> yes|no [reason]] | connections | connect <name> --provider <p> | tagcheck <connection> | secret <name>`;
 
 /** How often the jobs left running are looked at while the command waits for them. */
 const JOB_LOOK_MS = 500;
@@ -510,8 +511,17 @@ async function run(argv: readonly string[]): Promise<number> {
         await answer(p, args);
         break;
       case "connections": {
-        const list = await p.harness.models.list(user);
-        for (const c of list.connections) out(`${c.id}  ${c.name}  ${c.provider}${c.model !== undefined ? `  ${c.model}` : ""}${c.default ? "  (default)" : ""}${c.key === null ? "" : c.key.waiting ? "  (key waits: allow it)" : c.key.set ? "" : "  (no key)"}`);
+        const [list, checks] = await Promise.all([p.harness.models.list(user), p.harness.jobs.tagChecks(user)]);
+        for (const c of list.connections) {
+          const check = checks.find((t) => t.connection === c.id);
+          out(`${c.id}  ${c.name}  ${c.provider}${c.model !== undefined ? `  ${c.model}` : ""}${c.default ? "  (default)" : ""}${c.key === null ? "" : c.key.waiting ? "  (key waits: allow it)" : c.key.set ? "" : "  (no key)"}${check !== undefined ? `  tags kept ${check.kept}/${check.tried} on ${check.model} (${check.needed} needed): ${check.form}${check.set ? "" : ", not written to the config"}` : ""}`);
+        }
+        break;
+      }
+      case "tagcheck": {
+        const connection = args[0];
+        if (connection === undefined) throw new Usage("tagcheck <connection>");
+        said(await p.harness.jobs.tagCheck(user, connection), connection);
         break;
       }
       case "connect": {

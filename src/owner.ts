@@ -20,7 +20,7 @@ import type { DefinitionsApi, JobsApi, LiveApi, ModelsApi, RulesApi, SessionsApi
 const MEMBERS = {
   live: ["pause", "letGo", "say"],
   definitions: ["apply"],
-  jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "carryOn", "resume", "answer"],
+  jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "carryOn", "resume", "answer", "tagCheck"],
   sessions: ["compact", "reopen", "uncompact"],
   models: ["save", "setToolSecret"],
   rules: ["switch"],

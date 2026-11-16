@@ -58,6 +58,32 @@ export interface JobView {
   asks?: { at: number; tokens: number };
   /** What the owner gave it beyond its limits by carrying it on, each added up over every time he did: each adds to the limit it names, its run counting on from what it had spent (`time`: seconds of the run that goes on). */
   more?: JobLimits;
+  /** For a tag check (C-20): the connection it measures, by id. Its `agent` is `tag-check`, the part whose turns it plays. */
+  check?: { connection: string };
+}
+
+/**
+ * A tag check's record for one of his connections (§10.7 l.1285, §14 l.1563; C-20): the simple turns
+ * it played on the connection under the shipped reply contract, how many came back with the reply and
+ * the intent record each in its tags, against the count the tag form needs (`reply.check.kept`), and
+ * the form that set for the connection (`reply.forms.<connection>` in his global config, his to
+ * change after; `set` false where the file could not be written). The newest check of each stands.
+ */
+export interface TagCheck {
+  /** The connection's id, and its name when the check ran. */
+  connection: string;
+  name: string;
+  /** The model that answered. */
+  model: string;
+  tried: number;
+  kept: number;
+  needed: number;
+  form: "tags" | "two-step";
+  set: boolean;
+  /** When it ended. */
+  at: number;
+  /** The job that ran it. */
+  job: string;
 }
 
 /** A write a job made: the tool, the lane it writes to where it names one, and the first line of the tool's own answer. */
@@ -136,7 +162,11 @@ export type JobRefusal =
   /** The job did not stop at one of its own limits, so more of one would not let it go on. */
   | { refused: "not-at-limit"; id: string }
   /** His job-start hook kept the job from starting (§5.4 "Hooks"): the hook, and its reason in its own words. */
-  | { refused: "hook"; hook: string; reason: string };
+  | { refused: "hook"; hook: string; reason: string }
+  /** A tag check named none of his connections. */
+  | { refused: "connection"; connection: string }
+  /** A tag check's part is missing, switched off or not as it needs: `tag-check` holds no turn, or `reply-contract` names no tags. */
+  | { refused: "part"; part: "tag-check" | "reply-contract" };
 
 /**
  * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found
@@ -179,6 +209,15 @@ export interface JobsApi {
   resume(user: string, id: string): Promise<JobView | JobRefusal>;
   /** The owner's answer to a job that asks: it goes on in its own session, or ends with what it has. Owner's presses only (C-24). */
   answer(user: string, id: string, answer: JobAnswer): Promise<JobView | JobRefusal>;
+  /**
+   * Starts a tag check of one of his connections, by id or name (C-20): a job that plays the turns of
+   * `.prompts/tag-check.md` on it, each a fresh simple turn under the shipped reply contract in its tag
+   * form, counts those whose reply and intent record came back in their tags, keeps the record, and
+   * sets the connection's form from it. Owner's presses only (C-24).
+   */
+  tagCheck(user: string, connection: string): Promise<JobView | JobRefusal>;
+  /** The newest tag check of each of his connections that had one, for the Connections page. */
+  tagChecks(user: string): Promise<TagCheck[]>;
 }
 
 // ---------------------------------------------------------------- sessions

@@ -1,6 +1,8 @@
 export const REPLY_WORDS = {
   "reply.form": { name: "Reply form", about: "How a connection marks its reply: with tags, or in two steps for a connection that does not keep them." },
   "reply.forms.<connection>": { name: "Reply form of a connection", about: "The reply form of this connection, in place of the one every connection takes." },
+  "reply.check.turns": { name: "Turns a tag check plays", about: "Simple turns a tag check plays on a connection to see whether it keeps the reply's tags." },
+  "reply.check.kept": { name: "Turns that must keep the tags", about: "Turns of a tag check that must come back with the reply and the intent record in their tags for the connection to be given the tag form; fewer give it the two-step form." },
   "reply.streamAnyway": { name: "Two-step connections that stream", about: "Two-step connections whose replies are shown as they are written, not when their message ends." },
   "reply.heldSentences": { name: "Sentences held back", about: "Sentences the reply is held back by while a rule that interrupts covers it." },
   "reply.tailSentences": { name: "Sentences shown again", about: "Sentences of what was already shown that go with the line an agent goes on under after a rule stopped it." },

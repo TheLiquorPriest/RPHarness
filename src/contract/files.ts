@@ -190,9 +190,9 @@ export type FileOp =
 export type Writer = AgentRef | "harness";
 
 /**
- * The owner's own press, made through RPH's API on his word (`rules.switch`, C-10): it writes the
- * config file (`Layer.config`) of the chat's level or of the global level, and nothing else. It is
- * no agent's write: nothing records it against a turn.
+ * The owner's own press, made through RPH's API on his word (`rules.switch`, C-10; a tag check's
+ * form, C-20): it writes the config file (`Layer.config`) of the global level, or, with a chat in
+ * view, of the chat's level, and nothing else. It is no agent's write: nothing records it against a turn.
  */
 export type OwnerWrite = "owner";
 
@@ -273,7 +273,7 @@ export interface FilesPort {
    * Changes one file. A place this writer may not write is `Refused`, and nothing changes (§5.1).
    * Every write of an agent is recorded against `scope.turn` where there is one (§5.1: "notes
    * follow the turn"), so a swipe or a delete puts it back. A scope that names only the user writes
-   * nowhere: every write so named is refused, `writable` empty.
+   * nowhere but the global config, by the owner's own press: every other write so named is refused, `writable` empty.
    */
   write(scope: Scope | UserScope, path: string, op: FileOp, by: Writer | OwnerWrite): Promise<Written | Refused | Unapplied>;
 }

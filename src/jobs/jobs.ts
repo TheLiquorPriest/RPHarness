@@ -19,7 +19,7 @@
 // not ended, once its tokens reach it: its agents wait at their next call, in the session they have,
 // until he answers.
 import type { DelegateCall } from "../agents/tools";
-import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, ToolCtx, Usage, UserScope } from "../contract";
+import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, TagCheck, ToolCtx, Usage, UserScope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Fields } from "../files/api";
 import { lines } from "../harness/means";
@@ -29,6 +29,7 @@ import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
 import { joined } from "../agents/attachments";
 import { type JobAsk, type JobCore, type JobHooked, type PreparedJob, prepareJob } from "./run";
+import { prepareTagCheck, TAG_CHECK, tagChecks } from "./tagcheck";
 import type { JobCall, JobsWork, RunJobs } from "./tool";
 
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
@@ -329,6 +330,8 @@ export class Jobs implements JobsApi, JobsWork {
     const old = await this.get(user, id);
     if (old === undefined) return { refused: "no-job", id };
     if (!AGAIN.includes(old.state)) return { refused: "state", id, state: old.state, applies: [...AGAIN] };
+    // A tag check is started again as a check of the same connection, all its turns played afresh.
+    if (old.check !== undefined) return this.tagCheck(user, old.check.connection);
     const begun = await this.#begin({ scope: this.#ownScope(user, old.scope.chat), call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
     return this.#started(begun, old.agent);
   }
@@ -365,20 +368,29 @@ export class Jobs implements JobsApi, JobsWork {
     const core = this.#core;
     const { scope } = view;
     if (this.#switchesOf(scope.user).off) return { refused: "off" };
-    const part = lines(await loadGuidance(core.env.files, scope).part(LINES_PART));
-    const said = part?.line(line, fields);
-    const prepared = await prepareJob(
-      { ...core, jobs: this },
-      {
-        id: view.id,
-        scope,
-        call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] },
-        ...(view.startedBy !== "user" ? { by: view.startedBy } : {}),
-        spend: await core.usage.spend(scope.user),
-        ...(view.limits !== undefined ? { limits: view.limits } : {}),
-        goOn: { used: view.usage, ...(view.more !== undefined ? { more: view.more } : {}), ...(said !== undefined ? { line: said } : {}) },
-      },
-    );
+    const spend = await core.usage.spend(scope.user);
+    // A tag check goes on as itself, under its id, its turns played afresh: a measure has no session to go on from.
+    let prepared: PreparedJob | LoopToolResult | JobHooked;
+    if (view.check !== undefined) {
+      const check = await prepareTagCheck({ ...core, jobs: this }, { id: view.id, scope, spend }, view.check.connection);
+      if (!("run" in check)) return check;
+      prepared = check;
+    } else {
+      const part = lines(await loadGuidance(core.env.files, scope).part(LINES_PART));
+      const said = part?.line(line, fields);
+      prepared = await prepareJob(
+        { ...core, jobs: this },
+        {
+          id: view.id,
+          scope,
+          call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] },
+          ...(view.startedBy !== "user" ? { by: view.startedBy } : {}),
+          spend,
+          ...(view.limits !== undefined ? { limits: view.limits } : {}),
+          goOn: { used: view.usage, ...(view.more !== undefined ? { more: view.more } : {}), ...(said !== undefined ? { line: said } : {}) },
+        },
+      );
+    }
     if ("blocked" in prepared) return { refused: "hook", hook: prepared.blocked.hook, reason: prepared.blocked.reason };
     if (!("run" in prepared)) return { refused: "agent", agent: view.agent };
     const hit = prepared.day.reached(prepared.agent)[0];
@@ -403,6 +415,36 @@ export class Jobs implements JobsApi, JobsWork {
     this.#core.hub.holds.drop(id, "asking");
     this.#changed(live);
     return { ...live.view };
+  }
+
+  /**
+   * The owner starts a tag check of one of his connections (C-20): a job of no chat that plays the
+   * turns of `.prompts/tag-check.md` on it, held to his switches, counted in his day and waiting for a
+   * place as any job he starts, which keeps its record and sets the connection's form at its end.
+   */
+  async tagCheck(user: string, connection: string): Promise<JobView | JobRefusal> {
+    const core = this.#core;
+    await this.#recovery(user);
+    if (this.#switchesOf(user).off) return { refused: "off" };
+    const id = core.ids();
+    const scope = this.#ownScope(user, undefined);
+    const prepared = await prepareTagCheck({ ...core, jobs: this }, { id, scope, spend: await core.usage.spend(user) }, connection);
+    if ("refused" in prepared) return prepared;
+    const own = jobCountsFor(prepared.settings, prepared.connection);
+    const hit = prepared.day.reached(prepared.agent)[0] ?? (await this.#count(user, prepared.settings, own));
+    if (hit !== undefined) {
+      prepared.trace.event(prepared.agent, undefined, { kind: "limit", hit });
+      return this.#started({ hit }, TAG_CHECK);
+    }
+    await this.#prune(user, prepared.settings);
+    // Its brief is the connection it measures, by name, as the Jobs page lists it.
+    const view: JobView = { id, agent: TAG_CHECK, brief: prepared.connection.name ?? connection, state: "queued", scope, startedBy: "user", started: core.env.clock.now(), usage: emptyUsage(), check: { connection: prepared.connection.id ?? connection } };
+    return { ...this.#enqueue(view, prepared, own).view };
+  }
+
+  /** The newest tag check of each of the user's connections that had one. */
+  tagChecks(user: string): Promise<TagCheck[]> {
+    return tagChecks(this.#core, user);
   }
 
   /** The user's job of this process in one of the states a control applies to, or why there is none. */
@@ -705,7 +747,11 @@ export class Jobs implements JobsApi, JobsWork {
   async #again(view: JobView): Promise<boolean> {
     const { log } = this.#core.env;
     try {
-      const prepared = await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spend: await this.#core.usage.spend(view.scope.user), ...(view.limits !== undefined ? { limits: view.limits } : {}) });
+      const spend = await this.#core.usage.spend(view.scope.user);
+      const prepared =
+        view.check !== undefined
+          ? await prepareTagCheck({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, spend }, view.check.connection)
+          : await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spend, ...(view.limits !== undefined ? { limits: view.limits } : {}) });
       if (!("run" in prepared)) {
         log.warn("A job that was waiting could not be queued again.", { job: view.id, agent: view.agent });
         return false;

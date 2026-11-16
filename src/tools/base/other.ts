@@ -80,8 +80,8 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
       const keys = textsOf(given["keys"]).map((key) => key.trim()).filter((key) => key !== "");
       const draft = "newLore" in handed ? { ...(book !== undefined ? { book } : {}), ...(title !== undefined ? { title } : {}), ...(keys.length > 0 ? { keys } : {}) } : {};
       const was = "lore" in handed ? text(given, "was") : undefined;
-      await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "", ...(Object.keys(draft).length > 0 ? { draft } : {}), ...(was !== undefined && was !== "" ? { was } : {}) });
-      return answer(words("suggested"));
+      const filed = await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "", ...(Object.keys(draft).length > 0 ? { draft } : {}), ...(was !== undefined && was !== "" ? { was } : {}) });
+      return filed.kept ? answer(words("suggested")) : answer(words("suggest_full", { most: filed.openMost }), true);
     },
   };
 }

@@ -19,7 +19,7 @@ function host(): { extra: Extra; handed: { agent: AgentRef; suggestion: Suggesti
     ...b.host.events,
     suggestion: async (scope, agent, suggestion) => {
       handed.push({ agent, suggestion });
-      await b.host.events.suggestion(scope, agent, suggestion);
+      return b.host.events.suggestion(scope, agent, suggestion);
     },
   };
   return { extra: { env: { ...b.host, events } }, handed };

@@ -144,7 +144,10 @@ export interface Suggestion {
   was?: string;
 }
 
-/** RPH tells the host. None of these returns a decision. */
+/** What the host did with a suggestion: kept as open, under its id; or not kept, its chat's open suggestions being at their most. */
+export type SuggestionFiled = { kept: true; id: string } | { kept: false; openMost: number };
+
+/** RPH tells the host. None of these returns a decision; a suggestion is answered with whether it was kept. */
 export interface TurnEvents {
   /** The lead's intent record for the turn (§10.3): kept and shown, never read by code. */
   intent(scope: Scope, text: string): Promise<void>;
@@ -162,8 +165,8 @@ export interface TurnEvents {
   dropStaged(scope: Scope, agent: AgentRef): Promise<void>;
   /** A rule fired: which, on what, and what the agent did next. Told once the agent's next step is known (or its run ended). */
   ruleFired(scope: Scope, firing: RuleFiring): Promise<void>;
-  /** An agent's suggestion, for the user to accept, edit or dismiss. */
-  suggestion(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<void>;
+  /** An agent's suggestion, for the user to accept, edit or dismiss; answered with whether it was kept, which the agent is told. */
+  suggestion(scope: Scope, agent: AgentRef, suggestion: Suggestion): Promise<SuggestionFiled>;
   /** The reply was released (§10.7): once per generation. */
   released(scope: Scope, release: Release): Promise<void>;
   /** The lead's run is over. */

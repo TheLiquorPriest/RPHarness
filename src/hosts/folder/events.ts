@@ -4,6 +4,7 @@
 // that agent wrote this turn, as it was before the agent's first write, unless someone changed the
 // file after the agent's last write; such a file is kept, and the record says so.
 
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { Clock, Scope, TurnEvents } from "../../contract/index";
@@ -76,7 +77,12 @@ export function folderEvents(site: Site, clock: Clock, fileSerial: Serial): Turn
 
     ruleFired: (scope, firing) => keep(scope, "ruleFired", { firing }),
 
-    suggestion: (scope, agent, suggestion) => keep(scope, "suggestion", { agent, suggestion }),
+    // A folder keeps every suggestion it is handed: it has no list of open ones to fill.
+    suggestion: async (scope, agent, suggestion) => {
+      const id = randomUUID();
+      await keep(scope, "suggestion", { id, agent, suggestion });
+      return { kept: true, id };
+    },
 
     released: (scope, release) => keep(scope, "released", { release }),
 

@@ -184,9 +184,17 @@ export type FileOp =
  * Who writes. An agent writes only where `Places.writable` says. `"harness"` is RPH itself, writing
  * its own records (the session file and cache, the turn's transcripts, the released reply,
  * §5.3 and §11): it may also write in the session's folder, and nowhere else an agent may not.
- * Nobody writes a `yours` file or a mounted level through this port: those are the user's (§5.1).
+ * Nobody writes a `yours` file or a mounted level through this port: those are the user's (§5.1),
+ * save the owner's own press below.
  */
 export type Writer = AgentRef | "harness";
+
+/**
+ * The owner's own press, made through RPH's API on his word (`rules.switch`, C-10): it writes the
+ * config file (`Layer.config`) of the chat's level or of the global level, and nothing else. It is
+ * no agent's write: nothing records it against a turn.
+ */
+export type OwnerWrite = "owner";
 
 /** A change made. */
 export interface Written {
@@ -267,5 +275,5 @@ export interface FilesPort {
    * follow the turn"), so a swipe or a delete puts it back. A scope that names only the user writes
    * nowhere: every write so named is refused, `writable` empty.
    */
-  write(scope: Scope | UserScope, path: string, op: FileOp, by: Writer): Promise<Written | Refused | Unapplied>;
+  write(scope: Scope | UserScope, path: string, op: FileOp, by: Writer | OwnerWrite): Promise<Written | Refused | Unapplied>;
 }

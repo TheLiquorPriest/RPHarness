@@ -63,6 +63,7 @@
 import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 import type { McpRead } from "./mcp";
+import type { Rule } from "./rules";
 
 // ---------------------------------------------------------------- where things come from
 
@@ -569,6 +570,8 @@ export interface Guidance {
 
   /** Every rule file, examples and broken ones included, as the Rules page lists them; a rule's command with where it stands as `switches` say (none: off). */
   rules(switches?: SwitchesPort): Promise<RuleView[]>;
+  /** A rule as its file reads now, in force or not, an example's too (`rules.test`); undefined when no rule of the name reads whole. */
+  rule(name: string): Promise<Rule | undefined>;
   /** The triggered rules in force now, for one run. */
   ruleRun(options: RuleRunOptions): Promise<RuleRun>;
 }

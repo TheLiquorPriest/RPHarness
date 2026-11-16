@@ -14,7 +14,7 @@
 // `<harness member>.<name> <field>:<value>`: a call of that member whose last argument gives that
 // field that value (`sessions.close by:user`, his own close, S-3; the host's own close and a turn's
 // stay the host's turn lane's to call).
-import type { DefinitionsApi, JobsApi, LiveApi, ModelsApi, SessionsApi } from "./contract";
+import type { DefinitionsApi, JobsApi, LiveApi, ModelsApi, RulesApi, SessionsApi } from "./contract";
 
 /** The owner-only members, by the member of the harness they are on. */
 const MEMBERS = {
@@ -23,7 +23,8 @@ const MEMBERS = {
   jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "answer"],
   sessions: ["compact", "reopen", "uncompact"],
   models: ["save", "setToolSecret"],
-} as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[]; models: readonly (keyof ModelsApi)[] };
+  rules: ["switch"],
+} as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[]; models: readonly (keyof ModelsApi)[]; rules: readonly (keyof RulesApi)[] };
 
 /** The calls that are the owner's in one form only: the member, and the field and value of its last argument that make a call of it his. */
 const FORMS = [{ api: "sessions", name: "close", field: "by", value: "user" }] as const satisfies readonly { api: "sessions"; name: keyof SessionsApi; field: keyof NonNullable<Parameters<SessionsApi["close"]>[1]>; value: NonNullable<Parameters<SessionsApi["close"]>[1]>["by"] }[];

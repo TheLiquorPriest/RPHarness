@@ -54,7 +54,9 @@ export interface FactsPort {
   defs(): FactDef[];
   /**
    * The facts' values for this scope, by name: those named in `names`, or all of them. Every name
-   * is one `defs()` declares.
+   * is one `defs()` declares. A scope whose `turn` is a past turn reads them as they stood at that
+   * turn (C-10), so `rules.test` judges a past turn by its own facts; a fact the host cannot give as
+   * of then is left out, and the rule that tests it does not fire.
    */
   read(scope: Scope, names?: string[]): Promise<Record<string, FactValue>>;
 }

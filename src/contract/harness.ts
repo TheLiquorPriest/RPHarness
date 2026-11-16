@@ -308,8 +308,22 @@ export interface RuleTest {
 export interface RulesApi {
   /** Every rule of the chat's stack, in force or not. */
   list(scope: Scope): Promise<RuleView[]>;
-  /** Runs one rule against a past turn's record (§5.4: "the Rules page can run any rule against a past turn"). Absent until the harness has it; a host offers the page's button only when it is there. */
-  test?(scope: Scope, rule: string, turn: string): Promise<RuleTest>;
+  /**
+   * Switches a rule on or off at the chat's or the global level (C-10, Appendix A): the `off:` list of
+   * that level's config file, written through the file port on the owner's word (his own press: it
+   * is on `OWNER_ONLY`). A rule switched off at a farther level stays off whatever a nearer one says.
+   * The rule as it then stands; undefined when no rule has the name.
+   */
+  switch(scope: Scope, rule: string, on: boolean, level: "chat" | "global"): Promise<RuleView | undefined>;
+  /**
+   * Runs one rule, as it reads now, against a past turn's record (§5.4: "the Rules page can run any
+   * rule against a past turn"), and writes nothing (C-10): a pattern against each message, thinking,
+   * tool call and result of the agents it names in that turn and against its reply; a moment's fact
+   * as of that turn; an interval by the turn's count in its session; a question put to the judging
+   * model about each recorded message, shown in the live view. Whether it would have fired, and each
+   * firing with what matched. A rule of no such name rejects in words.
+   */
+  test(scope: Scope, rule: string, turn: string): Promise<RuleTest>;
   /** Every fact a rule can name (§5.4 "Facts"), RPH's own and the host's, each with what it counts, its groups and its fields; a host fact named like one of RPH's is marked, and told to the log. */
   facts(scope: Scope): Promise<ListedFact[]>;
 }

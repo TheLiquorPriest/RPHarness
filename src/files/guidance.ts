@@ -616,6 +616,11 @@ class TreeGuidance implements Guidance {
     return out;
   }
 
+  async rule(name: string): Promise<Rule | undefined> {
+    const found = (await this.#ruleStates()).get(name)?.found ?? (await this.#rule("examples", name));
+    return found?.item?.rule;
+  }
+
   async rules(switches?: SwitchesPort): Promise<RuleView[]> {
     const user = this.scope.user;
     const view = async (f: Found<ReadRule>, inForce: boolean, why: RuleView["why"]): Promise<RuleView> => {

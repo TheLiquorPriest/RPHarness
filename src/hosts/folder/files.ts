@@ -5,7 +5,7 @@
 
 import { appendFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, OwnerWrite, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
 import type { Serial } from "./disk";
 import { codeOf, sha256, writeWhole } from "./disk";
 import type { JournalLine } from "./shape";
@@ -160,8 +160,8 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     return { files: site.files };
   }
 
-  function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | undefined): Refused {
-    if (!namesChat(scope)) return { status: "refused", path, reason, writable: [] };
+  function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | OwnerWrite | undefined): Refused {
+    if (!namesChat(scope) || writer === "owner") return { status: "refused", path, reason, writable: [] };
     const places = folderPlaces(scope);
     return { status: "refused", path, reason, writable: writer === undefined ? places.writable : writableFor(places, writer) };
   }
@@ -269,14 +269,20 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
       if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, by);
       // With no chat in view, what is found is a level every chat shares: no one's to write through the port.
       if (!namesChat(scope)) return refusal(scope, lookup.at.path, "mounted", by);
-      const reason = refusalFor(lookup.at, writableFor(folderPlaces(scope), by));
-      if (reason !== undefined) return refusal(scope, lookup.at.path, reason, by);
+      // The owner's own press writes the chat's or the global level's config file, and nothing else.
+      if (by === "owner") {
+        const configs = folderLayers().flatMap((layer) => (layer.config !== undefined && (layer.level === "chat" || layer.level === "global") ? [`${layer.mount}${layer.config}`] : []));
+        if (!configs.includes(lookup.at.path)) return refusal(scope, lookup.at.path, lookup.at.level === "chat" ? "yours" : "mounted", by);
+      } else {
+        const reason = refusalFor(lookup.at, writableFor(folderPlaces(scope), by));
+        if (reason !== undefined) return refusal(scope, lookup.at.path, reason, by);
+      }
       return serial.run(lookup.at.disk, async () => {
         // Found again in this file's turn, so a write that waited sees what the one before it left.
         const again = await locate(loc, path);
         if (!again.ok) return refusal(scope, again.path, again.reason, by);
         const { result, old } = await apply(again.at, op);
-        if (result.status === "written" && by !== "harness" && scope.turn !== undefined) {
+        if (result.status === "written" && by !== "harness" && by !== "owner" && scope.turn !== undefined) {
           const line: JournalLine = { agent: by, path: result.path, before: old, after: result.hash };
           const journal = journalPath(site, scope.chat, scope.turn);
           await mkdir(dirname(journal), { recursive: true });

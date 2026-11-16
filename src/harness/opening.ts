@@ -13,6 +13,7 @@ import type { Wanted } from "../agents/attachments";
 import { type Given, joined } from "../agents/attachments";
 import type { Log, StackPart } from "../contract";
 import type { AgentDefinition, Fields, FrontPart, Guidance, PromptPart, Stack, StackEntry, StackSnapshot, TemplatePart } from "../files/api";
+import { splitHeader } from "../files/header";
 import { changes, changesText, snapshot } from "../files/stack";
 import { SKILL_LOAD, SKILLS_PART, skillsIndex } from "../tools/base/other";
 import type { HeldTool } from "../tools/registry";
@@ -79,7 +80,20 @@ export interface OpeningBlock {
   contract?: string;
 }
 
-/** A stack's entry as a part of the block: its own fields, without what only the stack keeps. */
+/**
+ * What an agent is sent of an instruction file: its body. Its header block (`depths:`, `modes:`, what
+ * the host's controls read) stays out of what the agent gets, and in the file for the host. A header
+ * with no closing line is no header: the whole text goes.
+ */
+function sentOf(entry: StackEntry, text: string): string {
+  if (entry.kind !== "instruction") return text;
+  const split = splitHeader(text, { path: entry.path, level: entry.level });
+  // An unclosed header reads as no lines and no body: then the whole text goes.
+  const closed = split.has && (split.lines.length > 0 || split.body !== "");
+  return closed ? split.body.replace(/^\n+/, "") : text;
+}
+
+/** A stack's entry as a part of the block: its own fields, without what only the stack keeps; an instruction file's text without its header block. */
 function partOf(entry: StackEntry, text: string | undefined): StackPart {
   return {
     kind: entry.kind,
@@ -89,7 +103,7 @@ function partOf(entry: StackEntry, text: string | undefined): StackPart {
     ...(entry.hash !== undefined ? { hash: entry.hash } : {}),
     where: entry.where,
     ...(entry.left !== undefined ? { left: entry.left } : {}),
-    ...(text !== undefined ? { text: text.trimEnd() } : {}),
+    ...(text !== undefined ? { text: sentOf(entry, text).trimEnd() } : {}),
     ...(entry.situations !== undefined ? { situations: [...entry.situations] } : {}),
   };
 }

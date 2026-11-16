@@ -713,7 +713,8 @@ export class Turn {
       situations,
       ...(contract !== undefined ? { contract: { part: contract, form: opening.form } } : {}),
     });
-    const added = joined(block.stack.entries.flatMap((entry) => (entry.where === "briefing" && entry.left === undefined && entry.text !== undefined ? [entry.text] : [])));
+    // The briefing's own parts as the block lays them out: an instruction file without its header block.
+    const added = joined(block.parts.flatMap((part) => (part.where === "briefing" && part.left === undefined && part.text !== undefined ? [part.text] : [])));
     const changed = changedText(opening, block, notices);
     const rulesDue = joined(due);
     const noticesText = this.#prompt === undefined ? [] : noticeLines(this.#prompt, await noticeWords(guidance));

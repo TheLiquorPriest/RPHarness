@@ -7,7 +7,8 @@
 //   files/chats/<character>/<chat>/PROMPT-MAP.md, LORE-INDEX.md  generated: the map the chat runs under, the lore it is bound to
 //   files/jobs/<hash>/                     a user's jobs of no chat: their notes and sessions
 //   host/chats/<chat>/chat.json            the chat: its character folder, preset, settings, named stretches, its user, the lore it is bound to
-//   host/chats/<chat>/messages.jsonl       its active path, one message per line, oldest first
+//   host/chats/<chat>/messages.jsonl       its active path, one message per line, oldest first; a reply the command line kept names its turn (`turn`)
+//   host/chats/<chat>/system.md            what a turn played from the command line (`rph-folder`, cli.ts) opens its prompt with: the preset and the card
 //   host/chats/<chat>/turns/<turn>/        the prompt given for a turn, where RPH found its slices, agents' writes
 //   host/chats/<chat>/sessions/<session>/  the session's list of tools
 //   host/chats/<chat>/events.jsonl         what RPH told the host

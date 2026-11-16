@@ -122,10 +122,10 @@ test("a family the lead's definition keeps out of reach is neither found nor cal
   expect(ran).toEqual([]);
 });
 
-const GM = "---\nname: gm\ndescription: Fixture game master.\nmodel: default\ntools: [file_write, tool_search, tool_use]\n---\nFixture game master: set the scene for the lead.\n";
+const GM = "---\nname: gm\ndescription: Fixture game master.\nmodel: default\ntools: [file_write, tool_search, tool_use]\nout_of_reach: [reply]\n---\nFixture game master: set the scene for the lead.\n";
 const LEAD = "---\nname: lead\ndescription: Fixture lead that hands work to a game master.\nmodel: default\ntools: [delegate, write_reply, reply_release]\ngiven:\n  - prompt:*\n  - briefing\n---\nFixture lead: answer the player.\n";
 
-test("the reply tools are reached only through an agent's own list: a sub-agent that holds tool_search and tool_use neither finds nor calls them, and the lead's reply is the one the player gets", async () => {
+test("the reply tools are out of reach of a sub-agent whose definition keeps the reply family out: holding tool_search and tool_use it neither finds nor calls them, and the lead's reply is the one the player gets", async () => {
   const s = (open = await stage({
     files: { ".agents/gm.md": GM, ".agents/lead.md": LEAD },
     answers: [

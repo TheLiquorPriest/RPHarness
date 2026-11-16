@@ -52,6 +52,7 @@ export class AgentRuns {
     const d = this.#d;
     const { env } = d;
     const tools = new Map(d.tools().map((tool) => [tool.name, tool]));
+    const clip = d.settings().clipChars;
     const gate = new TurnGate({
       scope: d.scope,
       agent,
@@ -66,7 +67,7 @@ export class AgentRuns {
       rules: d.rules(),
       words: d.words,
       tools,
-      clipChars: d.settings().clipChars,
+      ...(clip !== undefined ? { clipChars: clip } : {}),
     });
     const ran = d.ran;
     return {

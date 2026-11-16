@@ -52,7 +52,7 @@ export function pathTurns(log: SessionLog, to: string | null): PathTurn[] {
 function newestSummary(log: SessionLog, path: readonly SessionEntry[]): CompactedEntry | undefined {
   for (let at = path.length - 1; at >= 0; at -= 1) {
     const entry = path[at]!;
-    if (entry.type !== "compacted") continue;
+    if (entry.type !== "compacted" || entry.of === "run") continue;
     const written = log.path(entry.id, true);
     const kept = written.findIndex((step) => step.id === entry.kept);
     const stood = written.slice(0, kept < 0 ? written.length - 1 : kept);

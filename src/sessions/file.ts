@@ -122,15 +122,19 @@ export interface ShownEntry extends EntryBase {
 }
 
 /**
- * The session's earlier turns were summarized (§11), as the work of `turn`, at its start: the summary
- * stands for every turn on the path before `kept`, the turn entry of the first turn kept as it was.
- * The turns it stands for stay in the file, and a path that does not pass through it has them all.
+ * The session's earlier turns were summarized (§11), as the work of `turn`: the summary stands for
+ * every turn on the path before `kept`, the turn entry of the first turn kept as it was. The turns it
+ * stands for stay in the file, and a path that does not pass through it has them all. With `of:
+ * "run"`, the summary is of the turn's own older calls, made mid-run when a call would not fit: it
+ * stands for those entries of the turn, which the file keeps, and what a later turn carries is not
+ * changed by it (`kept` is the turn's own first entry).
  */
 export interface CompactedEntry extends EntryBase {
   type: "compacted";
   turn: string;
   summary: string;
   kept: string;
+  of?: "run";
 }
 
 /** The host asked for a compaction (§11): the session's next turn compacts at its start. A mark that holds until a compaction is written after it. */
@@ -223,7 +227,7 @@ function isEntry(v: Record<string, unknown>): boolean {
     case "shown":
       return str(v["turn"]);
     case "compacted":
-      return str(v["turn"]) && str(v["summary"]) && str(v["kept"]);
+      return str(v["turn"]) && str(v["summary"]) && str(v["kept"]) && optional(v["of"], (of) => of === "run");
     case "compact":
     case "applied":
       return v["turn"] === undefined;
@@ -383,7 +387,7 @@ export class SessionLog {
         if (!this.#reopened.has(entry.closing)) this.#reopened.set(entry.closing, entry);
         return;
       default: {
-        if (entry.type === "compacted") this.#asked = undefined;
+        if (entry.type === "compacted" && entry.of === undefined) this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
         if (this.#leaf === entry.parent) this.#leaf = entry.id;
         return;

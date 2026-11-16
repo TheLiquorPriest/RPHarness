@@ -31,14 +31,13 @@ export function toolTextOf(part: PromptPart | undefined): ToolText | undefined {
 
 /**
  * The texts a run's runners send a model, each from a file: the line an agent goes on under after a
- * rule stopped its call (`continue-after-rule`), how the `closing` argument is described, and the
- * tool answers' lines for a call that could not run or whose tool failed; a call that does not fit
- * its tool is given its tool's whole schema only where it is no longer than `schemaShown`.
+ * rule stopped its call (`continue-after-rule`), and the tool answers' lines for a call that could not
+ * run or whose tool failed; a call that does not fit its tool is given its tool's whole schema only
+ * where it is no longer than `schemaShown`.
  */
-export function runnerTexts(words: Words, goOn: TemplatePart | undefined, closing: string | undefined, schemaShown: number): RunnerTexts {
+export function runnerTexts(words: Words, goOn: TemplatePart | undefined, schemaShown: number): RunnerTexts {
   return {
     continueAfterRule: (fields) => joined([goOn?.render(fields).text ?? ""]),
-    ...(closing !== undefined && closing !== "" ? { closing } : {}),
     notFound: (fields) => words("not_held", fields),
     invalid: (fields) => words("invalid", invalidFields(fields, schemaShown)),
     cutShort: (fields) => words("cut_short", fields),

@@ -86,8 +86,20 @@ export interface TodoItem {
 export type TraceEvent =
   /** A run began: a turn, a job's run, or a talk with an agent; `lead` is the definition it started with. */
   | { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string }
-  /** An agent began work, on its model, in its own session, with what it was given by name. */
-  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[] }
+  /**
+   * An agent began work, on its model, in its own session, with what it was given by name. `tools`:
+   * the size of the fixed list its requests declare, in tokens as the model layer counts a call's
+   * tools, and the user's `tools.fixedTokens`; it is over where `tokens` passes `most`, and nothing is
+   * refused for that (a lead's).
+   */
+  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number } }
+  /**
+   * A tool an agent's list names is not held (§6.8), told once a session and definition: its
+   * definition lists a name nobody registered (`unregistered`); a host's tool takes a name of RPH's
+   * own and is left out (`shadowed`); or a tool the session declared as it opened has since been
+   * withdrawn by the host (`withdrawn`), and answers that it is gone.
+   */
+  | { kind: "tool_unheld"; tool: string; definition: string; reason: "unregistered" | "shadowed" | "withdrawn" }
   /**
    * The lead's intent record began (§10.3): in the tag form, its opening tag was read; where the lead
    * writes it into the turn's folder itself, that write began. Its end is the `intent` that follows.
@@ -162,8 +174,15 @@ export type TraceEvent =
    * minutes after which the chat application ends a generation that shows nothing. Once in a turn.
    */
   | { kind: "progress_missing"; time: number }
-  /** A session was compacted (§11): its tokens before and after, and how many of its newest turns were kept as they were. */
-  | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number }
+  /**
+   * A run was compacted (§11, S-9): `session`, the session of the run compacted (a lead's scene, a
+   * sub-agent's or a job's own); why (`would-not-fit`, a call would not fit its model's window less
+   * the reserve; `refused`, the provider refused one as too long; `asked`, the host asked; `fold`, the
+   * records mode's records passed their size); what it summarized (`turns`, the session's earlier
+   * turns, with how many of the newest it kept as they were; `run`, the run's own older calls); and
+   * the request's size as counted before and after, in tokens.
+   */
+  | { kind: "compacted"; session: string; reason: "would-not-fit" | "refused" | "asked" | "fold"; of: "turns" | "run"; before: number; after: number; keptTurns?: number }
   /**
    * A session opened, closed, forked from another (`from`, the session it was forked from), or opened
    * again: by the owner's undo of his own close (`by`), or because the turn that closed it left the

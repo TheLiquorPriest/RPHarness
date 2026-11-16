@@ -2,10 +2,12 @@
 // job's agent, the writer) and for the Files page, which lists exactly what the agent gets: its stack's
 // opening parts in §5.2's order, its definition's body filled in; for a lead, the reply contract
 // rendered for its connection's form; the guide of each family of tools it holds (`.tools/<family>.md`,
-// R-66); each held tool's description, which its declaration carries in the cached front; the skills'
-// index, for an agent that can call `skill_load`; what its definition's `opening:` names, as the host
-// answered when the session opened; and then what the briefing is handed, with the situations that add
-// it. A pinned file is no part of it: a run's start hands it, read whole then (R-174).
+// R-66); what the `closing` argument every tool of its own list takes means (`.tools/closing.md`),
+// said once here rather than in every declaration; each held tool's description, which its
+// declaration carries in the cached front; the skills' index, for an agent that can call
+// `skill_load`; what its definition's `opening:` names, as the host answered when the session opened;
+// and then what the briefing is handed, with the situations that add it. A pinned file is no part of
+// it: a run's start hands it, read whole then (R-174).
 import { createHash } from "node:crypto";
 import type { Wanted } from "../agents/attachments";
 import { type Given, joined } from "../agents/attachments";
@@ -15,6 +17,7 @@ import { changes, changesText, snapshot } from "../files/stack";
 import { SKILL_LOAD, SKILLS_PART, skillsIndex } from "../tools/base/other";
 import type { HeldTool } from "../tools/registry";
 import { TOOL_USE } from "../tools/search";
+import { CLOSING } from "../loop/runner";
 import { template, toolTextOf } from "./means";
 import type { ReplyFormSetting } from "./settings";
 
@@ -130,6 +133,9 @@ export async function openingOf(o: OpeningOf): Promise<OpeningBlock> {
     const guide = template(await guidance.tool(family));
     if (guide !== undefined) fronted(filePart("guide", `tools/${family}`, guide.source, guide.render().text));
   }
+  // What `closing` means, once, for an agent that holds any tool: every tool of its own list takes it (§10.7).
+  const closing = o.tools.length > 0 ? template(await guidance.tool(CLOSING)) : undefined;
+  if (closing !== undefined) fronted(filePart("closing", `tools/${CLOSING}`, closing.source, closing.render().text));
   // Each held tool of RPH's own, described by its file: the description its declaration carries, as the file has it now.
   for (const tool of o.tools) {
     if (tool.from !== "rph") continue;

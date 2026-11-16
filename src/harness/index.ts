@@ -12,6 +12,8 @@ import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { loadGuidance } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
+import { tokensOf } from "../model/tokens";
+import { withClosing } from "../loop";
 import { Jobs } from "../jobs";
 import { closingOf, type SessionChange, sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
@@ -19,7 +21,7 @@ import { LiveHub } from "./live";
 import { connectionOf, template } from "./means";
 import { openingOf } from "./opening";
 import { listedTools, ownTexts } from "./own";
-import { Sessions } from "./sessions";
+import { keptOpening, Sessions } from "./sessions";
 import { rebuildRequest } from "./requests";
 import { formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
@@ -75,6 +77,12 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   const sessionClosed = (scope: Scope): void => {
     core.sessions.drop(scope);
     core.models.ended?.(scope.user, scope.session);
+  };
+  // The registry as a run builds it for a scope, for the pages: RPH's own tools as a page lists them, and the host's.
+  const registryOf = async (scope: Scope) => {
+    const guidance = loadGuidance(env.files, scope);
+    const [settings, texts] = await Promise.all([readSettings(guidance, env.files, scope, env.log), ownTexts(guidance)]);
+    return { guidance, settings, registry: new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope)) };
   };
 
   return {
@@ -156,9 +164,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       // each family guide and held tool's description, the skills' index, and the briefing's parts
       // with the situations that add them.
       stack: async (scope, agent) => {
-        const guidance = loadGuidance(env.files, scope);
-        const [settings, definition, texts, contract] = await Promise.all([readSettings(guidance, env.files, scope, env.log), guidance.definition(agent), ownTexts(guidance), guidance.part("reply-contract")]);
-        const registry = new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope));
+        const { guidance, settings, registry } = await registryOf(scope);
+        const [definition, contract] = await Promise.all([guidance.definition(agent), guidance.part("reply-contract")]);
         const lead = definition?.given.includes("briefing") === true ? template(contract) : undefined;
         const form = lead === undefined || definition === undefined ? undefined : formFor(settings, await connectionOf(layer.api, scope, definition, env.log)).form;
         const block = await openingOf({ guidance, agent, definition, tools: definition === undefined ? [] : registry.hold(definition.tools).tools, isTool: (name) => registry.has(name), ...(lead !== undefined && form !== undefined ? { contract: { part: lead, form } } : {}) });
@@ -173,6 +180,21 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
           await file.settled();
         });
         core.sessions.of(scope).openings.clear();
+      },
+      // What an agent's requests carry as its fixed list, as a run declares it: a lead's as its session opened it, else its definition's as the registry holds it now; with its size.
+      declared: async (scope, agent) => {
+        const { guidance, settings, registry } = await registryOf(scope);
+        const opening = core.sessions.of(scope).openings.get(agent) ?? (await book.with(scope, (file) => keptOpening(file.log, agent)));
+        const held = opening !== undefined ? registry.opened(opening.tools, opening.declared, async () => ({ content: [], error: true })).tools : registry.hold((await guidance.definition(agent))?.tools ?? []).tools;
+        const tools = held.map((tool) => ({ name: tool.name, description: tool.description, parameters: withClosing(tool) }));
+        return { tools, tokens: tokensOf(JSON.stringify(tools), settings.tokens.charsPerToken), most: settings.fixedTokens };
+      },
+      tools: async (scope) => {
+        const { registry } = await registryOf(scope);
+        return registry
+          .all()
+          .map(({ name, family, from }) => ({ name, family, from }))
+          .sort((a, b) => a.name.localeCompare(b.name));
       },
     },
 

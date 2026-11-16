@@ -43,8 +43,8 @@ export interface GateDeps {
   words: Words;
   /** The agent's tools by name, with their tier and lane. */
   tools: ReadonlyMap<string, HeldTool>;
-  /** Characters of one call that the model reads (`results.clip`). */
-  clipChars: number;
+  /** The owner's own ceiling on the characters of one call that the model reads (`results.clip`); none by default. */
+  clipChars?: number;
   /** Where what failed around a tool is named: a rule that could not be asked, a whole that could not be kept. */
   log: Log;
 }
@@ -130,14 +130,15 @@ export class TurnGate implements ToolGate {
   }
 
   /**
-   * What the model reads of one call, cut to the setting where it is longer. It reads the answer's
-   * text, then its reports, one line each, then the texts that go after it (the rules' texts), in
-   * that order, and the setting counts them all: no more than the setting of any call reaches the
-   * model, the trace, the session file or a later request. Its whole is kept in the turn's folder (the
-   * session's, for a run with no turn), and the file's line says how much was left out and where: it
-   * comes after all that is shown, and the answer as it is kept ends with it, among its reports where
-   * it has any. A whole that could not be kept is said beside it, and logged. With `room` (what is
-   * left of the agent's prompt per call), the least of the two holds.
+   * What the model reads of one call, cut only where it is longer than the room the call that reads
+   * it has (`room`: the model's window less the reserve and less the request as it stands, and the
+   * agent's prompt per call where it has one) or the owner's own ceiling (`results.clip`, where he set
+   * one). It reads the answer's text, then its reports, one line each, then the texts that go after it
+   * (the rules' texts), in that order, and the cut counts them all: no more than that of any call
+   * reaches the model, the trace, the session file or a later request. Its whole is kept in the
+   * turn's folder (the session's, for a run with no turn), and the file's line says how much was left
+   * out and where: it comes after all that is shown, and the answer as it is kept ends with it, among
+   * its reports where it has any. A whole that could not be kept is said beside it, and logged.
    */
   bound(call: GateCall, result: LoopToolResult, added: readonly string[] = [], room?: number): Promise<Bounded> {
     return this.#bound(call, result, added, room, []);
@@ -146,7 +147,8 @@ export class TurnGate implements ToolGate {
   /** `bound`, with lines that go beside the answer whatever the cut: what could not be done around it. */
   async #bound(call: GateCall, result: LoopToolResult, added: readonly string[], room: number | undefined, beside: readonly string[]): Promise<Bounded> {
     const d = this.#d;
-    const most = room === undefined ? d.clipChars : Math.min(d.clipChars, room);
+    // Cut only where the whole would not fit the call that reads it (`room`), or past the owner's own ceiling where he set one (§10.2).
+    const most = Math.min(d.clipChars ?? Number.POSITIVE_INFINITY, room ?? Number.POSITIVE_INFINITY);
     const texts = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
     const reports = result.reports ?? [];
     const whole = [...texts, ...reports, ...added];

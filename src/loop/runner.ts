@@ -48,8 +48,6 @@ export interface RunnerTexts {
    * goes on under after a rule stopped its call. The rule's own text comes just before it.
    */
   continueAfterRule(fields: { shown: string }): string;
-  /** How the `closing` argument is described to the model, from the tool guides; absent leaves it undescribed. */
-  closing?: string;
   /** The answer to a call of a tool the agent does not hold. */
   notFound?(fields: { tool: string }): string | undefined;
   /**
@@ -102,6 +100,8 @@ export interface RunnerOptions {
    */
   context?: AgentMessage[];
   tools?: LoopTool[];
+  /** The size of its fixed list as declared, in tokens, and the user's `tools.fixedTokens`, which its start record says (a lead's). */
+  listSize?: { tokens: number; most: number };
   texts: RunnerTexts;
   /** The model, effort, sampling and longest answer of each model call, decided before that request alone. */
   settings?(request: CallRequest): CallSettings | undefined;
@@ -390,7 +390,7 @@ export class AgentRunner {
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
-    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, session: this.#o.session, given: options.given ?? [] });
+    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, session: this.#o.session, given: options.given ?? [], ...(this.#o.listSize !== undefined ? { tools: this.#o.listSize } : {}) });
     const time = this.#o.limits?.time;
     if (time !== undefined) {
       stint.timer = this.#clock.setTimeout(() => {
@@ -1002,12 +1002,16 @@ export class AgentRunner {
   }
 
   /**
-   * Characters left of the agent's prompt per call (`limits.callTokensIn`) for what the model reads
-   * of a call: the limit less the request as it stands and what it reads of this batch's other calls.
-   * Undefined with no such limit.
+   * Characters left for what the model reads of a call: the least of the model's window less the
+   * reserve (the run's point gives both) and the agent's prompt per call (`limits.callTokensIn`), less
+   * the request as it stands and what it reads of this batch's other calls (§10.2: nothing is cut
+   * until it would not fit). Undefined with neither.
    */
   #promptRoom(stint: Stint): number | undefined {
-    const most = this.#o.limits?.callTokensIn;
+    const point = this.#o.point;
+    const fits = point?.window !== undefined && point.window > 0 ? point.window - point.reserve : undefined;
+    const limit = this.#o.limits?.callTokensIn;
+    const most = fits === undefined ? limit : limit === undefined ? fits : Math.min(fits, limit);
     if (most === undefined) return undefined;
     const ratio = this.#o.terms.charsPerToken;
     let taken = requestTokens(this.#request(), ratio, this.#counted);
@@ -1209,7 +1213,7 @@ export class AgentRunner {
       name: tool.name,
       label: tool.name,
       description: tool.description,
-      parameters: own ? withClosing(tool, this.#o.texts.closing) : tool.parameters,
+      parameters: own ? withClosing(tool) : tool.parameters,
       ...(tool.sequential === true ? { executionMode: "sequential" as const } : {}),
       execute: async (callId, params, signal) => {
         const stint = this.#stint;
@@ -1346,13 +1350,14 @@ function withoutClosing(args: JsonValue): JsonValue {
 }
 
 /** A tool's own arguments, by name. */
-function argumentsOf(tool: LoopTool): JsonObject {
+function argumentsOf(tool: Pick<LoopTool, "parameters">): JsonObject {
   const properties = tool.parameters["properties"];
   return typeof properties === "object" && properties !== null && !Array.isArray(properties) ? properties : {};
 }
 
-function withClosing(tool: LoopTool, description: string | undefined): JsonSchema {
-  return { ...tool.parameters, properties: { ...argumentsOf(tool), [CLOSING]: description === undefined ? { type: "boolean" } : { type: "boolean", description } } };
+/** A tool of the agent's own list as it is declared: its own arguments and `closing`, a boolean whose meaning the opening block says once (`.tools/closing.md`). */
+export function withClosing(tool: Pick<LoopTool, "parameters">): JsonSchema {
+  return { ...tool.parameters, properties: { ...argumentsOf(tool), [CLOSING]: { type: "boolean" } } };
 }
 
 /** Clean: no failure and nothing reported (§10.7). */

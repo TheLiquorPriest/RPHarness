@@ -78,7 +78,7 @@ test("a turn's log lines name the turn and the run, each under its own name", as
   expect((await s.turn(request("t1", { carry: "continuing" }))).outcome.status).toBe("released");
   expect((await s.turn(request("t2", { carry: "continuing", parent: "t1" }))).outcome.status).toBe("released");
   const run = s.trace.of("run_started").find((record) => record.scope.turn === "t2")!.run;
-  const tight = s.logged.filter((line) => line.message.startsWith("The lead's first call would not fit"));
+  const tight = s.logged.filter((line) => line.message.startsWith("A call would not fit") && line.fields?.["turn"] === "t2");
   expect(tight).toHaveLength(1);
   expect(tight[0]!.fields).toMatchObject({ turn: "t2", run });
   expect(run).not.toBe("t2");

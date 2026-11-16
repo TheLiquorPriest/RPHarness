@@ -13,7 +13,6 @@ export const scope: Scope = { user: "user-a", chat: "chat-a", session: "session-
 /** The texts a runner sends a model, as test fixtures. */
 export const texts = {
   continueAfterRule: ({ shown }: { shown: string }) => `[Already shown]\n${shown}\n[Go on from there]`,
-  closing: "Fixture: true when this call needs no answer.",
   notFound: ({ tool }: { tool: string }) => `Fixture: no tool named ${tool}.`,
   invalid: ({ tool, arguments: sent }: { tool: string; arguments: string; parameters: string }) => `Fixture: ${tool} does not take ${sent}.`,
   cutShort: ({ tool }: { tool: string }) => `Fixture: ${tool} was cut short.`,

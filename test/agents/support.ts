@@ -76,8 +76,8 @@ export interface StageOptions {
   lore?: LoreFixture[];
   /** The views of the story the host gives by name. */
   views?: Record<string, string>;
-  /** The run's point before each request of every agent the team makes. */
-  point?: TeamDeps["point"];
+  /** The run's compaction settings for every agent the team makes. */
+  compaction?: TeamDeps["compaction"];
   /** How the host's store is reached: a test can hold a write back. */
   store?: (inner: StorePort) => StorePort;
 }
@@ -291,7 +291,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
         const line = progressPart?.format === "lines" ? progressPart.line(name, fields) : undefined;
         if (line !== undefined) progress.push(line);
       },
-      ...(options.point !== undefined ? { point: options.point } : {}),
+      ...(options.compaction !== undefined ? { compaction: options.compaction } : {}),
     });
     const own = new Map<string, ToolText>();
     for (const name of ["file_read", "file_find", "file_write", ...AGENT_TOOLS]) {

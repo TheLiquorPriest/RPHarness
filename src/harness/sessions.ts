@@ -33,8 +33,6 @@ export interface Opening {
    * tool's file waits for the next session, as the definition's own list does (§5.2, §6.8).
    */
   declared: Record<string, { description: string; parameters: JsonSchema }>;
-  /** How `closing` was described in every tool's declaration. */
-  closing?: string;
   /** The form its reply takes, whether a two-step reply streams anyway, and what the contract it was told names. */
   form: ReplyFormSetting;
   stream: boolean;

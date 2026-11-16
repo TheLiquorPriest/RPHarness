@@ -52,9 +52,9 @@ describe("a simple turn", () => {
       ["scene_note", true, true],
       ["todo", true, true],
     ]);
-    // The model was offered `closing` on every tool, described by the file's text.
+    // The model was offered `closing` on every tool, a boolean the opening block describes once.
     const declared = scripted.requests[0]?.messages.find((message) => message.role === "system");
-    expect(JSON.stringify(declared)).toContain("Fixture: true when this call needs no answer.");
+    expect(JSON.stringify(declared)).toContain('"closing":{"type":"boolean"}');
 
     // Streamed: the sink had each piece before the model pushed the next one.
     const pushed = (scripted.requests[0]?.pushed ?? []).filter((piece) => piece.kind === "text");

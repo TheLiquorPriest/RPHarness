@@ -74,6 +74,7 @@ export function ownTools(d: OwnToolsDeps): OwnTool[] {
       notices: d.words,
       texts,
       hits: settings.searchHits,
+      perCall: settings.perCall,
     }),
   ];
 }

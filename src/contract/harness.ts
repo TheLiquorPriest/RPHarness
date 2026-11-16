@@ -401,11 +401,13 @@ export type StackLeft = "missing" | "off" | "empty" | "broken" | "needs";
 
 /**
  * What a part of an agent's opening block is (§5.2, §10.2): its definition; an instruction file; an
- * always-on rule; the reply contract (a lead's); the guide of a family of tools it holds; a held
- * tool's description, which its declaration carries in the cached front; the skills' index; or what
- * its definition's `opening:` names, as the host answered when the session opened.
+ * always-on rule; the reply contract (a lead's); the guide of a family of tools it holds; what the
+ * `closing` argument every tool of its own list takes means (`.tools/closing.md`, said once, after the
+ * guides, for an agent that holds any tool); a held tool's description, which its declaration carries
+ * in the cached front; the skills' index; or what its definition's `opening:` names, as the host
+ * answered when the session opened.
  */
-export type StackPartKind = "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
+export type StackPartKind = "definition" | "instruction" | "rule" | "contract" | "guide" | "closing" | "description" | "skills" | "given";
 
 /**
  * One part of what an agent gets (§5.2): which part, the file it came from, and whether it sits in the

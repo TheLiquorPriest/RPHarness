@@ -18,9 +18,9 @@ import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun,
 import { userMessage } from "../harness/prompt";
 import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
-import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
+import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerOptions, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import { PlaceLine } from "../loop/line";
-import type { RequestPoint } from "../loop/types";
+import { Compactor, saveBeforeCompaction } from "../sessions/compact";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "../harness/opening";
@@ -79,10 +79,10 @@ export interface TeamDeps {
   progress?(name: string, fields: Fields): void;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map. Without it, such a name is not found. */
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
-  /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); none keeps nothing. */
-  keep?(agent: AgentRef): KeepRequest | undefined;
-  /** The run's point before each request of an agent the team makes (§11), a sub-agent's or a job's agent's; none: each request goes out as set. */
-  point?(agent: AgentRef): RequestPoint | undefined;
+  /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); `save`, its save call's at the moment before compaction; none keeps nothing. */
+  keep?(agent: AgentRef, kind?: "call" | "save"): KeepRequest | undefined;
+  /** The run's compaction settings (§11): each agent the team makes is compacted at any call that would not fit, as the lead is. None: its requests go out as set. */
+  compaction?(): { reserve: number; overflowTries: number; keepRecent: number; saveCalls: number };
   /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
   job?: string;
 }
@@ -275,15 +275,15 @@ export class Team implements TeamWork {
     const brief = frame?.render({ ...fields, task: call.brief, attachments, ...(call.returns !== undefined ? { returns: call.returns } : {}) }).text ?? joined([call.brief, ...given.blocks.map((block) => block.text)]);
     const rules = d.rules();
     const keep = d.keep?.(ref);
-    const point = d.point?.(ref);
     const questions = d.questions?.();
-    const runner = new AgentRunner({
+    const session = d.ids();
+    const options: RunnerOptions = {
       agent: ref,
       trace: d.trace,
       model: model.model,
       streamFn: model.streamFn,
       connection: connection.label,
-      session: d.ids(),
+      session,
       thinkingLevel: model.thinkingLevel,
       terms: d.terms(definition.name),
       ...(instructions !== "" ? { instructions } : {}),
@@ -298,7 +298,6 @@ export class Team implements TeamWork {
       ...(questions !== undefined ? { questions } : {}),
       gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),
-      ...(point !== undefined ? { point } : {}),
       // A run that goes on past an edit (a job's agent; one continued) is told what of its block no
       // longer stands, against its block made again from the files as they stand (R-128).
       changed: async () => {
@@ -306,7 +305,38 @@ export class Team implements TeamWork {
         const [current, notices] = await Promise.all([now.definition(definition.name), now.part("notices")]);
         return changedText(block, await openingOf({ guidance: now, agent: definition.name, definition: current, tools: held.tools, isTool: (name) => d.hold([name]).tools.length > 0, fields }), notices);
       },
-    });
+    };
+    // Compacted at any call that would not fit, as the lead is (§11, §13.3): its own older calls, after the moment before compaction where a rule names its definition.
+    const compaction = d.compaction?.();
+    const compactor =
+      compaction === undefined
+        ? undefined
+        : new Compactor({
+            agent: ref,
+            trace: d.trace,
+            model,
+            connection: connection.label,
+            session,
+            terms: options.terms,
+            texts: options.texts,
+            budget: d.budget(),
+            settings: compaction,
+            parts: async () => {
+              const [compacting, carried] = await Promise.all([d.guidance.part("compaction"), d.guidance.part("carried")]);
+              return { compaction: template(compacting), carried: template(carried) };
+            },
+            ids: () => d.ids(),
+            log: d.env.log,
+            ended: (summary) => d.models.ended?.(d.trace.scope.user, summary),
+            keep: (agent) => d.keep?.(agent),
+            track: (entry) => d.track(entry),
+            stopped: () => false,
+            before: (request) => {
+              const saving = d.keep?.(ref, "save");
+              return saveBeforeCompaction(request, { options, rules, saveCalls: compaction.saveCalls, ...(saving !== undefined ? { keep: saving } : {}), track: (entry) => d.track(entry), stopped: () => request.signal.aborted });
+            },
+          });
+    const runner = new AgentRunner({ ...options, ...(compactor !== undefined ? { point: compactor.point(model.limits.contextWindow?.tokens) } : {}) });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     // Its start record names only what it was handed.
     return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };

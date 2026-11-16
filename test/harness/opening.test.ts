@@ -68,6 +68,8 @@ test("the Author's stack lists the reply contract, each family guide, each held 
     ["opening", "contract", "prompts/reply-contract", "@shipped/.prompts/reply-contract.md"],
     ["opening", "guide", "tools/files", "@global/.tools/files.md"],
     ["opening", "guide", "tools/agents", "@global/.tools/agents.md"],
+    ["opening", "guide", "tools/skills", "@shipped/.tools/skills.md"],
+    ["opening", "closing", "tools/closing", "@shipped/.tools/closing.md"],
     ["opening", "description", "tools/file_read", "@shipped/.tools/file_read.md"],
     ["opening", "description", "tools/delegate", "@shipped/.tools/delegate.md"],
     ["opening", "description", "tools/skill_load", "@shipped/.tools/skill_load.md"],
@@ -94,7 +96,7 @@ test("the lead's first request and a sub-agent's first request hold exactly the 
   // Each held tool's description is what its declaration carries.
   for (const part of chief.filter((p) => p.kind === "description")) expect(lead!.tools.find((tool) => `tools/${tool.name}` === part.part)?.description).toBe(part.text!);
   const kept = await s.harness.definitions.stack(scope, "keeper");
-  expect(kept.map((part) => part.kind)).toEqual(["instruction", "definition", "guide", "description"]);
+  expect(kept.map((part) => part.kind)).toEqual(["instruction", "definition", "guide", "closing", "description"]);
   expect(textOf(keeper!.messages[0]!)).toBe(openingText(kept));
 });
 

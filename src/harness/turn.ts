@@ -16,26 +16,26 @@
 // `briefing`). Anything else it is given by name is found as a sub-agent's is, and placed after the
 // briefing, laid out by the given part.
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
-import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
+import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
 import { SilentReply } from "../reply/silent";
 import type { HeldFile, SessionBook, SessionFile } from "../sessions/book";
-import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, nextPiece, pathTurns, recordsTokens } from "../sessions/carry";
-import { answer, type OwnTool, Registry, REPLY_FAMILY, TodoLists, type ToolText, type Words } from "../tools";
+import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, pathTurns, recordsTokens } from "../sessions/carry";
+import { Compactor, type EarlierTurns, saveBeforeCompaction } from "../sessions/compact";
+import { answer, type OwnTool, Registry, TodoLists, type ToolText, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { JobsWork } from "../jobs/tool";
-import { noticeLines, type PromptView, promptSlice, promptTurn, promptViews, promptWords, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
+import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import type { LiveHub } from "./live";
@@ -75,39 +75,8 @@ export interface TurnCore {
   jobs: JobsWork;
 }
 
-/** What a compaction at a turn's start works on: the lead's first request as it stands, and where in it the carried block is. */
-interface Compacting {
-  file: SessionFile;
-  carry: CarriedInput;
-  /** The carried block's fields as they stand. */
-  carried: Fields;
-  layout: TemplatePart;
-  messages: AgentMessage[];
-  carriedAt: number;
-  model: AgentModel;
-  connection: Connection;
-  opening: Opening;
-  /** What the lead's run is handed, by name, as its start record names it. */
-  handed: string[];
-  definition: AgentDefinition;
-  declared: LoopTool[];
-  rules: RuleRun;
-  settings: Settings;
-  at: number;
-}
-
 function errorWords(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Whether a run ended on its first call, which the provider refused as longer than its model takes:
- * pi-ai's reading of each provider's words for that, on the error the call ended with.
- */
-function refusedAsTooLong(outcome: AgentOutcome, model: Model<Api>): boolean {
-  if (outcome.status !== "failed" || outcome.failure !== "model" || outcome.usage.calls !== 1 || outcome.error === undefined) return false;
-  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
-  return isContextOverflow({ role: "assistant", content: [], api: model.api, provider: model.provider, model: model.id, usage, stopReason: "error", errorMessage: outcome.error, timestamp: 0 });
 }
 
 /** Texts placed one after another in a message: each without the line break its file ends on, the empty ones left out. */
@@ -293,7 +262,7 @@ export class Turn {
     const scope = this.scope;
     const guidance = loadGuidance(env.files, scope);
     this.#guidance = guidance;
-    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, closing, file] = await Promise.all([
+    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, file] = await Promise.all([
       readSettings(guidance, env.files, scope, env.log),
       env.files.places(scope),
       guidance.definition(req.lead),
@@ -306,7 +275,6 @@ export class Turn {
       guidance.part("carried"),
       guidance.part("continue-after-rule"),
       guidance.part("role-note"),
-      guidance.tool("closing"),
       (this.#holding = this.#c.book.hold(scope)).then((held) => held.file),
     ]);
     this.#settings = settings;
@@ -385,7 +353,7 @@ export class Turn {
       models: this.#c.models,
       connection: (definition) => this.#connection(definition),
       hold: (names) => this.#registry?.hold(names) ?? { tools: [], missing: [...names] },
-      unregistered: (name, tools) => this.#unregistered("Tools a sub-agent's definition lists are registered by nobody; it holds the rest.", name, tools),
+      unregistered: (name, tools) => this.#unheld("unregistered", name, tools, "Tools a sub-agent's definition lists are registered by nobody; it holds the rest."),
       gate: (agent, parent) => this.#agentRuns().gate(agent, parent),
       texts: () => this.#texts,
       rules: () => this.#rulesRun(),
@@ -400,13 +368,14 @@ export class Turn {
       },
       gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
       progress: (name, fields) => this.#say(name, fields),
-      keep: (agent) => this.#keeper(agent).keep,
+      keep: (agent, kind) => this.#keeper(agent, kind).keep,
+      compaction: () => this.#settings.compaction,
       slice,
     });
     this.#team = team;
     const registry = new Registry(this.#ownTools(texts, team, guidance), await env.tools.all(scope));
     this.#registry = registry;
-    if (registry.shadowed.length > 0) env.log.warn("Host tools that take the name of one of RPH's own are left out.", { tools: registry.shadowed });
+    if (registry.shadowed.length > 0) this.#unheld("shadowed", req.lead, registry.shadowed, "Host tools that take the name of one of RPH's own are left out.");
 
     const connection = await this.#connection(definition);
     const judges = new Judges({
@@ -435,14 +404,14 @@ export class Turn {
     // The block the session opened with: as memory holds it, or, after a restart or once the session is open again after a close, as its file keeps it. Made afresh, it is kept in the file.
     let opening = session.openings.get(req.lead) ?? keptOpening(file.log, req.lead);
     if (opening === undefined) {
-      const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), template(closing), slice);
+      const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), slice);
       if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: opened, agent: req.lead } });
       opening = opened;
       file.add({ type: "opening", parent: begun.id, lead: req.lead, opening: opening as unknown as JsonObject });
     }
     session.openings.set(req.lead, opening);
     this.#opening = opening;
-    this.#texts = runnerTexts(this.#words, template(goOn), opening.closing, settings.schemaShown);
+    this.#texts = runnerTexts(this.#words, template(goOn), settings.schemaShown);
 
     let model: AgentModel;
     try {
@@ -451,19 +420,18 @@ export class Turn {
       return this.#outcome({ status: "failed", error: { code: "failed", detail: errorWords(error) } });
     }
     this.#c.usage.gauge(scope, this.run, this.#lead.id, model.limits.contextWindow?.tokens ?? 0, model.limits.maxTokens?.tokens ?? 0);
-    // The tools as the session declared them when it opened: a tool's file changed since waits for the next session (§6.8).
-    const held = registry.hold(opening.tools);
-    this.#unregistered("Tools the lead's definition lists are registered by nobody; it holds the rest.", req.lead, held.missing);
-    const declared = held.tools.flatMap((tool) => {
-      const kept = opening.declared[tool.name];
-      return kept === undefined ? [] : [{ ...tool, description: kept.description, parameters: kept.parameters }];
-    });
+    // The tools as the session declared them when it opened, each as it was declared then: a tool's file changed since waits for the next session, and one the host has withdrawn since stays declared and answers that it is gone (§6.8).
+    this.#unheld("unregistered", req.lead, opening.tools.filter((name) => !Object.hasOwn(opening.declared, name)), "Tools the lead's definition lists are registered by nobody; it holds the rest.");
+    const held = registry.opened(opening.tools, opening.declared, async (tool) => answer(this.#words("withdrawn", { tool }), true));
+    this.#unheld("withdrawn", req.lead, held.withdrawn, "Tools the lead's session declared as it opened are no longer offered by the host; each answers that it is gone.");
+    const declared = held.tools;
+    const listSize = { tokens: tokensOf(JSON.stringify(declared.map((tool) => ({ name: tool.name, description: tool.description, parameters: withClosing(tool) }))), settings.tokens.charsPerToken), most: settings.fixedTokens };
 
     const due = await rules.turnStart(this.#lead);
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
     // A request that carries no prompt (a run asked for to settle a turn's records, say) leaves the prompt's record as it was: nothing of it is compared, kept or saved, no view of it is written over the turn's, and its prompt tools find none.
     if (req.prompt.length > 0) {
-      const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, keep: settings.promptKept });
+      const { prompt, located } = await promptTurn({ env, scope, messages: req.prompt, parent: req.parent, by: this.#lead });
       this.#prompt = prompt;
       this.#notices = located.notices.length;
       if (located.notices.length > 0) this.#trace.event(this.#lead, undefined, { kind: "prompt_notices", notices: located.notices });
@@ -518,11 +486,61 @@ export class Turn {
       if (given.text !== "") messages.push(placed(systemMessage(given.text, at), wanted.map((item) => item.ref).join(", ")));
       handed.push(...given.handed);
     }
-    const compacting: Compacting | undefined = carriedAt !== undefined && carriedNow !== undefined && layout !== undefined ? { file, carry, carried: carriedNow, layout, messages, carriedAt, model, connection, opening, handed, definition, declared, rules, settings, at } : undefined;
-    if (compacting !== undefined) await this.#compact(compacting, false);
-    // What the Author was told, as sent: what the session carried into the turn and the briefing (§5.3 l.489).
-    if (places.turn !== undefined) await this.#writeBriefing(places.turn, sentMessages(messages));
-
+    // Compaction at the point before each of the lead's requests (§11): the session's earlier turns
+    // first, then the run's own older calls. It is asked here first, before the first call, for the
+    // reasons only a run's start has too (the host asked, the records fold), so what the Author is told
+    // (`briefing.md`) is what is sent.
+    let carrying = carry;
+    const earlierPlan = () => {
+      const current = file.log.turn(scope.turn);
+      return current === undefined || carrying.carry === "nothing" ? undefined : compactionAt(file.log, carrying.from, current, settings.compaction.keepTurns, carrying.compacted);
+    };
+    const earlierTurns: EarlierTurns | undefined =
+      carriedAt === undefined || carriedNow === undefined || layout === undefined
+        ? undefined
+        : {
+            starting: () => (file.log.asked !== undefined ? "asked" : recordsTokens(carriedNow, settings.tokens.charsPerToken) > settings.compaction.records ? "fold" : undefined),
+            left: () => earlierPlan() !== undefined,
+            compact: async (summarize) => {
+              const current = file.log.turn(scope.turn);
+              const plan = earlierPlan();
+              if (current === undefined || plan === undefined) return undefined;
+              const material = await compactionMaterial(carrying, plan.turns);
+              const summary = await summarize((before, turns) => materialFields(carrying.carry, before, turns), material.summary, material.turns);
+              if (summary === undefined || this.#ended()) return undefined;
+              const compacted = file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? current.id, turn: scope.turn, summary, kept: plan.kept ?? current.id });
+              // What the turn carries from here: a second compaction in the turn starts after this one.
+              carrying = { ...carrying, compacted };
+              carriedNow = (await carriedFields(carrying)) ?? {};
+              return { at: carriedAt, message: placed(systemMessage(joined([layout.render(carriedNow).text]), env.clock.now()), "session:carry"), keptTurns: plan.keptTurns };
+            },
+          };
+    const track = (entry: { runner: AgentRunner; work: Work }): (() => void) => {
+      this.#working.add(entry);
+      return () => this.#working.delete(entry);
+    };
+    const compactor = new Compactor({
+      agent: this.#lead,
+      trace: this.#trace,
+      model,
+      connection: connection.label,
+      session: scope.session,
+      terms: callTerms(settings, this.#lead.definition),
+      texts: this.#texts,
+      budget: this.#budget,
+      settings: settings.compaction,
+      parts: async () => ({ compaction: template(await guidance.part("compaction")), carried: layout }),
+      ids: () => this.#c.ids(),
+      log: env.log,
+      ended: (session) => this.#c.models.ended?.(scope.user, session),
+      keep: (agent) => this.#keeper(agent).keep,
+      track,
+      stopped: () => this.#ended(),
+      before: (request) => saveBeforeCompaction(request, { options: leadOptions, rules, saveCalls: settings.compaction.saveCalls, ...this.#keeper(this.#lead, "save"), track, stopped: () => this.#ended(), given: handed }),
+      ...(earlierTurns !== undefined ? { earlier: earlierTurns } : {}),
+      // A summary of the lead's own older calls is the turn's compaction too; it stands for those entries, which the file keeps.
+      written: (summary) => void file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? begun.id, turn: scope.turn, summary, kept: begun.id, of: "run" }),
+    });
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
     const second = this.#words("second_reply");
@@ -550,44 +568,50 @@ export class Turn {
             onBegin: () => this.#say("writing"),
             onReleased: (text) => this.#release(text, "message", this.#lead),
           });
-    const leadRunner = (): AgentRunner =>
-      new AgentRunner({
-        agent: this.#lead,
-        trace: this.#trace,
-        model: model.model,
-        streamFn: model.streamFn,
-        connection: connection.label,
-        session: scope.session,
-        thinkingLevel: model.thinkingLevel,
-        terms: callTerms(settings, this.#lead.definition),
-        instructions: opening.text,
-        context: messages,
-        tools: declared,
-        texts: this.#texts,
-        settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
-        limits: definition.limits,
-        turn: this.#budget,
-        stream: streamRules,
-        runEnd: rules.runEnd,
-        questions: judges,
-        gate: this.#agentRuns().gate(this.#lead, undefined),
-        channel,
-        ...this.#keeper(this.#lead),
-      });
-    const leadWork = async (runner: AgentRunner): Promise<AgentOutcome | undefined> => {
-      if (this.#ended()) return undefined;
+    const leadOptions: RunnerOptions = {
+      agent: this.#lead,
+      trace: this.#trace,
+      model: model.model,
+      streamFn: model.streamFn,
+      connection: connection.label,
+      session: scope.session,
+      thinkingLevel: model.thinkingLevel,
+      terms: callTerms(settings, this.#lead.definition),
+      instructions: opening.text,
+      context: messages,
+      tools: declared,
+      texts: this.#texts,
+      settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
+      limits: definition.limits,
+      turn: this.#budget,
+      stream: streamRules,
+      runEnd: rules.runEnd,
+      questions: judges,
+      gate: this.#agentRuns().gate(this.#lead, undefined),
+      channel,
+      ...this.#keeper(this.#lead),
+      listSize,
+    };
+    if (earlierTurns?.left() === true) {
+      const ratio = settings.tokens.charsPerToken;
+      const tokens = tokensOf(opening.text, ratio) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio) + promptTokens(messages, ratio);
+      const window = model.limits.contextWindow?.tokens;
+      const spans = await compactor.check({ agent: this.#lead, call: 1, messages, context: { from: 0, to: messages.length }, window, reserve: settings.compaction.reserve, tokens, signal: new AbortController().signal });
+      for (const span of spans ?? []) messages.splice(span.from, span.to - span.from, ...span.messages);
+    }
+    // What the Author was told, as sent: what the session carried into the turn and the briefing (§5.3 l.489).
+    if (places.turn !== undefined) await this.#writeBriefing(places.turn, sentMessages(messages));
+
+    const runner = new AgentRunner({ ...leadOptions, point: compactor.point(model.limits.contextWindow?.tokens) });
+    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
+    let outcome: AgentOutcome | undefined;
+    if (!this.#ended()) {
       const work = runner.start({ messages: [] }, { given: handed });
       const entry = { runner, work };
       this.#working.add(entry);
-      const done = await work.done;
+      outcome = await work.done;
       this.#working.delete(entry);
-      return done;
-    };
-    const runner = leadRunner();
-    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
-    let outcome = await leadWork(runner);
-    // The provider refused the first call as longer than its model takes: that call would not fit after all (§11), so the session is compacted as for one that would not, and the call is made again, once, on what it then carries.
-    if (outcome !== undefined && compacting !== undefined && refusedAsTooLong(outcome, model.model) && (await this.#compact(compacting, true))) outcome = await leadWork(leadRunner());
+    }
     // Nothing more started: the turn was stopped, or its own time ran out on the way (during a compaction, say), and it ends at that limit.
     if (outcome === undefined) return this.#timeUp !== undefined ? this.#outcome({ status: "limit", limit: this.#timeUp }) : this.#outcome({ status: "stopped" });
     // What the rules remembered is kept once every judgment still running has come in: through the host's store, and in memory only for the turns a later turn can still follow.
@@ -597,156 +621,11 @@ export class Turn {
   }
 
   /**
-   * Compacts the session where this run's work starts, before the lead's first call (§11): when that
-   * call would not fit its model's window less the reserve, or its provider refused it as too long
-   * (`refused`), when the records the records mode carries pass their set size (the fold), or when
-   * the host asked. The moment before compaction comes first, when a summary can follow: its rules
-   * give the lead a call with their text, on its context as it stands, so it can save what it wants
-   * kept. Then a call on the lead's model, written from the compaction part, summarizes the turns the
-   * session carries but the newest it keeps: one call, or one a piece where they are more than the
-   * model takes. The summary is an entry of the session file, as this turn's work; the turns it
-   * stands for stay there. The carried block becomes the summary and the turns after it. Whether a
-   * summary was written.
-   */
-  async #compact(c: Compacting, refused: boolean): Promise<boolean> {
-    const { env } = this.#c;
-    const { file, carry, messages, model, opening, declared, settings } = c;
-    const ratio = settings.tokens.charsPerToken;
-    const window = model.limits.contextWindow?.tokens ?? 0;
-    // The model layer's own estimate of a request, before a provider has counted it.
-    const sent = (): number => tokensOf(opening.text, ratio) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio) + promptTokens(messages, ratio);
-    const before = sent();
-    const asked = file.log.asked !== undefined;
-    const tight = refused || (window > 0 && before > window - settings.compaction.reserve);
-    const folding = recordsTokens(c.carried, ratio) > settings.compaction.records;
-    if (this.#ended() || (!asked && !tight && !folding)) return false;
-    const current = file.log.turn(this.scope.turn);
-    // The mode "nothing" carries only what the session opened with, which no summary makes smaller.
-    const plan = current === undefined || carry.carry === "nothing" ? undefined : compactionAt(file.log, carry.from, current, settings.compaction.keepTurns, carry.compacted);
-    if (current === undefined || plan === undefined) {
-      if (refused) env.log.warn("The provider refused the lead's first call as too long, and its session has no earlier turn left to summarize.", { turn: this.scope.turn, run: this.run, tokens: before, window });
-      else if (tight) env.log.warn("The lead's first call would not fit its model's window less the reserve, and its session has no earlier turn left to summarize; the call goes out as it is.", { turn: this.scope.turn, run: this.run, tokens: before, window, reserve: settings.compaction.reserve });
-      return false;
-    }
-
-    // What the summary is written from, first: with no instructions or nothing to summarize, no summary can follow, and the moment before compaction does not come.
-    const part = template(await this.#guidance?.part("compaction"));
-    const instructions = joined([part?.render().text ?? ""]);
-    const material = await compactionMaterial(carry, plan.turns);
-    if (instructions === "" || material.turns.length === 0) {
-      env.log.warn("The session's earlier turns cannot be summarized: the compaction part, or what it would summarize, is empty. They are carried as they were.", { turn: this.scope.turn, run: this.run });
-      return false;
-    }
-
-    const due = await c.rules.beforeCompaction(this.#lead);
-    if (due.length > 0) {
-      for (const fired of due) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "call" } });
-      const saver = new AgentRunner({
-        agent: this.#lead,
-        trace: this.#trace,
-        model: model.model,
-        streamFn: model.streamFn,
-        connection: c.connection.label,
-        session: this.scope.session,
-        thinkingLevel: model.thinkingLevel,
-        terms: callTerms(settings, this.#lead.definition),
-        instructions: opening.text,
-        context: messages,
-        tools: declared,
-        texts: this.#texts,
-        settings: () => (settings.leadSampling === "preset" && this.#req.presetSampling !== undefined ? { sampling: this.#req.presetSampling } : undefined),
-        // The call the rule gives (§11), bounded by the user's setting, and by the definition's own where that is less: its last call's tools run, and nothing after them.
-        limits: { ...c.definition.limits, calls: Math.min(settings.compaction.saveCalls, c.definition.limits?.calls ?? settings.compaction.saveCalls) },
-        turn: this.#budget,
-        stream: c.rules.stream(this.#lead),
-        gate: this.#agentRuns().gate(this.#lead, undefined),
-        ...this.#keeper(this.#lead, "save"),
-      });
-      if (this.#ended()) return false;
-      const work = saver.start({ messages: [userMessage(joined(due.map((fired) => fired.text)), c.at)] }, { given: c.handed });
-      const entry = { runner: saver, work };
-      this.#working.add(entry);
-      await work.done;
-      this.#working.delete(entry);
-      if (this.#ended()) return false;
-    }
-
-    // Each summary call is sent no more than the model's window less the room for its answer: what is
-    // more than that goes in pieces, oldest first, each piece's summary handed to the next as the
-    // summary its turns follow.
-    const room = window > settings.compaction.reserve ? window - settings.compaction.reserve : Number.POSITIVE_INFINITY;
-    const laid = (summary: string | undefined, turns: readonly JsonObject[]): string => {
-      const fields = materialFields(carry.carry, summary, turns);
-      return fields === undefined ? "" : joined([c.layout.render(fields).text]);
-    };
-    let summary = material.summary;
-    let left = material.turns;
-    while (left.length > 0) {
-      const { piece, rest } = nextPiece(left, room, (turns) => tokensOf(instructions, ratio) + tokensOf(laid(summary, turns), ratio));
-      const written = await this.#summarize(c, instructions, laid(summary, piece));
-      if (written === undefined) return false;
-      summary = written;
-      left = rest;
-    }
-    if (summary === undefined) return false;
-    const compacted = file.add({ type: "compacted", parent: file.log.tip(this.scope.turn) ?? current.id, turn: this.scope.turn, summary, kept: plan.kept ?? current.id });
-    // What the turn carries from here: a second compaction in the turn starts after this one.
-    c.carry = { ...carry, compacted };
-    const after = await carriedFields(c.carry);
-    c.carried = after ?? {};
-    messages[c.carriedAt] = placed(systemMessage(joined([after === undefined ? "" : c.layout.render(after).text]), c.at), "session:carry");
-    this.#trace.event(this.#lead, undefined, { kind: "compacted", session: this.scope.session, before, after: sent(), keptTurns: plan.keptTurns });
-    return true;
-  }
-
-  /**
-   * One summary call (§11): the compaction part's instructions, and one piece of what is summarized,
-   * in a session of its own for the call, let go when it ends, so it never takes the lead's cached
-   * front or thread (§10.2). Its summary, or undefined when the turn stopped or the call gave none,
-   * which the log is told.
-   */
-  async #summarize(c: Compacting, instructions: string, material: string): Promise<string | undefined> {
-    if (this.#ended()) return undefined;
-    const { model } = c;
-    const session = this.#c.ids();
-    const summarizing: AgentRef = { id: this.#c.ids(), definition: this.#req.lead };
-    const summarizer = new AgentRunner({
-      agent: summarizing,
-      trace: this.#trace,
-      model: model.model,
-      streamFn: model.streamFn,
-      connection: c.connection.label,
-      session,
-      thinkingLevel: model.thinkingLevel,
-      terms: callTerms(c.settings, this.#req.lead),
-      instructions,
-      texts: this.#texts,
-      turn: this.#budget,
-      ...this.#keeper(summarizing),
-    });
-    const work = summarizer.start({ messages: [userMessage(material, c.at)] });
-    const entry = { runner: summarizer, work };
-    this.#working.add(entry);
-    let outcome: AgentOutcome;
-    try {
-      outcome = await work.done;
-    } finally {
-      this.#working.delete(entry);
-      this.#c.models.ended?.(this.scope.user, session);
-    }
-    if (this.#ended()) return undefined;
-    const summary = outcome.status === "done" ? outcome.text.trim() : "";
-    if (summary !== "") return summary;
-    this.#c.env.log.warn("The session's earlier turns could not be summarized; they are carried as they were.", { turn: this.scope.turn, run: this.run, status: outcome.status, ...(outcome.error !== undefined ? { error: outcome.error } : {}) });
-    return undefined;
-  }
-
-  /**
    * Opens the session for its lead: the opening block, which holds still for the session (§5.2,
    * §10.2), made by the one builder; what its definition's `opening:` names is asked of the host
    * once, here (§8.2, R-163). Or why it cannot be made.
    */
-  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, closing: TemplatePart | undefined, slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<Opening | "no-tags"> {
+  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<Opening | "no-tags"> {
     const { env } = this.#c;
     const { form, stream } = formFor(settings, connection);
     let tags: ReplyTags | undefined;
@@ -763,7 +642,6 @@ export class Turn {
     if (items.missing.length > 0) env.log.warn("What the lead's definition gives as its session opens could not be found.", { agent: definition.name, missing: items.missing });
     // The skills in the block stand as the session opened it, and the briefing says when the list no longer does.
     const block = await openingOf({ guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => registry.has(name), ...(contract !== undefined ? { contract: { part: contract, form } } : {}), items: { given: items, layout: template(layout) }, log: env.log });
-    const closingText = joined([closing?.render().text ?? ""]);
     return {
       text: block.text,
       snapshot: block.snapshot,
@@ -772,7 +650,6 @@ export class Turn {
       given: [...definition.given],
       outOfReach: [...definition.outOfReach],
       declared: Object.fromEntries(held.tools.map((tool) => [tool.name, { description: tool.description, parameters: tool.parameters }])),
-      ...(closingText !== "" ? { closing: closingText } : {}),
       form,
       stream,
       ...(tags !== undefined ? { tags } : {}),
@@ -804,7 +681,7 @@ export class Turn {
     const added = joined(block.stack.entries.flatMap((entry) => (entry.where === "briefing" && entry.left === undefined && entry.text !== undefined ? [entry.text] : [])));
     const changed = changedText(opening, block, notices);
     const rulesDue = joined(due);
-    const noticesText = this.#prompt === undefined ? [] : noticeLines(this.#prompt, await promptWords(guidance));
+    const noticesText = this.#prompt === undefined ? [] : noticeLines(this.#prompt, await noticeWords(guidance));
     // The host's parts by name, and by the same name with "-" as "_", as a template names a field.
     const hostParts: Record<string, string> = {};
     for (const part of req.briefing) {
@@ -874,10 +751,10 @@ export class Turn {
   }
 
   /**
-   * What an agent may reach by searching (§6.8): every tool registered but RPH's reply tools, the
-   * tools its requests carry, and the families its definition keeps out of reach; the lead's as its
-   * opening block fixed them for the session. A reply tool is reached only through an agent's own
-   * list: who may release the turn's one reply is the definitions' to say (§10.6, Appendix C).
+   * What an agent may reach by searching (§6.8): every tool registered, the tools its requests carry,
+   * and the families its definition keeps out of reach; the lead's as its opening block fixed them for
+   * the session. A definition that keeps the reply tools from its agent names their family in
+   * `out_of_reach:`, as it does any family (§10.6, Appendix C).
    */
   async #reach(agent: AgentRef): Promise<AgentReach> {
     const opening = this.#opening;
@@ -885,7 +762,7 @@ export class Turn {
     const definition = lead === undefined ? await this.#guidance?.definition(agent.definition) : undefined;
     const fixed = lead?.tools ?? definition?.tools ?? [];
     const outOfReach = lead?.outOfReach ?? definition?.outOfReach ?? [];
-    const tools = (this.#registry?.all() ?? []).filter((tool) => tool.from !== "rph" || tool.family !== REPLY_FAMILY || fixed.includes(tool.name));
+    const tools = this.#registry?.all() ?? [];
     return { tools, fixed, outOfReach };
   }
 
@@ -907,11 +784,17 @@ export class Turn {
     return this.#rules;
   }
 
-  /** Tools an agent's definition lists that nobody registered: the log is told once in the session, when each is first found, and not on every turn. */
-  #unregistered(message: string, definition: string, missing: readonly string[]): void {
-    if (missing.length === 0) return;
-    const fresh = unsaid(this.#c.sessions.of(this.scope), definition, missing);
-    if (fresh.length > 0) this.#c.env.log.warn(message, { agent: definition, tools: fresh });
+  /**
+   * Tools an agent's list names that it does not hold (§6.8): its definition lists a name nobody
+   * registered, a host's tool takes one of RPH's names, or the host withdrew one its session declared.
+   * The log and the trace are told once in the session, when each is first found, and not every turn.
+   */
+  #unheld(reason: "unregistered" | "shadowed" | "withdrawn", definition: string, names: readonly string[], message: string): void {
+    if (names.length === 0) return;
+    const fresh = unsaid(this.#c.sessions.of(this.scope), `${reason} ${definition}`, names);
+    if (fresh.length === 0) return;
+    this.#c.env.log.warn(message, { agent: definition, tools: fresh });
+    for (const tool of fresh) this.#trace.event(this.#lead, undefined, { kind: "tool_unheld", tool, definition, reason });
   }
 
   /** What an agent's calls are sent, kept as `trace.requests` names them (`AgentRuns.keep`), as the runner's option. */
@@ -1107,7 +990,7 @@ export class Turn {
     // A draft shows nothing, and the rules on the reply look at it as it is written all the same.
     const channel: TextChannel = shown ?? new SilentReply();
     if (!live) this.#say("writing");
-    this.#unregistered("Tools the writer's definition lists are registered by nobody; it holds the rest.", writer, held.missing);
+    this.#unheld("unregistered", writer, held.missing, "Tools the writer's definition lists are registered by nobody; it holds the rest.");
     const runner = new AgentRunner({
       agent: ref,
       trace: this.#trace,

@@ -352,3 +352,17 @@ test("a sub-agent's question is shown with what it looked up before asking, only
   expect(part.render({ agent: "gm-1", question: "Which quay?", searched: "Two quays." }).text.trim()).toBe("gm-1 stopped to ask before going on:\n\nWhich quay?\n\nWhat it looked up before asking:\n\nTwo quays.");
   expect(part.render({ agent: "gm-1", question: "Which quay?" }).text).not.toContain("looked up");
 });
+
+test("what an agent is given is laid out under its name; given again on a continue, it is only what changed, under a heading that says so", async () => {
+  const part = await template("given");
+  const first = part.render({ attachments: [{ name: "file:WORLD.md", text: "The harbour." }], missing: ["lore:e-9"] }).text;
+  expect(first).toContain("## What you have been given");
+  expect(first).toContain("### file:WORLD.md\n\nThe harbour.");
+  expect(first).toContain("lore:e-9 could not be found.");
+  expect(first).not.toContain("(changed)");
+  const again = part.render({ again: true, attachments: [{ name: "file:WORLD.md", text: "The harbour freezes.", changed: true }] }).text;
+  expect(again).toContain("## What has changed since you were last given it");
+  expect(again).toContain("### file:WORLD.md (changed)\n\nThe harbour freezes.");
+  expect(again).not.toContain("What you have been given");
+  expect({ asks: ASKS.test(first + again), unfilled: (first + again).includes("{{") }).toEqual({ asks: false, unfilled: false });
+});

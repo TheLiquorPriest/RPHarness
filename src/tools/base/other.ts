@@ -7,7 +7,7 @@
 import type { Suggestion } from "../../contract";
 import type { Guidance } from "../../files/api";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text } from "../kit";
-import { type BaseToolsDeps, noticesOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, noticesOf, textsOf, wordsOf } from "./deps";
 
 /** The tool that gives a skill's text by its name. */
 export const SKILL_LOAD = "skill_load";

@@ -8,6 +8,7 @@
 import type { AgentRef, Log, Scope, SessionParent, TraceEvent } from "../contract";
 import type { AgentRecord, ParentCall, RunTrace } from "../loop/trace";
 import type { HeldFile, NewEntry, SessionBook } from "./book";
+import type { CompactFacts } from "./compact";
 
 /** What a record of an agent's work is in its session's file: its intent record, what it wrote in a call, a call, what came back; nothing for any other record. */
 export function entryOf(event: TraceEvent, turn: string, parent: string | null): NewEntry | undefined {
@@ -108,12 +109,12 @@ export class RunSessions {
   }
 
   /** A summary of such an agent's own older calls (§11), kept in its file as its run's compaction; it stands for those entries, which the file keeps. */
-  compacted(agent: AgentRef, summary: string): void {
+  compacted(agent: AgentRef, summary: string, facts: CompactFacts): void {
     const opened = this.#opened.get(agent.id);
     if (opened === undefined) return;
     this.#on(opened, (file) => {
       const begun = file.log.turn(this.#turn);
-      if (begun !== undefined) file.add({ type: "compacted", parent: file.log.tip(this.#turn) ?? begun.id, turn: this.#turn, summary, kept: begun.id, of: "run" });
+      if (begun !== undefined) file.add({ type: "compacted", parent: file.log.tip(this.#turn) ?? begun.id, turn: this.#turn, summary, kept: begun.id, of: "run", ...facts });
     });
   }
 

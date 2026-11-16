@@ -23,7 +23,7 @@ function turn(id: string, extra: Partial<TurnRequest> = {}): TurnRequest {
 test("a session file the host deletes between turns is begun anew by the next turn, which carries nothing from it (with no session kept read between turns)", async () => {
   const s = (open = await stage({ config: "sessions:\n  held: 0\n", answers: [1, 2, 3].map((n) => said(`<intent>Intent ${n}.</intent><reply>Reply ${n}.</reply>`)) }));
   for (const req of [turn("t1"), turn("t2", { parent: "t1" })]) expect((await s.turn(req)).outcome.status).toBe("released");
-  expect((await s.harness.sessions!.list(USER, CHAT)).map((view) => view.id)).toEqual(["s1"]);
+  expect((await s.harness.sessions!.list(USER, CHAT)).sessions.map((view) => view.id)).toEqual(["s1"]);
 
   // The host prunes the session.
   expect((await s.env.files.write(S1, FILE, { op: "delete" }, "harness")).status).toBe("written");

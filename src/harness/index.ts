@@ -16,7 +16,8 @@ import { tokensOf } from "../model/tokens";
 import { withClosing } from "../loop";
 import { promptMapApi } from "../prompt";
 import { Jobs } from "../jobs";
-import { closingOf, type SessionChange, sessionsApi } from "../sessions/api";
+import { closingOf, type SessionChange, sessionsApi, viewOf } from "../sessions/api";
+import { SessionListing } from "../sessions/listing";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { connectionOf, template } from "./means";
@@ -64,7 +65,9 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   });
   const hub = new LiveHub({ log: env.log });
   const usage = new UsageBook({ store: env.store, clock: env.clock, log: env.log, files: env.files });
-  const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now() });
+  // Each chat's index of its sessions, brought up to date whenever a session's file changes, so the Sessions page lists without reading them.
+  const listing = new SessionListing(env.store, env.log);
+  const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now(), changed: (file) => listing.keep(file.scope, viewOf(file, env.clock.now()), file.log.leftTurns()) });
   const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, book });
   const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs };
   const turns = new Map<string, Turn>();
@@ -142,6 +145,9 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       files: env.files,
       now: () => env.clock.now(),
       keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).compaction.keepTurns,
+      pageSize: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).sessions.page,
+      carriedPart: async (scope) => template(await loadGuidance(env.files, scope).part("carried")),
+      listing,
       closed: sessionClosed,
       log: env.log,
       told,

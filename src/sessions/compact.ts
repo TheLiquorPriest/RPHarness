@@ -22,6 +22,13 @@ import { nextPiece } from "./carry";
 /** Why a compaction was made (S-9). */
 export type CompactReason = Extract<TraceEvent, { kind: "compacted" }>["reason"];
 
+/** What a compaction's entry keeps beside its summary, for the Sessions page: why, and the request's size as counted before and after. */
+export interface CompactFacts {
+  reason: CompactReason;
+  before: number;
+  after: number;
+}
+
 /** How a compaction's material is laid out for its call by the carried part: the summary so far, and the turns (or the run's own work) it is to stand for. */
 export type MaterialFields = (summary: string | undefined, turns: readonly JsonObject[]) => Fields | undefined;
 
@@ -35,7 +42,7 @@ export interface EarlierTurns {
   /** Whether earlier turns are left to summarize. */
   left(): boolean;
   /** Summarizes them and writes the summary as the turn's: the carried block as it then stands, its place in the run's fixed context, and how many turns it keeps as they were. */
-  compact(summarize: Summarize): Promise<{ at: number; message: AgentMessage; keptTurns: number } | undefined>;
+  compact(summarize: Summarize, facts: { reason: CompactReason; before: number }): Promise<{ at: number; message: AgentMessage; keptTurns: number } | undefined>;
 }
 
 export interface CompactorDeps {
@@ -68,7 +75,7 @@ export interface CompactorDeps {
   /** The session's earlier turns, for a lead. */
   earlier?: EarlierTurns;
   /** Where a summary of the run's own older calls is kept as the run's: the agent's session file. */
-  written?(summary: string): void;
+  written?(summary: string, facts: CompactFacts): void;
 }
 
 /** What an agent's save call at the moment before compaction is made with. */
@@ -238,7 +245,7 @@ export class Compactor {
       d.trace.event(d.agent, undefined, { kind: "compacted", session: d.session, reason, of, before, after: size, ...(keptTurns !== undefined ? { keptTurns } : {}) });
     const summarize: Summarize = (layout, summary, turns) => this.#summarize(parts, layout, summary, turns, fits);
     if (earlier) {
-      const done = await d.earlier!.compact(summarize);
+      const done = await d.earlier!.compact(summarize, { reason, before: size });
       if (done !== undefined) {
         const at = request.context.from + done.at;
         const before = size;
@@ -260,7 +267,7 @@ export class Compactor {
           const before = size;
           size += weigh([message], ratio) - weigh(messages.slice(work.from, work.to), ratio);
           spans.push({ from: work.from, to: work.to, messages: [message] });
-          d.written?.(summary);
+          d.written?.(summary, { reason, before, after: size });
           told("run", before);
         }
       }

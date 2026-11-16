@@ -23,6 +23,8 @@ export interface BookDeps {
   /** RPH's own ids, which session entries take (`HarnessOptions.ids`). */
   ids(): string;
   now(): number;
+  /** A file something changed was let go: what lists the chat's sessions is brought up to date. */
+  changed?(file: SessionFile): void;
 }
 
 /** One session's file: its tree in memory, and its lines on disk. */
@@ -42,6 +44,8 @@ export class SessionFile {
   #queued = "";
   /** The appends under way, until the queue is empty or one fails. */
   #writing: Promise<void> | undefined;
+  /** Whether something was written to it since `takeChanged` was last asked. */
+  #changed = false;
   /**
    * Why the file could not be read, where it could not: refused or failed as a whole (`reason`, the
    * host's or the error's words), or lines that do not parse (`lines`, from 1). The turn is told, and
@@ -101,6 +105,13 @@ export class SessionFile {
     return this.#queued !== "" || this.#writing !== undefined;
   }
 
+  /** Whether something was written to it since this was last asked: asking clears it. */
+  takeChanged(): boolean {
+    const was = this.#changed;
+    this.#changed = false;
+    return was;
+  }
+
   /** Tries again what an append could not write, and resolves as `settled` does. */
   async flush(): Promise<void> {
     if (this.#queued !== "") this.#writing ??= this.#drain();
@@ -108,6 +119,7 @@ export class SessionFile {
   }
 
   #write(text: string): void {
+    this.#changed = true;
     this.#queued += text;
     this.#writing ??= this.#drain();
   }
@@ -195,6 +207,8 @@ export class SessionBook {
       release: () => {
         if (released) return;
         released = true;
+        // Told as it is let go, before the holder goes on: a listing asked next finds it.
+        if (file.takeChanged()) this.#d.changed?.(file);
         this.#let(key, held);
       },
     };

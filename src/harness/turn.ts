@@ -403,7 +403,7 @@ export class Turn {
       progress: (name, fields) => this.#say(name, fields),
       keep: (agent, kind) => this.#keeper(agent, kind).keep,
       session: (agent, kind, by) => this.#agentRuns().session(agent, kind, by),
-      compacted: (agent, summary) => this.#agentRuns().compacted(agent, summary),
+      compacted: (agent, summary, facts) => this.#agentRuns().compacted(agent, summary, facts),
       compaction: () => this.#settings.compaction,
       slice,
     });
@@ -536,18 +536,23 @@ export class Turn {
         : {
             starting: () => (file.log.asked !== undefined ? "asked" : recordsTokens(carriedNow, settings.tokens.charsPerToken) > settings.compaction.records ? "fold" : undefined),
             left: () => earlierPlan() !== undefined,
-            compact: async (summarize) => {
+            compact: async (summarize, facts) => {
               const current = file.log.turn(scope.turn);
               const plan = earlierPlan();
               if (current === undefined || plan === undefined) return undefined;
               const material = await compactionMaterial(carrying, plan.turns);
               const summary = await summarize((before, turns) => materialFields(carrying.carry, before, turns), material.summary, material.turns);
               if (summary === undefined || this.#ended()) return undefined;
-              const compacted = file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? current.id, turn: scope.turn, summary, kept: plan.kept ?? current.id });
-              // What the turn carries from here: a second compaction in the turn starts after this one.
+              // What the turn carries from here, laid out first so the entry keeps the request's size after it: a second compaction in the turn starts after this one.
+              const ratio = settings.tokens.charsPerToken;
+              const was = joined([layout.render(carriedNow ?? {}).text]);
+              const entry = { type: "compacted" as const, parent: file.log.tip(scope.turn) ?? current.id, turn: scope.turn, summary, kept: plan.kept ?? current.id, turns: plan.turns.map((turn) => turn.entry.turn), reason: facts.reason, before: facts.before };
+              const fields = (await carriedFields({ ...carrying, compacted: { ...entry, id: "", at: env.clock.now() } })) ?? {};
+              const now = joined([layout.render(fields).text]);
+              const compacted = file.add({ ...entry, after: facts.before - tokensOf(was, ratio) + tokensOf(now, ratio) });
               carrying = { ...carrying, compacted };
-              carriedNow = (await carriedFields(carrying)) ?? {};
-              return { at: carriedAt, message: placed(systemMessage(joined([layout.render(carriedNow).text]), env.clock.now()), "session:carry"), keptTurns: plan.keptTurns };
+              carriedNow = fields;
+              return { at: carriedAt, message: placed(systemMessage(now, env.clock.now()), "session:carry"), keptTurns: plan.keptTurns };
             },
           };
     const track = (entry: { runner: AgentRunner; work: Work }): (() => void) => {
@@ -574,7 +579,7 @@ export class Turn {
       before: (request) => saveBeforeCompaction(request, { options: leadOptions, rules, saveCalls: settings.compaction.saveCalls, ...this.#keeper(this.#lead, "save"), track, stopped: () => this.#ended(), given: handed }),
       ...(earlierTurns !== undefined ? { earlier: earlierTurns } : {}),
       // A summary of the lead's own older calls is the turn's compaction too; it stands for those entries, which the file keeps.
-      written: (summary) => void file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? begun.id, turn: scope.turn, summary, kept: begun.id, of: "run" }),
+      written: (summary, facts) => void file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? begun.id, turn: scope.turn, summary, kept: begun.id, of: "run", ...facts }),
     });
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);

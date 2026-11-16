@@ -146,7 +146,9 @@ export interface ShownEntry extends EntryBase {
  * stands for stay in the file, and a path that does not pass through it has them all. With `of:
  * "run"`, the summary is of the turn's own older calls, made mid-run when a call would not fit: it
  * stands for those entries of the turn, which the file keeps, and what a later turn carries is not
- * changed by it (`kept` is the turn's own first entry).
+ * changed by it (`kept` is the turn's own first entry). What the Sessions page shows of it: the
+ * turns it stands for (`turns`), why it was made (`reason`), and the request's size as counted
+ * before and after (`before`, `after`); absent in an entry written before they were kept.
  */
 export interface CompactedEntry extends EntryBase {
   type: "compacted";
@@ -154,6 +156,17 @@ export interface CompactedEntry extends EntryBase {
   summary: string;
   kept: string;
   of?: "run";
+  turns?: string[];
+  reason?: "would-not-fit" | "refused" | "asked" | "fold";
+  before?: number;
+  after?: number;
+}
+
+/** The owner undid a summary (S-8, R-38): `compacted` no longer stands, so from the next turn the turns it stood for are carried whole again, until a later compaction. A mark of his word: it belongs to no turn, and is never the leaf. */
+export interface UncompactedEntry extends EntryBase {
+  type: "uncompacted";
+  compacted: string;
+  turn?: undefined;
 }
 
 /** The host asked for a compaction (§11): the session's next turn compacts at its start. A mark that holds until a compaction is written after it. */
@@ -217,7 +230,7 @@ export interface SpentEntry extends EntryBase {
   ms: number;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | OpensWithEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | CachedEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
+export type SessionEntry = OpeningEntry | OpenedEntry | OpensWithEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | CachedEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | UncompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -259,6 +272,8 @@ function isEntry(v: Record<string, unknown>): boolean {
       return optional(v["turn"], str) && optional(v["by"], (by) => by === "user");
     case "reopened":
       return v["turn"] === undefined && str(v["closing"]);
+    case "uncompacted":
+      return v["turn"] === undefined && str(v["compacted"]);
     case "left":
       return str(v["turn"]);
     case "shown":
@@ -363,6 +378,8 @@ export class SessionLog {
   readonly #spent = new Map<string, SpentEntry>();
   /** The owner's undo of each closing he took back, by the closing. */
   readonly #reopened = new Map<string, ReopenedEntry>();
+  /** The summaries the owner undid, by the summary. */
+  readonly #undone = new Map<string, UncompactedEntry>();
   /** The host's newest word on the summary the session opens with, in the order of the file. */
   #opensWith: OpensWithEntry | undefined;
 
@@ -427,6 +444,9 @@ export class SessionLog {
       case "reopened":
         if (!this.#reopened.has(entry.closing)) this.#reopened.set(entry.closing, entry);
         return;
+      case "uncompacted":
+        if (!this.#undone.has(entry.compacted)) this.#undone.set(entry.compacted, entry);
+        return;
       case "opensWith":
         this.#opensWith = entry;
         return;
@@ -482,6 +502,11 @@ export class SessionLog {
     return this.#reopened.get(id);
   }
 
+  /** The owner's undo of the summary `id`, if he undid it. */
+  undone(id: string): UncompactedEntry | undefined {
+    return this.#undone.get(id);
+  }
+
   /** A turn's first entry. */
   turn(turn: string): TurnEntry | undefined {
     return this.#turns.get(turn);
@@ -495,6 +520,11 @@ export class SessionLog {
   /** Whether the host said a turn left the path, and no turn has followed it since. */
   left(turn: string): boolean {
     return this.#left.has(turn);
+  }
+
+  /** The turns off the path now. */
+  leftTurns(): string[] {
+    return [...this.#left.keys()];
   }
 
   /** The host's word that put a turn off the path, while it is off it. */

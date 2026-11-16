@@ -21,7 +21,7 @@ const MEMBERS = {
   live: ["pause", "letGo", "say"],
   definitions: ["apply"],
   jobs: ["start", "cancel", "setSwitches", "hold", "letGo", "again", "answer"],
-  sessions: ["compact", "reopen"],
+  sessions: ["compact", "reopen", "uncompact"],
   models: ["save"],
 } as const satisfies { live: readonly (keyof LiveApi)[]; definitions: readonly (keyof DefinitionsApi)[]; jobs: readonly (keyof JobsApi)[]; sessions: readonly (keyof SessionsApi)[]; models: readonly (keyof ModelsApi)[] };
 

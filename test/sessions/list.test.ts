@@ -18,6 +18,6 @@ test("a chat with more sessions than a host gives by default in one find has eve
     s.clock.advance(1);
     await sessions.open({ user: USER, chat: CHAT, session: id });
   }
-  const listed = await sessions.list(USER, CHAT);
+  const listed = (await sessions.list(USER, CHAT, { limit: ids.length })).sessions;
   expect(listed.map((view) => view.id)).toEqual(ids);
 });

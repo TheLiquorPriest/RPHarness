@@ -4,11 +4,13 @@
 // compaction asked for, and each session as it stands now. Every change is told as it happens, to
 // the host's trace and the chat's live view (§13.1: RPH reports everything it does). Code never
 // closes a session for its size, and nothing here is a step of a turn.
-import type { FilesPort, Log, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
+import type { CompactionView, FilesPort, Log, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
+import type { TemplatePart } from "../files/api";
 import type { SessionBook, SessionFile } from "./book";
 import { copyCache } from "./cache";
-import { compactionAt, pathTurns } from "./carry";
-import type { ClosedEntry, SessionEntry, SessionLog } from "./file";
+import { carriedFields, compactionAt, pathTurns, summaryStands } from "./carry";
+import type { ClosedEntry, CompactedEntry, SessionEntry, SessionLog } from "./file";
+import { pageOf, type SessionListing } from "./listing";
 
 /** A change of a session, as its trace record tells it. */
 export type SessionChange = Omit<Extract<TraceEvent, { kind: "session" }>, "kind">;
@@ -29,7 +31,7 @@ export function closingOf(file: SessionFile): ClosedEntry | undefined {
 }
 
 /** A session as it stands at its leaf: the newest closing that stands says who closed it. */
-function viewOf(file: SessionFile, now: number): SessionView {
+export function viewOf(file: SessionFile, now: number): SessionView {
   const { log, header, scope } = file;
   const turns = pathTurns(log, log.leaf);
   const closing = standing(log, new Set(turns.map((turn) => turn.entry.turn))).at(-1);
@@ -59,10 +61,39 @@ export interface SessionsDeps {
   now(): number;
   /** How many of a session's newest turns a summary never stands for, as the user's settings for its chat say. */
   keepTurns(scope: Scope): Promise<number>;
+  /** How many sessions a page of the list holds when it asks for no number (`sessions.page`), as the user's settings say. */
+  pageSize(scope: Scope): Promise<number>;
+  /** The carried part (§10.2 block 3's layout), as the files for the session's chat stand. */
+  carriedPart(scope: Scope): Promise<TemplatePart | undefined>;
+  /** Each chat's index of its sessions, which a listing reads. */
+  listing: SessionListing;
   /** The session closed: what the harness and the model layer keep of it beside its file is let go. */
   closed(scope: Scope): void;
   /** A change of the session, told to the host's trace and the chat's live view as a record of the host's word (S-1). */
   told(scope: Scope, change: SessionChange): void;
+}
+
+/** A compaction as the Sessions page shows it, from its entry. */
+function compactionOf(log: SessionLog, onPath: ReadonlySet<string>, entry: CompactedEntry): CompactionView {
+  const undone = log.undone(entry.id) !== undefined;
+  return {
+    id: entry.id,
+    turn: entry.turn,
+    summary: entry.summary,
+    at: entry.at,
+    of: entry.of ?? "turns",
+    turns: [...(entry.turns ?? [])],
+    ...(entry.reason !== undefined ? { reason: entry.reason } : {}),
+    ...(entry.before !== undefined ? { before: entry.before } : {}),
+    ...(entry.after !== undefined ? { after: entry.after } : {}),
+    stands: onPath.has(entry.id) && summaryStands(log, entry),
+    ...(undone ? { undone: true as const } : {}),
+  };
+}
+
+function compactionsOf(log: SessionLog): CompactionView[] {
+  const onPath = new Set(log.path(log.leaf).map((entry) => entry.id));
+  return log.entries.flatMap((entry) => (entry.type === "compacted" ? [compactionOf(log, onPath, entry)] : []));
 }
 
 export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
@@ -177,21 +208,49 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
       return seen === undefined ? undefined : placed(seen);
     },
 
-    async list(user, chat) {
+    async list(user, chat, page) {
       const scope: Scope = { user, chat, session: ANY_SESSION };
+      const limit = page?.limit ?? (await d.pageSize(scope));
+      const indexed = await d.listing.all(user, chat);
+      if (indexed !== undefined) return pageOf(indexed, page?.after, limit);
+      // No index yet (or the store lost it): made again from the files, once, and listed from it.
       const { files } = d;
       const folder = (await files.places(scope)).session.replace(/[^/]+\/$/, "");
       // Every session the chat has: a host's own cap on one find would cut the list short with no sign of it.
       const found = await files.find(scope, { by: "glob", pattern: "*/*.jsonl", limit: Number.MAX_SAFE_INTEGER, ...(folder !== "" ? { path: folder } : {}) });
-      if (found.status === "refused") return [];
+      if (found.status === "refused") return { sessions: [] };
       const ids = found.hits.flatMap((hit) => {
         const [session, name] = hit.path.slice(folder.length).split("/");
         return hit.type === "file" && session !== undefined && name === `${session}.jsonl` ? [session] : [];
       });
       // One file at a time, each let go once its view is made: a chat's sessions are never in memory all at once.
-      const views: SessionView[] = [];
-      for (const session of ids) views.push(await placed(await book.with({ user, chat, session }, view)));
-      return views.sort((a, b) => a.opened - b.opened);
+      const made: { view: SessionView; left: string[] }[] = [];
+      for (const session of ids) made.push(await book.with({ user, chat, session }, (file) => ({ view: view(file), left: file.log.leftTurns() })));
+      await d.listing.rebuild(user, chat, made);
+      return pageOf((await d.listing.all(user, chat)) ?? [], page?.after, limit);
     },
+
+    carried: (scope, carry) =>
+      book.with(scope, async (file) => {
+        // Block 3 as the session's next turn would have it, after its newest turn on the path.
+        const layout = await d.carriedPart(scope);
+        if (layout === undefined) return "";
+        const record = layout.header["record"];
+        const fields = await carriedFields({ carry, tree: file.log, from: file.log.leaf, scope, files: d.files, log: d.log, ...(typeof record === "string" ? { record } : {}) });
+        return fields === undefined ? "" : layout.render(fields).text.trimEnd();
+      }),
+
+    compactions: (scope) => book.with(scope, (file) => compactionsOf(file.log)),
+
+    uncompact: (scope, id) =>
+      book.with(scope, async (file) => {
+        // His undo: the summary no longer stands; the file keeps both.
+        const entry = file.log.get(id);
+        if (entry?.type === "compacted" && file.log.undone(id) === undefined) {
+          file.add({ type: "uncompacted", parent: file.log.leaf, compacted: id });
+          await file.settled();
+        }
+        return compactionsOf(file.log);
+      }),
   };
 }

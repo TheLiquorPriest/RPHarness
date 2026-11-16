@@ -20,7 +20,7 @@ import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerOptions, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import { PlaceLine } from "../loop/line";
-import { Compactor, saveBeforeCompaction } from "../sessions/compact";
+import { type CompactFacts, Compactor, saveBeforeCompaction } from "../sessions/compact";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "../harness/opening";
@@ -86,7 +86,7 @@ export interface TeamDeps {
   /** An agent the team made is a session of its own (§13.4): a sub-agent (`agent`), or a job's first agent (`job`); `by` the call that started it, none for a job the owner started. None: no file is kept. */
   session?(agent: AgentRef, kind: "agent" | "job", by: ParentCall | undefined): void;
   /** A summary of such an agent's own older calls (§11), kept in its session's file as its run's compaction. */
-  compacted?(agent: AgentRef, summary: string): void;
+  compacted?(agent: AgentRef, summary: string, facts: CompactFacts): void;
   /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
   job?: string;
 }
@@ -337,7 +337,7 @@ export class Team implements TeamWork {
             keep: (agent) => d.keep?.(agent),
             track: (entry) => d.track(entry),
             stopped: () => false,
-            written: (summary) => d.compacted?.(ref, summary),
+            written: (summary, facts) => d.compacted?.(ref, summary, facts),
             before: (request) => {
               const saving = d.keep?.(ref, "save");
               return saveBeforeCompaction(request, { options, rules, saveCalls: compaction.saveCalls, ...(saving !== undefined ? { keep: saving } : {}), track: (entry) => d.track(entry), stopped: () => request.signal.aborted });

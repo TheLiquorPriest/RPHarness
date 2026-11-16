@@ -16,6 +16,7 @@ import type { Settings } from "./settings";
 import { Transcripts } from "./transcripts";
 import { RunSessions } from "../sessions/runs";
 import type { SessionBook } from "../sessions/book";
+import type { CompactFacts } from "../sessions/compact";
 
 export interface AgentRunDeps {
   env: Environment;
@@ -64,8 +65,8 @@ export class AgentRuns {
   }
 
   /** A summary of such an agent's own older calls (§11), kept in its session's file. */
-  compacted(agent: AgentRef, summary: string): void {
-    this.#sessions?.compacted(agent, summary);
+  compacted(agent: AgentRef, summary: string, facts: CompactFacts): void {
+    this.#sessions?.compacted(agent, summary, facts);
   }
 
   /** The run ended, whatever the end: each of its agents' sessions is closed and written. */

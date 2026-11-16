@@ -85,7 +85,7 @@ test("a branch starts as its source stood at a turn: its next turn carries what 
   for (const part of [SUMMARY, "Intent 1.", "Intent 2."]) expect(text).toContain(part);
   expect(text).not.toContain("Intent 3.");
 
-  expect((await sessions.list(USER, CHAT)).map((view) => [view.id, view.turns])).toEqual([
+  expect((await sessions.list(USER, CHAT)).sessions.map((view) => [view.id, view.turns])).toEqual([
     ["s1", 3],
     ["s2", 3],
   ]);

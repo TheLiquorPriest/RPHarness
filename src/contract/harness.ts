@@ -9,7 +9,7 @@ import type { LayerLevel } from "./files";
 import type { ModelsApi, ToolsAs } from "./models";
 import type { TraceDelta, TraceRecord } from "./trace";
 import type { JobPage, JobQuery } from "./store";
-import type { LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
+import type { Carry, LimitHit, ReplySink, TurnOutcome, TurnRequest } from "./turn";
 import type { ListedFact } from "./facts";
 import type { JsonSchema } from "./json";
 import type { PromptMapApi } from "./prompt";
@@ -230,7 +230,40 @@ export interface SessionsApi {
   /** Compacts it at the start of its next turn, on the user's word (§11). */
   compact(scope: Scope): Promise<SessionView>;
   get(scope: Scope): Promise<SessionView | undefined>;
-  list(user: string, chat: string): Promise<SessionView[]>;
+  /**
+   * A page of the chat's sessions, in the order opened (S-7): `sessions.page` of them unless `limit`
+   * asks for fewer or more, from after the session `after` names; `next`, where the next page starts,
+   * while more are left. Listed from the chat's index of its sessions: no session file is read.
+   */
+  list(user: string, chat: string, page?: { after?: string; limit?: number }): Promise<{ sessions: SessionView[]; next?: string }>;
+  /** What the session's next turn would carry in mode `carry` (S-8, §14 Sessions): block 3 as it would go, laid out by the carried part; empty where it would carry nothing. */
+  carried(scope: Scope, carry: Carry): Promise<string>;
+  /** Each compaction of the session, in the order written (S-8): its summary, the turn that wrote it, what it stands for, why, its sizes, and whether it still stands. */
+  compactions(scope: Scope): Promise<CompactionView[]>;
+  /** Undoes a summary (S-8, R-38's "Undo the summary"): from the next turn the turns it stood for are carried whole again, until a later compaction; the file keeps both. Owner's presses only (C-24). */
+  uncompact(scope: Scope, id: string): Promise<CompactionView[]>;
+}
+
+/** A compaction as the Sessions page shows it (S-8). */
+export interface CompactionView {
+  /** Its entry's id in the session file: what `uncompact` names. */
+  id: string;
+  /** The turn whose work it was. */
+  turn: string;
+  summary: string;
+  at: number;
+  /** What it summarized: the session's earlier turns, or a run's own older calls. */
+  of: "turns" | "run";
+  /** The turns it stands for (of earlier turns), oldest first; empty where the entry was written before they were kept. */
+  turns: string[];
+  reason?: "would-not-fit" | "refused" | "asked" | "fold";
+  /** The request's size as counted, before and after, in tokens. */
+  before?: number;
+  after?: number;
+  /** Whether it still stands on the session's path: on it, not undone, and no turn it stood for left since. A run's own summary stands for nothing a later turn carries. */
+  stands: boolean;
+  /** The owner undid it. */
+  undone?: true;
 }
 
 // ---------------------------------------------------------------- rules

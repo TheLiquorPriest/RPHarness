@@ -42,21 +42,28 @@ export function pathTurns(log: SessionLog, to: string | null): PathTurn[] {
 }
 
 /**
- * The newest summary on a path that still stands. A summary stands for every turn before the first
- * it kept, on its own line of the file, as they stood when it was written: once one of them leaves
- * the path after that (deleted, or an attempt shown again in its place), it no longer stands, and
- * the one before it is taken, or none. So a turn that left reaches no later request through a
- * summary: the turns it stood for are carried as they are now, and the next compaction summarizes
- * them again from the file.
+ * Whether a summary of earlier turns still stands, wherever it is: the owner has not undone it, and
+ * no turn it stood for (every turn before the first it kept, on its own line of the file, as they
+ * stood when it was written) has left the path since (deleted, or an attempt shown again in its
+ * place).
+ */
+export function summaryStands(log: SessionLog, entry: CompactedEntry): boolean {
+  if (entry.of === "run" || log.undone(entry.id) !== undefined) return false;
+  const written = log.path(entry.id, true);
+  const kept = written.findIndex((step) => step.id === entry.kept);
+  const stood = written.slice(0, kept < 0 ? written.length - 1 : kept);
+  return !stood.some((step) => step.type === "turn" && log.leftAfter(step.turn, entry.id));
+}
+
+/**
+ * The newest summary on a path that still stands (`summaryStands`); else the one before it, or none.
+ * So a turn that left, or a summary undone, reaches no later request through it: the turns it stood
+ * for are carried as they are now, and the next compaction summarizes them again from the file.
  */
 function newestSummary(log: SessionLog, path: readonly SessionEntry[]): CompactedEntry | undefined {
   for (let at = path.length - 1; at >= 0; at -= 1) {
     const entry = path[at]!;
-    if (entry.type !== "compacted" || entry.of === "run") continue;
-    const written = log.path(entry.id, true);
-    const kept = written.findIndex((step) => step.id === entry.kept);
-    const stood = written.slice(0, kept < 0 ? written.length - 1 : kept);
-    if (!stood.some((step) => step.type === "turn" && log.leftAfter(step.turn, entry.id))) return entry;
+    if (entry.type === "compacted" && summaryStands(log, entry)) return entry;
   }
   return undefined;
 }

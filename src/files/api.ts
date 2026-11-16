@@ -60,7 +60,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FileProblem, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 import type { HookEntry } from "../external/hooks";
 import type { McpRead } from "./mcp";
@@ -81,17 +81,8 @@ export interface Replaced {
   path: string;
 }
 
-/**
- * Something wrong with a file, in words a user can act on: which file, which line where one can be
- * named, and what to change. A problem never stops a turn: the file, or the field, is left out.
- */
-export interface Problem {
-  path: string;
-  level?: LayerLevel;
-  /** The line of the file, counted from 1. */
-  line?: number;
-  message: string;
-}
+/** Something wrong with a file, in words a user can act on (the contract's `FileProblem`, as `Harness.problems` gives it). */
+export type Problem = FileProblem;
 
 // ---------------------------------------------------------------- the owner's own tools
 

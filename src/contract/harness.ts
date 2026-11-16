@@ -657,15 +657,35 @@ export interface KeptMessage {
   block?: string;
 }
 
+/** A message of a rebuilt request: as it was sent, and, where its text was kept as a place in a file of the turn's folder, that file, as a path in the agents' view. */
+export interface RebuiltMessage extends KeptMessage {
+  file?: string;
+}
+
 /**
  * A kept request rebuilt from the turn's folder (§5.3 l.495, §17.1 l.1764): every message as it was
- * sent, in order; each tool declared with the file its description came from (none for a host's
- * tool); and whether what was rebuilt is what was sent (`same`, by the hash the file keeps).
+ * sent, in order, each with the file its text points into where it points into one; each tool
+ * declared with the file its description came from (none for a host's tool); and whether what was
+ * rebuilt is what was sent (`same`, by the hash the file keeps).
  */
 export interface RebuiltRequest {
-  messages: KeptMessage[];
+  messages: RebuiltMessage[];
   tools: { name: string; file?: string }[];
   same: boolean;
+}
+
+/**
+ * Something RPH finds wrong with one of the files it reads (an agent definition, a rule, a part, a
+ * skill, a level's config, a tool's manifest, `mcp.json`, a level's `hooks.yml`), in words a user can
+ * act on: the file as a path in the agents' view, its level, its line where one can be named, and
+ * what to change. A problem never stops a turn: the file, or what of it does not read, is left out.
+ */
+export interface FileProblem {
+  path: string;
+  level?: LayerLevel;
+  /** The line of the file, counted from 1. */
+  line?: number;
+  message: string;
 }
 
 // ---------------------------------------------------------------- the harness
@@ -717,6 +737,13 @@ export interface Harness {
    * from the pointers into the turn's files it holds; undefined when there is no such file.
    */
   rebuildRequest(scope: Scope, file: string): Promise<RebuiltRequest | undefined>;
+  /**
+   * Every problem RPH finds in the files it reads for a scope (the Files page): a file that does not
+   * read, a field it does not know, a name that finds no file. A file that does not parse at all,
+   * whose hooks or rules are then none, is among them. With a scope of no chat, the shipped and
+   * global levels' alone. A read: it changes nothing.
+   */
+  problems(scope: Scope | UserScope): Promise<FileProblem[]>;
   /** Stops every run and job (a running job is kept as interrupted, §13.5) and waits for what RPH keeps to be written. */
   close(): Promise<void>;
 }

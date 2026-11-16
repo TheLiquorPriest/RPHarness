@@ -256,6 +256,10 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       return rebuildRequest(env.files, scope, file);
     },
 
+    problems(scope) {
+      return loadGuidance(env.files, scope).problems();
+    },
+
     async close() {
       for (const turn of turns.values()) turn.stop();
       await Promise.allSettled([...answering, jobs.close()]);

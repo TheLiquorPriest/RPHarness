@@ -16,6 +16,7 @@ import { tokensOf } from "../model/tokens";
 import { withClosing } from "../loop";
 import { promptMapApi } from "../prompt";
 import { Jobs } from "../jobs";
+import { External } from "../external";
 import { closingOf, type SessionChange, sessionsApi, viewOf } from "../sessions/api";
 import { SessionListing } from "../sessions/listing";
 import { SessionBook } from "../sessions/book";
@@ -68,8 +69,9 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   // Each chat's index of its sessions, brought up to date whenever a session's file changes, so the Sessions page lists without reading them.
   const listing = new SessionListing(env.store, env.log);
   const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now(), changed: (file) => listing.keep(file.scope, viewOf(file, env.clock.now()), file.log.leftTurns()) });
-  const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, book });
-  const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs };
+  const external = new External({ files: env.files, switches: env.switches, secret: (user, name) => layer.toolSecret(user, name) });
+  const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, book, external });
+  const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs, external };
   const turns = new Map<string, Turn>();
   const answering = new Set<Promise<unknown>>();
   // A change of a session made on the host's word, outside any agent's work, is a run of its own,
@@ -86,10 +88,11 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   const registryOf = async (scope: Scope) => {
     const guidance = loadGuidance(env.files, scope);
     const [settings, texts] = await Promise.all([readSettings(guidance, env.files, scope, env.log), ownTexts(guidance)]);
-    return { guidance, settings, registry: new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope)) };
+    return { guidance, settings, registry: new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope), await external.tools(guidance, settings, () => undefined)) };
   };
 
   return {
+    external: { list: (scope) => external.list(scope) },
     async answer(req, sink, signal) {
       const turn = new Turn(core, req, sink);
       const key = turnKey(req.scope);
@@ -154,7 +157,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     }),
 
     rules: {
-      list: (scope) => loadGuidance(env.files, scope).rules(),
+      list: (scope) => loadGuidance(env.files, scope).rules(env.switches),
       // One writer per fact: a host fact under one of RPH's names is listed marked, and said in the log.
       facts: async () => {
         const facts = listFacts(env.facts);

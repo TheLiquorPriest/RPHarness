@@ -38,6 +38,7 @@ import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { GuidesGiven } from "../tools/search/tools";
 import type { JobsWork } from "../jobs/tool";
+import type { External } from "../external";
 import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type SceneMap, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
@@ -76,6 +77,8 @@ export interface TurnCore {
   book: SessionBook;
   /** The harness's jobs, which `job_start` starts (§13.5). */
   jobs: JobsWork;
+  /** His own tools and rule commands (C3). */
+  external: External;
 }
 
 function errorWords(error: unknown): string {
@@ -373,6 +376,11 @@ export class Turn {
         const own = agent.id === this.#lead.id ? definition : await guidance.definition(agent.definition);
         return interruptFor(settings, own === undefined ? { id: null, name: null } : await this.#connection(own)) === "stop";
       },
+      command: this.#c.external.ruleCommands(scope.user, settings),
+      commandFailed: (agent, rule, why) => {
+        this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "command", detail: why });
+        env.log.warn("A rule's command could not answer; the rule did not fire.", { turn: scope.turn, rule: rule.rule, path: rule.path, why });
+      },
       ...(memory !== undefined ? { memory } : {}),
     });
     this.#rules = rules;
@@ -411,7 +419,7 @@ export class Turn {
       slice,
     });
     this.#team = team;
-    const registry = new Registry(this.#ownTools(texts, team, guidance), await env.tools.all(scope));
+    const registry = new Registry(this.#ownTools(texts, team, guidance), await env.tools.all(scope), await this.#c.external.tools(guidance, settings, this.#words));
     this.#registry = registry;
     if (registry.shadowed.length > 0) this.#unheld("shadowed", req.lead, registry.shadowed, "Host tools that take the name of one of RPH's own are left out.");
 

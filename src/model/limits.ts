@@ -12,7 +12,8 @@
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 import type { ModelFigure, ModelLimit, ModelLimits, ModelLimitsEntry, ModelPictures } from "../contract";
-import { isRecord, isTokenCount } from "./json";
+import { isRecord } from "../contract/json";
+import { isTokenCount } from "./json";
 
 function firstOf(entered: number | undefined, listed: number | undefined, reported: number | undefined): ModelLimit | null {
   if (isTokenCount(entered)) return { tokens: entered, from: "user" };

@@ -40,7 +40,7 @@ import type { JsonObject, PassError, PassRequest, PassResult, PassSink } from ".
 import type { ModelSettings } from "../harness/settings";
 import type { CallAsk, CallDeps, CallShape } from "./call";
 import { makeCall, shapeOf, signingOf, termsOf } from "./call";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 import type { Sampling } from "./kinds";
 import type { ModelEffort } from "./source";
 import { compatSays } from "./transcript";

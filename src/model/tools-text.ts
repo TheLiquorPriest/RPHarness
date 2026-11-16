@@ -14,7 +14,7 @@ import type { AssistantMessage, Message, Tool, ToolCall, ToolResultMessage } fro
 import { contentText, getCurrentTools } from "@earendil-works/pi-ai";
 import type { JsonObject, JsonValue } from "../contract";
 import type { Fields } from "../files/api";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 
 /** The tools-as-text file filled in with one use's fields; undefined where it is switched off. */
 type Render = ((fields: Fields) => string) | undefined;

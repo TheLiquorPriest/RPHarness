@@ -178,6 +178,7 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     if (scope === undefined) fail(h.scope === undefined ? "question" : "scope", "`scope:` says what the question is about: text, thinking or reply.");
     const interrupt = h.interrupt === "always" ? true : h.interrupt === undefined || h.interrupt === null || h.interrupt === "never" ? false : undefined;
     if (interrupt === undefined) fail("interrupt", "`interrupt:` is `always` to have the agent wait for the judging model's answer before its next call; left out, the agent goes on and the answer comes in when it comes.");
+    if (h.interrupt === "never") problem("interrupt", "`interrupt: never` is not read for a question: left out, the agent goes on and the answer comes in when it comes; `always` has it wait for the answer.");
     const judge = h.judge === undefined || h.judge === null ? undefined : typeof h.judge === "string" && h.judge.trim() !== "" ? h.judge.trim() : false;
     if (judge === false) fail("judge", "`judge:` names the connection the judging model is reached through, by its name or its id.");
     if (typeof h.question === "string" && scope !== undefined && interrupt !== undefined && judge !== false) when = { trigger: "question", question: h.question.trim(), scope, interrupt, ...(judge !== undefined ? { judge } : {}) };

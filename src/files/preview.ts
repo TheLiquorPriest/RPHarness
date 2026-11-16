@@ -4,15 +4,15 @@
 // keeper of those values, which a run's guidance tells each render (`GuidanceOptions.rendered`), kept
 // in the host's store by user, chat and part. Everything here reads, save the keeper's own record.
 
-import type { Environment, FilesPort, FileText, JsonObject, JsonValue, Log, PartFileKind, PartsApi, Scope, StorePort } from "../contract/index";
+import type { Environment, FilesPort, FileText, JsonObject, JsonValue, Log, PartFileKind, PartsApi, RunScope, Scope, StorePort } from "../contract/index";
 import { textHash } from "../prompt/text";
 import type { Fields, GuidanceOptions, PartKind, PromptPart, Template } from "./api";
 import { loadGuidance } from "./guidance";
 import { parsePart } from "./parts";
 
-/** The store's key of a part's last fields in a chat. */
-function fieldsKey(chat: string, kind: PartKind, name: string): string {
-  return `parts/fields/${textHash(chat)}/${kind}/${name}`;
+/** The store's key of a part's last fields in a chat, or, for a job of no chat, the user's own. */
+function fieldsKey(chat: string | undefined, kind: PartKind, name: string): string {
+  return `parts/fields/${chat === undefined ? "user" : textHash(chat)}/${kind}/${name}`;
 }
 
 const KIND: Record<"prompt" | "tool", PartKind> = { prompt: "prompts", tool: "tools" };
@@ -27,7 +27,7 @@ function asJson(fields: Fields): JsonObject {
  * the part's last (of a part of lines, by the line's name), written to the store once the render's
  * moment has passed, so a part rendered many times in one step is written once.
  */
-export function partFields(store: StorePort, scope: Scope, log: Log): NonNullable<GuidanceOptions["rendered"]> {
+export function partFields(store: StorePort, scope: RunScope, log: Log): NonNullable<GuidanceOptions["rendered"]> {
   const pending = new Map<string, { whole?: JsonObject; lines: Record<string, JsonObject> }>();
   let flushing = false;
   const flush = async (): Promise<void> => {

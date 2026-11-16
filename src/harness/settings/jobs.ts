@@ -34,6 +34,8 @@ export const JOBS = worded(
     runAgents: { key: "jobs.run.agents", takes: { type: "whole", least: 0 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.agents" },
     // How long a job's record is kept: the Jobs page lists them a page at a time, and the oldest go as a job starts.
     keepDays: { key: "jobs.keepDays", takes: { type: "whole", least: 1 }, default: 90, perConnection: false, at: "jobs.keepDays" },
+    // In a job, the Author's connection judges a rule's question where neither the rule nor `rules.judge` names one; this names the Author.
+    lead: { key: "lead", takes: { type: "text" }, default: null, orNone: true, none: "the asking agent's own", perConnection: false, levels: ["shipped", "global", "chat"], at: "lead" },
   },
   JOBS_WORDS,
 );

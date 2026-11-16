@@ -40,7 +40,7 @@ import { Book } from "./book";
 import type { CallDeps } from "./call";
 import { agentShapeOf, makeCall, sessionKey, shapeOf, streamFunction, termsOf } from "./call";
 import { embed } from "./embed";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 import { KINDS, builtInProviders, kindOf } from "./kinds";
 import { reportedOf } from "./limits";
 import { passRequest } from "./pass";

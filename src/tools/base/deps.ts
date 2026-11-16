@@ -2,7 +2,7 @@
 // answer in: the lines of the prompt part `base-tools`, read through the turn's guidance when a tool
 // is called. Each tool's description and its arguments' are its own file in `.tools/`, read by the
 // harness with its other tools' files (`BASE_TOOLS`).
-import type { Environment, JsonValue, LoreEntry, ToolCtx, WebSearchPort } from "../../contract";
+import type { Environment, JsonValue, LoreEntry, Scope, ToolCtx, WebSearchPort } from "../../contract";
 import type { Guidance } from "../../files/api";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, type ToolText, type Words } from "../kit";
@@ -52,6 +52,17 @@ export function wordsOf(guidance: Pick<Guidance, "part">): Promise<Words> {
 /** The tool answers' lines every tool shares, as the guidance has them. */
 export function noticesOf(guidance: Pick<Guidance, "part">): Promise<Words> {
   return linesOf(guidance, NOTICES_PART);
+}
+
+/**
+ * The call's scope as a chat's, for a tool that works in one (the chat, its lore, its suggestions,
+ * its gap checks); or, in a job of no chat (C-23), the answer that says it has none to work in, in
+ * the tool answers' words (`no_chat`).
+ */
+export async function inChat(guidance: Pick<Guidance, "part">, ctx: ToolCtx, tool: string): Promise<{ scope: Scope } | { answer: LoopToolResult }> {
+  const scope = ctx.scope;
+  if (scope.chat !== undefined) return { scope };
+  return { answer: answer((await noticesOf(guidance))("no_chat", { tool }), true) };
 }
 
 /** Lines in order, those the file does not have (or that came out empty) left out. */

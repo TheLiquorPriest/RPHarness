@@ -114,15 +114,15 @@ describe("folder host", () => {
 
   test("the tools listed when a session begins hold for it, across a new host; a new session sees the manifest as it is", async () => {
     const names = async (s: Scope) => (await host.tools.all(s)).map((t) => t.name);
-    expect(await names(scope)).toEqual(["kit_tally", "kit_words", "kit_stamp"]);
+    expect(await names(scope)).toEqual(["kit_tally", "kit_words", "kit_stamp", "kit_shell"]);
     const words = (await host.tools.all(scope)).find((t) => t.name === "kit_words");
     expect(words?.description).toBe("Counts the words of a text.\n");
 
     await writeFile(join(place, "host", "tools.json"), JSON.stringify({ tools: KIT_MANIFEST.tools.filter((t) => t.name !== "kit_tally") }));
     await host.close();
     host = await makeFolderHost(KIT_SEED, place);
-    expect(await names(scope)).toEqual(["kit_tally", "kit_words", "kit_stamp"]);
-    expect(await names({ ...scope, session: "kit-session-2" })).toEqual(["kit_words", "kit_stamp"]);
+    expect(await names(scope)).toEqual(["kit_tally", "kit_words", "kit_stamp", "kit_shell"]);
+    expect(await names({ ...scope, session: "kit-session-2" })).toEqual(["kit_words", "kit_stamp", "kit_shell"]);
 
     const tally = (await host.tools.all(scope)).find((t) => t.name === "kit_tally");
     const ctx: ToolCtx = { scope, agent: agentA, run: scope.turn, callId: "kit-call-1", signal: new AbortController().signal, onUpdate: () => {} };
@@ -130,7 +130,6 @@ describe("folder host", () => {
 
     await host.close();
     const log = await readFile(join(place, "host", "log.jsonl"), "utf8");
-    expect(log).toContain("kit_shell");
     expect(log).toContain("kit_unrun");
   });
 

@@ -18,7 +18,7 @@
 
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import { contentText, getCurrentSystemMessage } from "@earendil-works/pi-ai";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 
 /** Whether a model's compatibility flags say `name`: they differ in shape by API, so they are read as a record. */
 export function compatSays(model: Model<Api>, name: string): boolean {

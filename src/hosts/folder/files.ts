@@ -5,28 +5,28 @@
 
 import { appendFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, OwnerWrite, Range, Refused, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
+import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, OwnerWrite, Range, Refused, RunScope, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
 import type { Serial } from "./disk";
 import { codeOf, sha256, writeWhole } from "./disk";
 import type { JournalLine } from "./shape";
 import type { Site } from "./site";
 import type { Located, TopView, TreeLocation } from "./view";
 import { folderLayers, folderPlaces, kindOf, locate, MOUNTS, refusalFor, topView, viewPath, writableFor } from "./view";
+import { hostLimits } from "./config";
 
 /** The levels every chat shares, which a scope that names only the user sees. */
 const SHARED: readonly LayerLevel[] = ["shipped", "global"];
 
-/** Whether a scope names a chat: one that names only the user has no chat in view. */
-function namesChat(scope: Scope | UserScope): scope is Scope {
-  return "chat" in scope;
+/** Whether a scope names a chat: one that names only the user, or a job of no chat, has no chat in view. */
+function namesChat(scope: RunScope | UserScope): scope is Scope {
+  return "chat" in scope && typeof scope.chat === "string";
 }
 
-/** The most hits a find gives when its query names no limit. */
-export const FIND_LIMIT = 200;
-/** Files larger than this many bytes are passed over by grep. */
-export const GREP_MAX_BYTES = 1024 * 1024;
-/** A grep hit's line is cut to this many UTF-16 code units. */
-export const GREP_LINE_MAX = 1000;
+/** The run a scope is: a chat's, a job's of no chat (its user and session), or none for a scope that names only the user. */
+function runOf(scope: RunScope | UserScope): RunScope | undefined {
+  if (namesChat(scope)) return scope;
+  return "session" in scope && typeof scope.session === "string" ? { user: scope.user, session: scope.session } : undefined;
+}
 
 /** The journal of agents' writes in a turn. */
 export function journalPath(site: Site, chat: string, turn: string): string {
@@ -154,15 +154,18 @@ async function apply(at: Located, op: FileOp): Promise<{ result: Written | Unapp
 /** The file port. `serial` runs one change at a time per file, shared with whatever else changes the tree's files (dropping an agent's writes), so two changes to one file both land. */
 export function folderFiles(site: Site, serial: Serial): FilesPort {
   /** Where a scope's levels are on disk: its chat's, or, with no chat in view, the tree's folder alone. */
-  async function locationOf(scope: Scope | UserScope): Promise<TreeLocation> {
+  async function locationOf(scope: RunScope | UserScope): Promise<TreeLocation> {
     if (namesChat(scope)) return site.location(scope);
-    site.serves(scope);
-    return { files: site.files };
+    const run = runOf(scope);
+    if (run === undefined) site.serves(scope);
+    else site.check(run);
+    return run === undefined ? { files: site.files } : { files: site.files, jobs: sha256(scope.user) };
   }
 
-  function refusal(scope: Scope | UserScope, path: string, reason: Refused["reason"], writer: Writer | OwnerWrite | undefined): Refused {
-    if (!namesChat(scope) || writer === "owner") return { status: "refused", path, reason, writable: [] };
-    const places = folderPlaces(scope);
+  function refusal(scope: RunScope | UserScope, path: string, reason: Refused["reason"], writer: Writer | OwnerWrite | undefined): Refused {
+    const run = runOf(scope);
+    if (run === undefined || writer === "owner") return { status: "refused", path, reason, writable: [] };
+    const places = folderPlaces(run);
     return { status: "refused", path, reason, writable: writer === undefined ? places.writable : writableFor(places, writer) };
   }
 
@@ -171,7 +174,8 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
     const lookup = await locate(loc, query.path ?? "");
     if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, undefined);
     const at = lookup.at;
-    const limit = query.limit ?? FIND_LIMIT;
+    const limits = await hostLimits(site);
+    const limit = query.limit ?? limits.findLimit;
     const hits: FileHit[] = [];
     if (at.is === "none" || limit <= 0) return { status: "found", hits };
     const top = await topView(loc, at.level);
@@ -185,7 +189,7 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
 
     if (query.by === "list") {
       if (at.is === "file") return found([await fileHit(at.level, at.rest, at.disk)]);
-      for await (const e of walk(at.level, at.rest, at.disk, query.depth ?? 1, top)) {
+      for await (const e of walk(at.level, at.rest, at.disk, query.depth ?? limits.listDepth, top)) {
         if (hits.length >= room) break;
         hits.push(e.folder ? { path: viewPath(at.level, e.rest), type: "folder", level: at.level, kind: kindOf(at.level, e.rest) } : await fileHit(at.level, e.rest, e.disk));
       }
@@ -215,7 +219,7 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
       if (hits.length >= room) break;
       if (only !== undefined && !only.match(below(at, f.rest))) continue;
       const bytes = (await stat(f.disk)).size;
-      if (bytes > GREP_MAX_BYTES) {
+      if (bytes > limits.grepBytes) {
         large += 1;
         continue;
       }
@@ -226,13 +230,13 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
       for (const [i, line] of lines.entries()) {
         if (hits.length >= room) break;
         if (!pattern.test(line)) continue;
-        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, GREP_LINE_MAX) };
+        const hit: FileHit = { path: viewPath(at.level, f.rest), type: "file", level: at.level, kind: kindOf(at.level, f.rest), bytes, line: i + 1, text: line.slice(0, limits.grepLine) };
         hits.push(hit);
-        if (line.length > GREP_LINE_MAX) cutLines.add(hit);
+        if (line.length > limits.grepLine) cutLines.add(hit);
       }
     }
     const cut = hits.slice(0, limit).filter((hit) => cutLines.has(hit)).length;
-    return found(hits, { ...(large > 0 ? { large: { files: large, bytes: GREP_MAX_BYTES } } : {}), ...(cut > 0 ? { cut: { lines: cut, chars: GREP_LINE_MAX } } : {}) });
+    return found(hits, { ...(large > 0 ? { large: { files: large, bytes: limits.grepBytes } } : {}), ...(cut > 0 ? { cut: { lines: cut, chars: limits.grepLine } } : {}) });
   }
 
   return {
@@ -267,14 +271,15 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
       const loc = await locationOf(scope);
       const lookup = await locate(loc, path);
       if (!lookup.ok) return refusal(scope, lookup.path, lookup.reason, by);
-      // With no chat in view, what is found is a level every chat shares: no one's to write through the port.
-      if (!namesChat(scope)) return refusal(scope, lookup.at.path, "mounted", by);
+      // With no chat in view, what is found is a level every chat shares, no one's to write through the port; save a job's own notes and session folder.
+      const run = runOf(scope);
+      if (run === undefined || (run.chat === undefined && (by === "owner" || lookup.at.level !== "chat"))) return refusal(scope, lookup.at.path, "mounted", by);
       // The owner's own press writes the chat's or the global level's config file, and nothing else.
       if (by === "owner") {
         const configs = folderLayers().flatMap((layer) => (layer.config !== undefined && (layer.level === "chat" || layer.level === "global") ? [`${layer.mount}${layer.config}`] : []));
         if (!configs.includes(lookup.at.path)) return refusal(scope, lookup.at.path, lookup.at.level === "chat" ? "yours" : "mounted", by);
       } else {
-        const reason = refusalFor(lookup.at, writableFor(folderPlaces(scope), by));
+        const reason = refusalFor(lookup.at, writableFor(folderPlaces(run), by));
         if (reason !== undefined) return refusal(scope, lookup.at.path, reason, by);
       }
       return serial.run(lookup.at.disk, async () => {
@@ -282,9 +287,9 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
         const again = await locate(loc, path);
         if (!again.ok) return refusal(scope, again.path, again.reason, by);
         const { result, old } = await apply(again.at, op);
-        if (result.status === "written" && by !== "harness" && by !== "owner" && scope.turn !== undefined) {
+        if (result.status === "written" && by !== "harness" && by !== "owner" && run.turn !== undefined) {
           const line: JournalLine = { agent: by, path: result.path, before: old, after: result.hash };
-          const journal = journalPath(site, scope.chat, scope.turn);
+          const journal = journalPath(site, run.chat, run.turn);
           await mkdir(dirname(journal), { recursive: true });
           await appendFile(journal, `${JSON.stringify(line)}\n`, "utf8");
         }

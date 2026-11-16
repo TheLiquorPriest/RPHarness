@@ -7,7 +7,7 @@
 import type { Suggestion } from "../../contract";
 import type { Guidance } from "../../files/api";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text } from "../kit";
-import { type BaseToolsDeps, noticesOf, textsOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, inChat, noticesOf, textsOf, wordsOf } from "./deps";
 
 /** The tool that gives a skill's text by its name. */
 export const SKILL_LOAD = "skill_load";
@@ -58,6 +58,8 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
       own,
     ),
     async run(args, ctx) {
+      const at = await inChat(deps.guidance, ctx, "suggest");
+      if ("answer" in at) return at.answer;
       const given = fieldsOf(args);
       const file = text(given, "file")?.trim() || undefined;
       const lore = text(given, "lore")?.trim() || undefined;
@@ -66,7 +68,7 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
       const [target] = targets;
       if (target === undefined || targets.length > 1) return answer(words("suggest_target"), true);
       // An entry the agent may not read is one it cannot have a change for.
-      if (lore !== undefined && (await deps.env.lore.read(ctx.scope, [lore], ctx.agent)).length === 0) return answer(words("no_entry", { id: lore }), true);
+      if (lore !== undefined && (await deps.env.lore.read(at.scope, [lore], ctx.agent)).length === 0) return answer(words("no_entry", { id: lore }), true);
       let handed = target;
       if (file !== undefined) {
         // A path that leaves the view, or passes through a link, is no file of the user's that anyone could change (§5.1).
@@ -80,7 +82,7 @@ export function suggest(deps: BaseToolsDeps): OwnTool {
       const keys = textsOf(given["keys"]).map((key) => key.trim()).filter((key) => key !== "");
       const draft = "newLore" in handed ? { ...(book !== undefined ? { book } : {}), ...(title !== undefined ? { title } : {}), ...(keys.length > 0 ? { keys } : {}) } : {};
       const was = "lore" in handed ? text(given, "was") : undefined;
-      const filed = await deps.env.events.suggestion(ctx.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "", ...(Object.keys(draft).length > 0 ? { draft } : {}), ...(was !== undefined && was !== "" ? { was } : {}) });
+      const filed = await deps.env.events.suggestion(at.scope, ctx.agent, { target: handed, text: text(given, "text") ?? "", reason: text(given, "reason") ?? "", ...(Object.keys(draft).length > 0 ? { draft } : {}), ...(was !== undefined && was !== "" ? { was } : {}) });
       return filed.kept ? answer(words("suggested")) : answer(words("suggest_full", { most: filed.openMost }), true);
     },
   };

@@ -8,7 +8,8 @@ import { readLines } from "./disk";
 import type { ChatRecord, StoredMessage } from "./shape";
 import { storedMessage } from "./shape";
 import type { Site } from "./site";
-import { match, SEARCH_LIMIT, snippetOf, termsOf } from "./words";
+import { hostLimits } from "./config";
+import { match, snippetOf, termsOf } from "./words";
 
 export function folderChat(site: Site): ChatPort {
   async function load(scope: Scope): Promise<{ chat: ChatRecord; messages: StoredMessage[] }> {
@@ -54,7 +55,7 @@ export function folderChat(site: Site): ChatPort {
     },
 
     async search(scope, query) {
-      const { chat, messages } = await load(scope);
+      const [{ chat, messages }, limits] = await Promise.all([load(scope), hostLimits(site)]);
       const terms = termsOf(query.text);
       if (terms.length === 0) return [];
       const [from, to] = query.within === undefined ? [0, messages.length] : bounds(query.within, messages.length);
@@ -64,11 +65,11 @@ export function folderChat(site: Site): ChatPort {
         if (m === undefined || (m.hidden && !chat.hiddenReadable)) continue;
         const { score, at, length } = match(m.text, terms);
         if (score === 0) continue;
-        found.push({ score, hit: { id: m.id, index, role: m.role, name: m.name, snippet: snippetOf(m.text, at, length), how: "words" } });
+        found.push({ score, hit: { id: m.id, index, role: m.role, name: m.name, snippet: snippetOf(m.text, at, length, limits.snippet), how: "words" } });
       }
       return found
         .sort((a, b) => b.score - a.score || a.hit.index - b.hit.index)
-        .slice(0, query.limit ?? SEARCH_LIMIT)
+        .slice(0, query.limit ?? limits.searchHits)
         .map((f) => f.hit);
     },
   };

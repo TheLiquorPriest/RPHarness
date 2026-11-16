@@ -4,10 +4,13 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import type { JsonObject, ToolCtx } from "../../src/contract";
 import type { Fields } from "../../src/files/api";
-import { GREP_LINE_MAX, GREP_MAX_BYTES } from "../../src/hosts/folder/files";
+import { HOST_LIMITS } from "../../src/hosts/folder/config";
 import { fileFind } from "../../src/tools";
 import type { OwnTool, Words } from "../../src/tools/kit";
 import { type Bench, bench, LEAD, SCOPE, textOf } from "./base/support";
+
+const GREP_LINE_MAX = HOST_LIMITS.grepLine;
+const GREP_MAX_BYTES = HOST_LIMITS.grepBytes;
 
 let b: Bench;
 let find: OwnTool;

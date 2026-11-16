@@ -29,7 +29,8 @@ export async function folderFacts(site: Site): Promise<FactsPort> {
 
     async read(scope, names) {
       site.check(scope);
-      const values = (await load()).values[scope.chat] ?? {};
+      // A job of no chat has no chat's facts: each reads as never set.
+      const values = scope.chat === undefined ? {} : ((await load()).values[scope.chat] ?? {});
       const out: Record<string, FactValue> = {};
       for (const name of names ?? defs.map((d) => d.name)) {
         if (!declared.has(name)) continue;

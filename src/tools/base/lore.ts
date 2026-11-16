@@ -6,7 +6,7 @@
 // `tools.perCall` entries or hits.
 import type { LoreEntry } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
-import { type BaseToolsDeps, heldLimit, linesAnswer, shown, textsOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, heldLimit, inChat, linesAnswer, shown, textsOf, wordsOf } from "./deps";
 
 /** An entry in full: its head, who may know it where its source says, and its text. */
 function laid(words: Words, entry: LoreEntry): string {
@@ -28,11 +28,13 @@ export function loreRead(deps: BaseToolsDeps): OwnTool {
     description: own?.description ?? "",
     parameters: argumentsOf({ ids: { type: "array", items: { type: "string" } } }, ["ids"], own),
     async run(args, ctx) {
+      const at = await inChat(deps.guidance, ctx, "lore_read");
+      if ("answer" in at) return at.answer;
       const named = [...new Set(textsOf(fieldsOf(args)["ids"]))];
       // One read takes the first ids up to the bound; the rest are named, to be asked for again.
       const ids = named.slice(0, deps.perCall);
       const unread = named.slice(deps.perCall);
-      const [words, entries] = await Promise.all([wordsOf(deps.guidance), ids.length === 0 ? [] : deps.env.lore.read(ctx.scope, ids, ctx.agent)]);
+      const [words, entries] = await Promise.all([wordsOf(deps.guidance), ids.length === 0 ? [] : deps.env.lore.read(at.scope, ids, ctx.agent)]);
       const left = unread.length > 0 ? words("lore_unread", { most: deps.perCall, ids: unread }) : undefined;
       if (entries.length === 0) return ids.length === 0 ? answer(words("none_found"), true) : linesAnswer([...ids.map((id) => words("no_entry", { id })), left], "\n", true);
       // Each entry read in full is kept in the session's cache, where the turn keeps it (§11, R-111).
@@ -62,11 +64,13 @@ export function loreSearch(deps: BaseToolsDeps): OwnTool {
     description: own?.description ?? "",
     parameters: argumentsOf({ query: { type: "string" }, sources: { type: "array", items: { type: "string" } }, limit: { type: "integer", minimum: 1 } }, ["query"], own),
     async run(args, ctx) {
+      const at = await inChat(deps.guidance, ctx, "lore_search");
+      if ("answer" in at) return at.answer;
       const given = fieldsOf(args);
       const sources = textsOf(given["sources"]);
       const limit = heldLimit(whole(given, "limit"), deps.perCall);
       const query = { text: text(given, "query") ?? "", ...(sources.length > 0 ? { sources } : {}), ...(limit !== undefined ? { limit } : {}) };
-      const [words, found] = await Promise.all([wordsOf(deps.guidance), deps.env.lore.search(ctx.scope, query, ctx.agent)]);
+      const [words, found] = await Promise.all([wordsOf(deps.guidance), deps.env.lore.search(at.scope, query, ctx.agent)]);
       const hits = found.slice(0, limit ?? deps.perCall);
       if (hits.length === 0) return answer(words("none_found"));
       return linesAnswer(

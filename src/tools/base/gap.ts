@@ -6,7 +6,7 @@
 // nothing about meaning: it shows what was searched and what came back.
 import type { GapCheck, GapSearch, SearchHit } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole } from "../kit";
-import { type BaseToolsDeps, linesAnswer, textsOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, inChat, linesAnswer, textsOf, wordsOf } from "./deps";
 
 /** Where a check's evidence is kept, inside the turn's own `queries/` folder. */
 const EVIDENCE = "queries/gap-check-";
@@ -21,7 +21,9 @@ export function gapCheck(deps: BaseToolsDeps): OwnTool {
     parameters: argumentsOf({ topic: { type: "string" }, terms: { type: "array", items: { type: "string" } }, limit: { type: "integer", minimum: 1 } }, ["topic"], own),
     async run(args, ctx) {
       const { env } = deps;
-      const { scope } = ctx;
+      const at = await inChat(deps.guidance, ctx, "gap_check");
+      if ("answer" in at) return at.answer;
+      const { scope } = at;
       const given = fieldsOf(args);
       const topic = (text(given, "topic") ?? "").trim();
       const words = await wordsOf(deps.guidance);

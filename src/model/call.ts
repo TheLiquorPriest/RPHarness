@@ -56,7 +56,8 @@ import type { JsonObject, ModelLimits, Scope, ToolsAs, UserScope } from "../cont
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import type { Book, Connection } from "./book";
-import { isRecord, isTokenCount, own } from "./json";
+import { isRecord } from "../contract/json";
+import { isTokenCount, own } from "./json";
 import type { ProviderKind, Sampling, SamplingName } from "./kinds";
 import { SAMPLING_NAMES, kindOf, unlistedModel } from "./kinds";
 import { limitsOf } from "./limits";

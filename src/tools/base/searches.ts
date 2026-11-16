@@ -7,7 +7,7 @@
 import type { SearchHit, StoreInfo, StoresPort, WebSearchPort } from "../../contract";
 import type { LoopToolResult } from "../../loop/types";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
-import { type BaseToolsDeps, heldLimit, linesAnswer, shown, textsOf, wordsOf } from "./deps";
+import { type BaseToolsDeps, heldLimit, inChat, linesAnswer, shown, textsOf, wordsOf } from "./deps";
 import { SessionsStore } from "./sessions";
 
 /** Hits, one line each by `line`, or the line for none. */
@@ -37,7 +37,9 @@ export function archiveSearch(deps: BaseToolsDeps, stores: StoresPort | undefine
     description: own?.description ?? "",
     parameters: argumentsOf({ query: { type: "string" }, stores: { type: "array", items: { type: "string" } }, limit: { type: "integer", minimum: 1 }, ref: { type: "string" } }, [], own),
     async run(args, ctx) {
-      const { scope } = ctx;
+      const at = await inChat(deps.guidance, ctx, "archive_search");
+      if ("answer" in at) return at.answer;
+      const { scope } = at;
       const given = fieldsOf(args);
       const words = await wordsOf(deps.guidance);
       const sessions = new SessionsStore(deps.env.files, words);

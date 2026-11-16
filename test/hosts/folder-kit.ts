@@ -46,7 +46,7 @@ export const KIT_MANIFEST = {
     { name: "kit_tally", family: "sums", tier: "read", description: "Adds up a list of numbers.", parameters: { type: "object", properties: { numbers: { type: "array", items: { type: "number" } } }, required: ["numbers"] } },
     { name: "kit_words", family: "sums", tier: "read", descriptionFile: "@global/.tools/kit-words.md", parameters: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
     { name: "kit_stamp", family: "marks", tier: "write", lane: "engine", description: "Records a stamp under a name.", parameters: { type: "object", properties: { name: { type: "string" } }, required: ["name"] } },
-    { name: "kit_shell", family: "commands", tier: "external", description: "Runs a command.", parameters: { type: "object" }, command: ["true"] },
+    { name: "kit_shell", family: "commands", tier: "external", description: "Runs a command.", parameters: { type: "object" }, command: "true" },
     { name: "kit_unrun", family: "sums", tier: "read", description: "Nothing runs this one.", parameters: { type: "object" } },
   ],
 };

@@ -2,7 +2,7 @@
 // The port holds the one rule on writes (agents write only in the notes and this turn's own
 // folders); these tools put its answers into the words of the tool answers' file, and say where the
 // agent may write when a write is refused.
-import type { FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, Refused, Scope, Written } from "../contract";
+import type { FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, Refused, RunScope, Written } from "../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, type ToolText, whole, type Words } from "./kit";
 
 /** What the file tools are made with. */
@@ -14,7 +14,7 @@ export interface FileToolsDeps {
   /** The most hits one `file_find` asks for (the user's `tools.perCall`): a limit the agent names is held to it before the host is asked; with none, the host's own cap holds. Absent, as in a spike, nothing holds the agent's. */
   most?: number;
   /** A write went through: for the intent record of the two-step form, which the lead writes itself (§10.7). */
-  written?(scope: Scope, by: { id: string; definition: string }, done: Written): Promise<void>;
+  written?(scope: RunScope, by: { id: string; definition: string }, done: Written): Promise<void>;
 }
 
 function refusal(words: Words, refused: Refused) {
@@ -199,7 +199,7 @@ function changedLines(before: string, now: string): { from: number; shown: strin
  * append, the text it now holds; after an edit, the lines it changed, each with its number; after
  * a delete, nothing. A tool's answer is clipped as every tool's is, so a long file is not given whole.
  */
-async function nowReads(deps: FileToolsDeps, scope: Scope, done: Written, before: FileRead | undefined): Promise<string[]> {
+async function nowReads(deps: FileToolsDeps, scope: RunScope, done: Written, before: FileRead | undefined): Promise<string[]> {
   if (done.op === "delete") return [];
   const now = await deps.files.read(scope, done.path);
   if (now.status !== "read") return [];

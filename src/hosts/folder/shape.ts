@@ -22,11 +22,7 @@ import type {
   SliceKind,
   ToolTier,
 } from "../../contract/index";
-
-/** A plain object (not null, not an array): its fields are still to be checked. */
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { isRecord } from "../../contract/json";
 
 /** A document that is not what the host expects: the words name the file and what is wrong. */
 export class ShapeError extends Error {
@@ -103,6 +99,10 @@ export interface ChatRecord {
   preset: PresetRef | null;
   hiddenReadable: boolean;
   ranges: Record<string, HistoryRange>;
+  /** The lore sources the chat is bound to: an entry of another source is not read for it. Absent: every source. */
+  lore?: string[];
+  /** The user whose chat it is: another user's scope is refused. Absent: any user the host serves. */
+  user?: string;
 }
 
 export function chatRecord(where: string, value: unknown): ChatRecord {
@@ -115,11 +115,14 @@ export function chatRecord(where: string, value: unknown): ChatRecord {
     }
   }
   if (v.hiddenReadable !== undefined && typeof v.hiddenReadable !== "boolean") throw new ShapeError(where, `"hiddenReadable" must be true or false`);
+  if (v.lore !== undefined && !(Array.isArray(v.lore) && v.lore.every((s) => typeof s === "string"))) throw new ShapeError(where, `"lore" must be a list of the lore sources the chat is bound to`);
   return {
     character: text(where, v.character, "character"),
     preset: v.preset === undefined || v.preset === null ? null : presetRef(where, v.preset),
     hiddenReadable: v.hiddenReadable === true,
     ranges,
+    ...(Array.isArray(v.lore) ? { lore: v.lore as string[] } : {}),
+    ...(v.user !== undefined ? { user: text(where, v.user, "user") } : {}),
   };
 }
 
@@ -350,8 +353,8 @@ export interface ManifestTool {
   description?: string;
   descriptionFile?: string;
   parameters: JsonObject;
-  /** A command to run: such a tool is not run by the folder host. */
-  command?: JsonValue;
+  /** The command line a command tool runs, JSON in and out, once the host's switches have it on: such a tool is of the external tier. */
+  command?: string;
 }
 
 /** The manifest's tools. An entry that is not a tool rejects the whole manifest, with words that say which. */
@@ -371,7 +374,7 @@ export function manifest(where: string, value: unknown): ManifestTool[] {
     const descriptionFile = optionalText(at, t.descriptionFile, "descriptionFile");
     if ((description === undefined) === (descriptionFile === undefined)) throw new ShapeError(at, `give "description" or "descriptionFile", one of the two`);
     const lane = optionalText(at, t.lane, "lane");
-    if (t.command !== undefined && !isJson(t.command)) throw new ShapeError(at, `"command" must be JSON`);
+    const command = optionalText(at, t.command, "command");
     return {
       name: text(at, t.name, "name"),
       family: text(at, t.family, "family"),
@@ -380,7 +383,7 @@ export function manifest(where: string, value: unknown): ManifestTool[] {
       ...(lane !== undefined ? { lane } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(descriptionFile !== undefined ? { descriptionFile } : {}),
-      ...(t.command !== undefined ? { command: t.command as JsonValue } : {}),
+      ...(command !== undefined ? { command } : {}),
     };
   });
 }

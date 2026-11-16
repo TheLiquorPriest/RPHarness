@@ -96,6 +96,7 @@ export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }
         const said = learned.problems.flatMap((problem) => words(problem.line, problem.fields) ?? []);
         return answer(said.length === 0 ? undefined : said.join("\n"), true);
       }
+      if (ctx.scope.chat === undefined) return answer(notices("no_chat", { tool: "prompt_map_write" }), true);
       await deps.env.prompt.saveMap(ctx.scope, learned.map, ctx.agent);
       if (deps.sceneMap !== undefined) await keepSceneMap(deps.sceneMap, learned.map);
       prompt.remap(learned.map);

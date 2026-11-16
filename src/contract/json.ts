@@ -7,6 +7,11 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 /** A JSON object. */
 export type JsonObject = { [key: string]: JsonValue };
 
+/** A plain object (not null, not an array): its fields are still to be checked. The one such check of RPH and its folder host. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 /**
  * A JSON Schema (draft 2020-12) as a plain object. A tool's parameters are an object schema:
  * `{ "type": "object", "properties": { … }, "required": [ … ] }`. RPH checks a call's arguments

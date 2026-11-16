@@ -4,7 +4,7 @@
 
 import { join } from "node:path";
 import type { Clock, PromptMap, PromptMessage, PromptPort, RawLayout, RawMessage, RawPart, Scope } from "../../contract/index";
-import { readJson, textHash, writeJson } from "./disk";
+import { readJson, textHash, writeJson, writeWhole } from "./disk";
 import type { GivenPrompt, KeptMap } from "./shape";
 import { givenPrompt, keptMap } from "./shape";
 import type { Site } from "./site";
@@ -75,6 +75,9 @@ export function folderPrompt(site: Site, clock: Clock): PromptPort {
       site.check(scope);
       const kept: KeptMap = { map, learnedBy: by, at: clock.now() };
       await writeJson(mapPath(map.preset.id), kept);
+      // The chat's readable view of the map it now runs under (§5 l.422), generated, never edited by an agent.
+      const lines = [`# Prompt map of ${map.preset.name ?? map.preset.id}`, "", ...map.slices.map((slice) => `- ${slice.marker} (${slice.kind}): ${slice.line}`), ""];
+      await writeWhole(join(await site.chatFolder(scope), "PROMPT-MAP.md"), lines.join("\n"));
     },
 
     async saveLocated(scope, located) {

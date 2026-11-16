@@ -5,7 +5,7 @@
 // clipped by what runs around every call (the user's `results.clip`), as every tool's is.
 import type { ChatMessage, JsonValue } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
-import { type BaseToolsDeps, heldLimit, linesAnswer, wordsOf } from "./deps";
+import { type BaseToolsDeps, heldLimit, inChat, linesAnswer, wordsOf } from "./deps";
 
 /**
  * A stretch asked for, as positions, the last included: where it ends as asked (`to`) and as one
@@ -57,15 +57,18 @@ export function chatRead(deps: BaseToolsDeps): OwnTool {
       own,
     ),
     async run(args, ctx) {
+      const at = await inChat(deps.guidance, ctx, "chat_read");
+      if ("answer" in at) return at.answer;
+      const { scope } = at;
       const { chat } = deps.env;
       const most = deps.perCall;
-      const [words, info] = await Promise.all([wordsOf(deps.guidance), chat.info(ctx.scope)]);
+      const [words, info] = await Promise.all([wordsOf(deps.guidance), chat.info(scope)]);
       const { length } = info;
       if (length === 0) return answer(words("chat_empty"));
       // A message named by its id: its place asked of the host once, then one stretch read.
-      const asked = await askedOf(fieldsOf(args), length, most, (id) => chat.position(ctx.scope, id));
+      const asked = await askedOf(fieldsOf(args), length, most, (id) => chat.position(scope, id));
       if ("unknown" in asked) return answer(words("no_message", { id: asked.unknown }), true);
-      const messages = await chat.read(ctx.scope, { from: asked.from, to: asked.stop + 1 });
+      const messages = await chat.read(scope, { from: asked.from, to: asked.stop + 1 });
       const first = messages[0];
       const end = messages.at(-1);
       if (first === undefined || end === undefined) return answer(words("chat_outside", { length, last: length - 1, from: asked.from, to: asked.to }), true);
@@ -83,9 +86,11 @@ export function chatSearch(deps: BaseToolsDeps): OwnTool {
     description: own?.description ?? "",
     parameters: argumentsOf({ query: { type: "string" }, limit: { type: "integer", minimum: 1 } }, ["query"], own),
     async run(args, ctx) {
+      const at = await inChat(deps.guidance, ctx, "chat_search");
+      if ("answer" in at) return at.answer;
       const given = fieldsOf(args);
       const limit = heldLimit(whole(given, "limit"), deps.perCall);
-      const [words, found] = await Promise.all([wordsOf(deps.guidance), deps.env.chat.search(ctx.scope, { text: text(given, "query") ?? "", ...(limit !== undefined ? { limit } : {}) })]);
+      const [words, found] = await Promise.all([wordsOf(deps.guidance), deps.env.chat.search(at.scope, { text: text(given, "query") ?? "", ...(limit !== undefined ? { limit } : {}) })]);
       const hits = found.slice(0, limit ?? deps.perCall);
       if (hits.length === 0) return answer(words("none_found"));
       return linesAnswer(

@@ -5,7 +5,7 @@
 
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
-import type { ModelLimits, Scope, ToolsAs, TraceEvent } from "../contract";
+import type { ModelLimits, RunScope, ToolsAs, TraceEvent } from "../contract";
 
 /**
  * How hard an agent's model reasons: `inherit` and `auto` leave it to the connection's own effort
@@ -30,7 +30,7 @@ export interface AgentChoice {
  */
 export interface UserChoice extends AgentChoice {
   user: string;
-  scope?: Scope;
+  scope?: RunScope;
 }
 
 export interface AgentModel {

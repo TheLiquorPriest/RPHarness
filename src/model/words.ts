@@ -15,7 +15,7 @@
 
 import type { ModelSettings } from "../harness/settings";
 import type { SettingWords } from "../harness/settings/entry";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 
 /** A status at the head of a provider's text: "529 {…}" or "429: {…}". */
 const LEADING_STATUS = /^(\d{3})(?::\s*|\s+)([\s\S]*)$/;

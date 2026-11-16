@@ -11,7 +11,7 @@ import { onTestFinished } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, Scope, StoresPort, Switchable, SwitchesPort, ToolResult, ToolsPort, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
+import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, RunScope, Scope, StoresPort, Switchable, SwitchesPort, ToolResult, ToolsPort, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/helpers";
@@ -162,7 +162,7 @@ export interface Stage {
   harness: Harness;
   trace: WatchedTrace;
   /** What the host was told, in order. */
-  told: { kind: keyof TurnEvents; scope: Scope; payload: unknown }[];
+  told: { kind: keyof TurnEvents; scope: RunScope; payload: unknown }[];
   /** The log's lines. */
   logged: { level: string; message: string; fields?: Record<string, JsonValue> }[];
   /** A shared record of what happened, in order: what the host was told and which tools ran. */
@@ -239,7 +239,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
   hosted(host);
   const told: Stage["told"] = [];
   const recorded = (inner: TurnEvents): TurnEvents => {
-    const tell = <K extends keyof TurnEvents>(kind: K, scope: Scope, payload: unknown, then: () => ReturnType<NonNullable<TurnEvents[K]>>): ReturnType<NonNullable<TurnEvents[K]>> => {
+    const tell = <K extends keyof TurnEvents>(kind: K, scope: RunScope, payload: unknown, then: () => ReturnType<NonNullable<TurnEvents[K]>>): ReturnType<NonNullable<TurnEvents[K]>> => {
       told.push({ kind, scope, payload });
       order.push(`told:${kind}`);
       return then();

@@ -12,7 +12,7 @@ import type { Embedded } from "../contract";
 import { MODELS } from "../harness/settings/models";
 import type { Connection } from "./book";
 import { type CallDeps, throttleOf } from "./call";
-import { isRecord } from "./json";
+import { isRecord } from "../contract/json";
 import { KINDS, type ProviderKind, kindOf } from "./kinds";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 

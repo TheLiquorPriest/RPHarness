@@ -14,9 +14,9 @@ export const RULES = worded(
     // §18.1 row 0.2's fallback: a stream rule that interrupts stops the call, or, on a connection where a stopped reply cannot go on cleanly, reminds instead.
     interrupt: { key: "rules.interrupt", takes: { type: "oneOf", values: MODES }, default: "stop", perConnection: false, at: "ruleInterrupt" },
     interrupts: { key: "rules.interrupts.<connection>", takes: { type: "oneOf", values: MODES }, default: null, orNone: true, none: "as rules.interrupt says", perConnection: true, at: "ruleInterrupts.<connection>" },
-    // §5.4: the judging model for `question:` rules is a connection the user chooses. None by default:
-    // the asking agent's own (Appendix D.1: the Author's connection, until you choose another).
-    judge: { key: "rules.judge", takes: { type: "text" }, default: null, orNone: true, none: "the asking agent's own connection", perConnection: false, at: "judge" },
+    // §5.4: the judging model for `question:` rules is a connection the user chooses, in the global
+    // config alone. None by default: the Author's connection (Appendix D.1), until you choose another.
+    judge: { key: "rules.judge", takes: { type: "text" }, default: null, orNone: true, none: "the Author's connection", perConnection: false, levels: ["shipped", "global"], at: "judge" },
     // A rule's command answers yes or no about the moment; ten seconds is long for that and short of holding a turn up.
     commandTimeout: { key: "rules.commandTimeout", takes: { type: "whole", least: 1 }, default: 10, perConnection: false, at: "ruleCommandTimeout", ms: true },
   },

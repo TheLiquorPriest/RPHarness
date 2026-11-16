@@ -419,7 +419,7 @@ export async function readSettingsOf<const G extends readonly Group[]>(groups: G
 }
 
 /** The settings of a scope, as its config files set them over the defaults; a key the harness reads no longer is logged. */
-export async function readSettings(guidance: Guidance, files: FilesPort, scope: Scope, log: Log): Promise<Settings> {
+export async function readSettings(guidance: Guidance, files: FilesPort, scope: Scope | UserScope, log: Log): Promise<Settings> {
   return settingsFrom(GROUPS, await levelConfigs(guidance, files, scope, log), log, GONE);
 }
 

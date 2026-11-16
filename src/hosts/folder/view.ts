@@ -5,7 +5,7 @@
 
 import { lstat } from "node:fs/promises";
 import { join } from "node:path";
-import type { FileKind, Layer, LayerLevel, Places, RefusalReason, Scope, Writer } from "../../contract/index";
+import type { FileKind, Layer, LayerLevel, Places, RefusalReason, RunScope, Writer } from "../../contract/index";
 import { codeOf } from "./disk";
 
 /** Where each mounted level appears in the agents' view. A chat folder's own entry of one of these names is not reachable. */
@@ -35,7 +35,9 @@ const TURN_FOLDERS = ["queries", "scratch", "output", "cache"] as const;
  * level, mounted on its own. They are hidden by what they are on disk, not by how a path spells
  * them: on a file system that ignores case, `CHATS` and `chatſ` are `chats`.
  */
-const GLOBAL_HIDDEN = ["chats", "defaults"] as const;
+const GLOBAL_HIDDEN = ["chats", "defaults", "jobs"] as const;
+/** Where a user's jobs of no chat keep their notes and sessions, under the tree's folder: `jobs/<user's hash>/`, its notes folder and `sessions/` all that is in view there. */
+export const JOBS_FOLDER = "jobs";
 
 /** The levels, farthest first, as every chat of the folder host has them. */
 export function folderLayers(): Layer[] {
@@ -47,10 +49,11 @@ export function folderLayers(): Layer[] {
   ];
 }
 
-/** A scope's places. Its session's and turn's ids have been checked as safe for a path. */
-export function folderPlaces(scope: Scope): Places {
+/** A scope's places. Its session's and turn's ids have been checked as safe for a path. A job of no chat has its user's notes and its session's folder, and no turn. */
+export function folderPlaces(scope: RunScope): Places {
   const notes = `${NOTES_FOLDER}/`;
   const session = `${SESSIONS_FOLDER}/${scope.session}/`;
+  if (scope.chat === undefined) return { notes, session, writable: [notes] };
   if (scope.turn === undefined) return { notes, session, writable: [notes] };
   const turn = `${session}turns/${scope.turn}/`;
   return { notes, session, turn, writable: [notes, ...TURN_FOLDERS.map((f) => `${turn}${f}/`)] };
@@ -68,8 +71,14 @@ export interface ChatLocation {
   chat: string;
 }
 
-/** Where the levels in view are on disk: a chat's, or, for a scope that names only the user, the tree's folder alone, whose shipped and global levels every chat shares. */
-export type TreeLocation = ChatLocation | { files: string };
+/** Where a user's jobs of no chat keep their sessions: the tree's folder, and his folder's name under `jobs/`. */
+export interface JobsLocation {
+  files: string;
+  jobs: string;
+}
+
+/** Where the levels in view are on disk: a chat's; for a job of no chat, the shipped and global levels and its user's sessions; for a scope that names only the user, the tree's folder alone, whose shipped and global levels every chat shares. */
+export type TreeLocation = ChatLocation | JobsLocation | { files: string };
 
 /** A path in the view, found. */
 export interface Located {
@@ -144,6 +153,7 @@ export async function topView(loc: TreeLocation, level: LayerLevel): Promise<Top
 function levelBase(loc: TreeLocation, level: LayerLevel): string[] {
   if (level === "shipped") return ["defaults"];
   if (level === "global") return [];
+  if ("jobs" in loc && level === "chat") return [JOBS_FOLDER, loc.jobs];
   if (!("chat" in loc)) throw new Error(`A view with no chat in it has no ${level} level.`);
   return level === "chat" ? ["chats", loc.character, loc.chat] : ["chats", loc.character];
 }
@@ -173,7 +183,9 @@ export async function locate(loc: TreeLocation, path: string): Promise<Lookup> {
   const level: LayerLevel = first === "@global" ? "global" : first === "@character" ? "character" : first === "@shipped" ? "shipped" : "chat";
   const rest = level === "chat" ? segments : segments.slice(1);
   const normalized = viewPath(level, rest);
-  if (!("chat" in loc) && (level === "chat" || level === "character")) return { ok: false, path: normalized, reason: "outside" };
+  // With no chat in view there is no character's or chat's level; a job of no chat sees its user's notes and `sessions/` there, and nothing else.
+  const jobSession = "jobs" in loc && level === "chat" && (rest[0] === NOTES_FOLDER || rest[0] === SESSIONS_FOLDER);
+  if (!("chat" in loc) && (level === "chat" || level === "character") && !jobSession) return { ok: false, path: normalized, reason: "outside" };
   const top = rest[0];
   if (top !== undefined && !(await (await topView(loc, level))(top))) return { ok: false, path: normalized, reason: "outside" };
 

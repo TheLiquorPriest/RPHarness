@@ -417,7 +417,7 @@ class Run implements RuleRun {
         this.#questions += 1;
         const id = `${rule.name}#${this.#questions}`;
         this.#asked.set(id, rule.name);
-        out.push({ id, rule: rule.name, agent, question: when.question, watched: scope.watch, text, interrupt: when.interrupt, ...(when.judge !== undefined ? { judge: when.judge } : {}) });
+        out.push({ id, rule: rule.name, path: rule.path, agent, question: when.question, watched: scope.watch, text, interrupt: when.interrupt, ...(when.judge !== undefined ? { judge: when.judge } : {}) });
       }
     }
     return out;

@@ -432,6 +432,8 @@ export interface MessageSeen {
 export interface Question {
   id: string;
   rule: string;
+  /** The rule's file, for what is said when its judge cannot answer. */
+  path: string;
   agent: AgentRef;
   question: string;
   watched: "text" | "thinking" | "reply";

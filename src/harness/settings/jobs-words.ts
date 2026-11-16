@@ -11,4 +11,5 @@ export const JOBS_WORDS = {
   "jobs.run.time": { name: "Time for a job's run", about: "Seconds one job's run may take." },
   "jobs.run.agents": { name: "Sub-agents in a job's run", about: "Sub-agents the agents of one job's run may start in all; 0 starts none." },
   "jobs.keepDays": { name: "Days a job is kept", about: "Days the record of a job is kept; the older ones are removed when the next job starts." },
+  lead: { name: "The Author", about: "The definition that leads the chat's turns, the Author: in a job, its connection judges a rule's question where neither the rule nor rules.judge names one." },
 };

@@ -48,7 +48,8 @@
 import type { Credential, CredentialStore, OAuthCredential } from "@earendil-works/pi-ai";
 import type { ConnectionInput, ConnectionsDoc, Effort, ModelLimitsEntry, ModelsPort, SecretsDoc, SignInToken, StoredConnection, Switchable, UserScope } from "../contract";
 import { MODELS } from "../harness/settings/models";
-import { isRecord, isTokenCount, own } from "./json";
+import { isRecord } from "../contract/json";
+import { isTokenCount, own } from "./json";
 import type { ProviderKind } from "./kinds";
 import { kindOf } from "./kinds";
 import { placeOf } from "./place";

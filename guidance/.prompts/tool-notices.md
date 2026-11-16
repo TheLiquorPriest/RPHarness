@@ -12,7 +12,7 @@ past_message_count: {{agent}} was not run: the count of messages it is sent afte
 said: The player said to you while you were at work: {{words}}
 not_held: You hold no tool named {{tool}}.
 withdrawn: {{tool}} was not run: it is not offered any more. It was among your tools when this session began.
-invalid: {{tool}} was not run: {{#unparsed}}the arguments you sent are not JSON, so none could be read.{{#parameters}} It takes {{parameters}}.{{/parameters}} What was sent: {{arguments}}{{/unparsed}}{{^unparsed}}the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}{{/unparsed}}
+invalid: {{tool}} was not run: {{#unparsed}}the arguments you sent are not JSON, so none could be read.{{#parameters}} It takes {{parameters}}.{{/parameters}} What was sent: {{arguments}}{{/unparsed}}{{^unparsed}}the arguments you sent do not fit what it takes.{{#misfits}} {{argument}} {{#missing}}is missing{{/missing}}{{^missing}}does not fit{{/missing}}{{#choices}}; it takes one of {{choices}}{{/choices}}.{{/misfits}}{{#parameters}} It takes {{parameters}}.{{/parameters}}{{/unparsed}}
 cut_short: {{tool}} was not run: your message reached its length limit, so its arguments may be cut short. Call it again.
 not_switched_on: {{tool}} was not run: {{name}} {{#waiting}}waits for the player to switch it on{{/waiting}}{{^waiting}}is switched off{{/waiting}}.
 never: {{tool}} was not run: it writes to {{lane}}, where the player allows no writes.

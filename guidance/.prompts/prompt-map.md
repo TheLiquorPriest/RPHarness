@@ -30,7 +30,6 @@ notice_order: {{markers}} moved: the prompt's parts are in a different order tha
 notice_preset: This prompt is from {{#now}}{{now.name}}{{#now.revision}}, revision {{now.revision}}{{/now.revision}}{{/now}}{{^now}}a preset the chat application did not name{{/now}}, where the turn before was from {{#was}}{{was.name}}{{#was.revision}}, revision {{was.revision}}{{/was.revision}}{{/was}}{{^was}}a preset it did not name{{/was}}.
 write_saved: The map of {{preset}} is saved: {{count}} slices.
 write_kept: The player's own slices are kept as the player left them: {{markers}}.
-write_unclaimed: Text that belongs to no slice: {{names}}. Read it with prompt, and write the map again to give it a slice.
 write_no_preset: The chat application did not say which preset this prompt is from, so no map can be kept for it.
 write_none: Give at least one slice.
 write_no_parts: {{marker}} names no part of the prompt.

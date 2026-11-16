@@ -230,3 +230,19 @@ test("a tool no longer offered and arguments that are not JSON are each told as 
   expect(part.line("invalid", { tool: "world_query", arguments: '{"id": 4}', misfits: [{ argument: "id", missing: false }] })).toBe("world_query was not run: the arguments you sent do not fit what it takes. id does not fit.");
   for (const said of [part.line("withdrawn", { tool: "x" }) ?? "", part.line("invalid", { tool: "x", arguments: "{", unparsed: true }) ?? ""]) expect({ said, asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ said, asks: false, unfilled: false });
 });
+
+test("each family of RPH's tools that has no tool of its own name has a guide, and no description of RPH's says when to use its tool", async () => {
+  const families = ["agents", "jobs", "chat", "continuity", "lore", "skills", "suggestions", "stores", "web", "files", "reply", "tools"];
+  for (const family of families) {
+    const guide = await shippedTool(family);
+    expect({ family, said: guide.description.length > 0, asks: ASKS.test(guide.description) }).toEqual({ family, said: true, asks: false });
+  }
+  const tools = readdirSync(join(SHIPPED_GUIDANCE, ".tools")).map((file) => file.replace(/\.md$/, "")).filter((name) => !families.includes(name));
+  for (const name of tools) {
+    const said = (await shippedTool(name)).description;
+    expect({ name, says: /needs no (tool|release)|No read is needed|are found with tool_search/.test(said) }).toEqual({ name, says: false });
+  }
+  expect((await shippedTool("archive_search")).description).toContain("earlier sessions");
+  expect(await lines()).toBeDefined();
+  expect((await lines()).line("invalid", { tool: "world_query", misfits: [{ argument: "kind", missing: false, choices: "places, quests" }] })).toBe("world_query was not run: the arguments you sent do not fit what it takes. kind does not fit; it takes one of places, quests.");
+});

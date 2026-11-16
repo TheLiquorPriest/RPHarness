@@ -1,5 +1,5 @@
 // One list of everything a scope's files name that runs a command or calls out (§16, C3): rule
-// commands, command tools, HTTP tools' addresses and MCP servers (hooks join it with their package),
+// commands, command tools, HTTP tools' addresses, MCP servers and hooks,
 // each with where it is written, exactly what it runs or calls, where it stands as the host's
 // switches say as it is listed, and what keeps it from working. A thing just written in a file, or
 // added from the UI, or changed, is listed waiting; the switch itself stays on the server's command
@@ -13,7 +13,7 @@ export async function externalList(guidance: Guidance, switches: SwitchesPort | 
   const user = guidance.scope.user;
   // A file that writes neither a command nor an address has nothing to switch on.
   const stateOf = async (kind: SwitchableKind, name: string, runs: string) => (runs === "" || switches === undefined ? "off" : await switches.state(user, { kind, name, target: runs }));
-  const [rules, manifests, mcp] = await Promise.all([guidance.rules(switches), guidance.manifestFiles(), guidance.mcpServers()]);
+  const [rules, manifests, mcp, hooks] = await Promise.all([guidance.rules(switches), guidance.manifestFiles(), guidance.mcpServers(), guidance.hooks()]);
   // The examples are never in force, so nothing of theirs runs.
   const commands = rules.flatMap((rule): ExternalEntry[] => (rule.command !== undefined && rule.why !== "example" ? [{ kind: "rule-command", name: rule.name, runs: rule.command.runs, path: rule.path, level: rule.level, state: rule.command.state }] : []));
   const tools = await Promise.all(
@@ -31,5 +31,7 @@ export async function externalList(guidance: Guidance, switches: SwitchesPort | 
       return { kind: "mcp-server", name: read.name, runs, path: read.path, level: read.level, state: await stateOf("mcp-server", read.name, runs), ...(problems.length > 0 ? { problem: problems.join(" ") } : {}) };
     }),
   );
-  return [...commands, ...tools, ...mcpServers];
+  // Every hook in force is asked as its file is read, so one just written is listed waiting at once.
+  const hookEntries = await Promise.all(hooks.map(async (hook): Promise<ExternalEntry> => ({ kind: "hook", name: hook.name, runs: hook.command, path: hook.path, level: hook.level, state: await stateOf("hook", hook.name, hook.command) })));
+  return [...commands, ...tools, ...mcpServers, ...hookEntries];
 }

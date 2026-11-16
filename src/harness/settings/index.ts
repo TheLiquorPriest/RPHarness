@@ -26,6 +26,7 @@ import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
 import { COMPACTION } from "./compaction";
 import { CONNECTION, DEFINITION, frozen, type Group, isNamed, type ListedSetting, type SettingEntry } from "./entry";
+import { HOOKS } from "./hooks";
 import { JOBS } from "./jobs";
 import { LIMITS } from "./limits";
 import { MCP } from "./mcp";
@@ -39,7 +40,7 @@ import { TRACE, TRACE_GONE } from "./trace";
 import { USAGE } from "./usage";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, MCP, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
+export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, MCP, HOOKS, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE, ...TRACE_GONE };

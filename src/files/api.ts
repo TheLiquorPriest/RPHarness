@@ -62,6 +62,7 @@
 
 import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
+import type { HookEntry } from "../external/hooks";
 import type { McpRead } from "./mcp";
 import type { Rule } from "./rules";
 
@@ -569,6 +570,8 @@ export interface Guidance {
   manifestFiles(): Promise<ManifestRead[]>;
   /** His MCP servers (`<tools>/mcp.json`, every level's, a nearer server replacing a farther one of its name), broken ones too. */
   mcpServers(): Promise<McpRead[]>;
+  /** His hooks in force (every level's `<hooks>/hooks.yml`, the farthest level's first, each file's in its order; a nearer hook replacing a farther one of its name, those `off:` names as `hooks/<name>` left out); what cannot be read is among `problems`. */
+  hooks(): Promise<HookEntry[]>;
   /** A prompt part's, a tool description's or a skill's file as the levels give it (`Harness.parts.read`, C17): its text, where it is, whether it is switched off, and whether it reads whole. */
   layered(kind: PartKind | "skills", name: string): Promise<{ text: string; path: string; level: LayerLevel; off: boolean; broken: boolean } | undefined>;
 

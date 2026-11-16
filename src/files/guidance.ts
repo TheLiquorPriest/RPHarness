@@ -8,7 +8,9 @@ import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles
 import type { AgentDefinition, Fields, Guidance, GuidanceOptions, LoadGuidance, ManifestRead, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
 import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
+import type { HookEntry } from "../external/hooks";
 import { normalized, problemAt, WrittenItems } from "./header";
+import { HOOKS_FILE, parseHooks } from "./hooks";
 import { parseManifest } from "./manifest";
 import { type McpRead, parseMcp } from "./mcp";
 import { parsePart } from "./parts";
@@ -275,7 +277,7 @@ class TreeGuidance implements Guidance {
 
   async problems(): Promise<Problem[]> {
     const [lists, config] = await Promise.all([Promise.all((["instructions", "agents", "skills", "prompts", "tools", "examples", "manifests"] as const).map(async (l) => [l, [...(await this.#tree.found(l)).keys()]] as const)), this.#tree.config()]);
-    const loads: Promise<unknown>[] = [this.#ruleStates(), this.#mappedToNobody(), this.#pinned()];
+    const loads: Promise<unknown>[] = [this.#ruleStates(), this.#mappedToNobody(), this.#pinned(), this.hooks()];
     for (const [listing, names] of lists) {
       for (const name of names) {
         if (listing === "instructions") loads.push(this.#instructions(name));
@@ -632,6 +634,27 @@ class TreeGuidance implements Guidance {
 
   mcpServers(): Promise<McpRead[]> {
     return this.#mcp();
+  }
+
+  /** Every level's `hooks.yml`, farther first, each in its written order: a nearer hook replaces a farther one of its name; those `off:` names (`hooks/<name>`) are left out; every file's problems join the Files page's. */
+  hooks(): Promise<HookEntry[]> {
+    return this.#once("hooks", async () => {
+      const [layers, config] = await Promise.all([this.#tree.layers(), this.#tree.config()]);
+      const hooks = new Map<string, HookEntry>();
+      for (const layer of layers) {
+        const folder = layer.folders.hooks?.replace(/\/+$/, "");
+        if (folder === undefined) continue;
+        const file = await this.#tree.read(`${layer.mount}${folder}/${HOOKS_FILE}`);
+        if (file === undefined) continue;
+        const read = parseHooks(file);
+        this.#problems.push(...read.problems);
+        for (const hook of read.hooks) {
+          hooks.delete(hook.name);
+          hooks.set(hook.name, hook);
+        }
+      }
+      return [...hooks.values()].filter((hook) => !config.off.has(`hooks/${hook.name}`));
+    });
   }
 
   async manifestFiles(): Promise<ManifestRead[]> {

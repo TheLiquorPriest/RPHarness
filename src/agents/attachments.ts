@@ -11,9 +11,10 @@
 // know as if there were no such entry (§9.4), so no other place is asked for it. The whole list goes
 // to the host, which keeps it with the turn (§10.5: "the list is saved with the turn"). A name nobody
 // could give is handed back, for the delegate call's result.
-// A stretch of the chat holds at most the user's `tools.perCall` messages, as one `chat_read` does.
+// A stretch of the chat is given whole, however long: read page by page of the user's
+// `tools.perCall` messages, in order, nothing cut (§10.5: "each in full").
 // Messages and entries are laid out by lines of a file; nothing here adds a word.
-import type { AgentRef, AttachmentRef, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
+import type { AgentRef, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, Scope } from "../contract";
 import type { LinesPart } from "../files/api";
 
 /** A name an agent is given, and where it was named: its definition's `given:`, or the call that started it. */
@@ -35,7 +36,7 @@ export interface AttachDeps {
   lines: LinesPart | undefined;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map; none: such a name is not found. */
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
-  /** The most messages a stretch of the chat holds (the user's `tools.perCall`): the last few are the newest of them, and any other stretch stops that many from its start. */
+  /** How many messages one read of the chat asks for (the user's `tools.perCall`): a stretch is read in pages of so many, all of them. */
   most: number;
 }
 
@@ -106,10 +107,18 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
       range = Object.hasOwn(ranges, stretch.named) ? ranges[stretch.named] : undefined;
     } else if ("last" in stretch) {
       const { length } = await env.chat.info(scope);
-      range = { from: Math.max(0, length - Math.min(stretch.last, deps.most)), to: length };
+      range = { from: Math.max(0, length - stretch.last), to: length };
     } else range = { from: stretch.from, to: stretch.to + 1 };
     if (range === undefined || range.to <= range.from) return undefined;
-    const messages = await env.chat.read(scope, { from: range.from, to: Math.min(range.to, range.from + deps.most) });
+    const messages: ChatMessage[] = [];
+    for (let from = range.from; from < range.to; ) {
+      const to = Math.min(range.to, from + Math.max(1, deps.most));
+      const page = await env.chat.read(scope, { from, to });
+      messages.push(...page);
+      // A page short of what was asked is the chat's end.
+      if (page.length < to - from) break;
+      from = to;
+    }
     if (messages.length === 0) return undefined;
     // Each message as the `chat_message` line lays it out; nothing when the file has no such line.
     const laid = messages.map(

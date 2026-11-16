@@ -42,7 +42,7 @@ test("a question comes back through delegate, marked; the answer continues the s
   expect(outcome.status).toBe("done");
   const lead = s.models["lead-model"]!.requests;
   // The question is the answer to the delegate call, laid out by the question's part, and marked.
-  expect(lastResult(lead[1]!.messages)).toBe("gm-1 stopped to ask before going on:\n\nHow wide is the gap?\n\nWhat it found before asking:\n\nthe scene notes and the lore of the rock");
+  expect(lastResult(lead[1]!.messages)).toBe("gm-1 stopped to ask before going on:\n\nHow wide is the gap?\n\nWhat it looked up before asking:\n\nthe scene notes and the lore of the rock");
   const delegated = s.trace.of("tool_ended").find((record) => record.event.callId === "d-1");
   expect(delegated?.event.result.marks).toEqual(["question"]);
   // The answer went on with the same agent: its earlier messages, then the lead's words as its question's answer.

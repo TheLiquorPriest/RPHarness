@@ -171,7 +171,7 @@ describe("delegate", () => {
     expect(toolResults(s.models["lead-model"]!.requests[1]!.messages).sort()).toEqual(["keeper was not started: this turn has started 2 agents, and the player allows 2.", "keeper-1 answered:\n\nNoted.", "keeper-2 answered:\n\nNoted."]);
   });
 
-  test("a stretch of the chat an agent is given holds no more messages than the player lets one call take", async () => {
+  test("a stretch of the chat an agent is given is whole however long, read in pages of what one call may take, oldest first, the newest included", async () => {
     const gm = definition("gm", { model: "gm-model", tools: [] }, "Fixture GM.");
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".agents/gm.md": gm, "config.yml": "tools:\n  perCall: 2\n" },
@@ -192,9 +192,8 @@ describe("delegate", () => {
     await (await s.play(PLAYER)).done;
 
     const brief = textOf(s.models["gm-model"]!.requests[0]!.messages[1] ?? { content: "" });
-    // The last few are the newest; any other stretch stops at the bound from its start.
-    expect(brief).toContain("### chat:history[-30:]\n\n#3 Wren Hale: Fixture line three.\n\n#4 Mara: Fixture line four.\n\n### chat:history[#0..#4]\n\n#0 Mara: Fixture line zero.\n\n#1 Wren Hale: Fixture line one.\n\n### chat:history[scene]\n\n#1 Wren Hale: Fixture line one.\n\n#2 Mara: Fixture line two.");
-    expect(brief).not.toContain("Fixture line two.\n\n#3");
+    // Each stretch whole, in order, through pages of two.
+    expect(brief).toContain("### chat:history[-30:]\n\n#0 Mara: Fixture line zero.\n\n#1 Wren Hale: Fixture line one.\n\n#2 Mara: Fixture line two.\n\n#3 Wren Hale: Fixture line three.\n\n#4 Mara: Fixture line four.\n\n### chat:history[#0..#4]\n\n#0 Mara: Fixture line zero.\n\n#1 Wren Hale: Fixture line one.\n\n#2 Mara: Fixture line two.\n\n#3 Wren Hale: Fixture line three.\n\n#4 Mara: Fixture line four.\n\n### chat:history[scene]\n\n#1 Wren Hale: Fixture line one.\n\n#2 Mara: Fixture line two.\n\n#3 Wren Hale: Fixture line three.\n\n#4 Mara: Fixture line four.");
   });
 
   test("a sub-agent that could not go on is said to have had its model fail only when its model did", async () => {

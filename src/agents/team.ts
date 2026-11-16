@@ -21,6 +21,7 @@ import type { AgentSettings } from "../harness/settings";
 import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type LoopToolResult, type ParentCall, type QuestionRules, type RunnerOptions, type RunnerTexts, type RunTrace, type ToolGate, type Work, type WorkInput, type WorkOptions } from "../loop";
 import { PlaceLine } from "../loop/line";
 import { type CompactFacts, Compactor, saveBeforeCompaction } from "../sessions/compact";
+import { tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource, UserChoice } from "../model/source";
 import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "../harness/opening";
@@ -169,14 +170,14 @@ function said(text: string, extra: Omit<LoopToolResult, "content"> = {}): LoopTo
 
 /**
  * A question as `ask_author` gave it, in the fields the question's part names: the question, and
- * what was looked for before asking as `found`, as a tool's argument and a part's field are each
- * named for their reader (the brief is the part's `task`).
+ * what was looked for before asking as `searched`, under the name the tool's argument has (the brief
+ * is the part's `task`).
  */
-function questionFields(question: JsonValue | undefined): { question: string; found: string } {
+function questionFields(question: JsonValue | undefined): { question: string; searched: string } {
   const given = typeof question === "object" && question !== null && !Array.isArray(question) ? question : {};
   const text = given["question"];
   const searched = given["searched"];
-  return { question: typeof text === "string" ? text : "", found: typeof searched === "string" ? searched : "" };
+  return { question: typeof text === "string" ? text : "", searched: typeof searched === "string" ? searched : "" };
 }
 
 export class Team implements TeamWork {
@@ -314,6 +315,17 @@ export class Team implements TeamWork {
     };
     // Compacted at any call that would not fit, as the lead is (§11, §13.3): its own older calls, after the moment before compaction where a rule names its definition.
     const compaction = d.compaction?.();
+    // Never cut, never silent (§10.5): what it starts with (its block, its brief and all it is given, its tools) is counted against its model's window less the reserve for its reply; past it, nothing starts and the lead is told the sizes, to decide.
+    const window = model.limits.contextWindow?.tokens;
+    if (window !== undefined && window > 0) {
+      const ratio = options.terms.charsPerToken;
+      const size = tokensOf(instructions, ratio) + tokensOf(joined([brief]), ratio) + tokensOf(JSON.stringify(held.tools.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio);
+      const room = window - (compaction?.reserve ?? 0);
+      if (size > room) {
+        d.env.log.info("A sub-agent was not started: what it starts with would not fit its model.", { agent: ref.id, size, room });
+        return answer(loaded.words("too_large", { agent: definition.name, size, room, attachments: given.blocks.map((block) => ({ name: block.name, tokens: tokensOf(block.text, ratio) })) }), true);
+      }
+    }
     const compactor =
       compaction === undefined
         ? undefined
@@ -495,7 +507,7 @@ export class Team implements TeamWork {
       case "asked": {
         const asked = questionFields(outcome.question);
         // Without the question's part, the question and what was looked for go as the agent wrote them.
-        const text = loaded.question?.render({ ...fields, ...asked }).text ?? joined([asked.question, asked.found]);
+        const text = loaded.question?.render({ ...fields, ...asked }).text ?? joined([asked.question, asked.searched]);
         return said(joined([text]), { marks: [QUESTION_MARK], ...extra });
       }
       case "done":

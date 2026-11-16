@@ -56,7 +56,7 @@ test("two started in one step work side by side; both ask, both are answered, bo
 
   expect(outcome).toMatchObject({ status: "done", text: "Both settled." });
   const lead = s.models["lead-model"]!.requests;
-  expect(results(lead[1]!.messages)).toEqual(["gm-1 stopped to ask before going on:\n\nTen feet or twenty?\n\nWhat it found before asking:\n\nthe scene notes", "keeper-1 stopped to ask before going on:\n\nWhich vow, the first or the second?\n\nWhat it found before asking:\n\nthe chat"]);
+  expect(results(lead[1]!.messages)).toEqual(["gm-1 stopped to ask before going on:\n\nTen feet or twenty?\n\nWhat it looked up before asking:\n\nthe scene notes", "keeper-1 stopped to ask before going on:\n\nWhich vow, the first or the second?\n\nWhat it looked up before asking:\n\nthe chat"]);
   expect(results(lead[2]!.messages).slice(-2)).toEqual(["gm-1 answered:\n\nRuled on Twenty feet.", "keeper-1 answered:\n\nRecalled The second vow."]);
   // Each asked, then finished; the lead ended last. Which of the two came back first is theirs to decide.
   const ended = s.trace.of("agent_ended");

@@ -217,6 +217,10 @@ export interface SessionView {
   turns: number;
   /** A compaction the host asked for (`compact`), waiting for the session's next turn. */
   compactAsked?: true;
+  /** On `close`'s answer alone: his session-close hook kept it open (§5.4 "Hooks"), the hook and its reason in its own words, which the page that closed it shows. */
+  held?: { hook: string; reason: string };
+  /** On `close`'s answer alone: what his session-close hooks added, which the host puts after the scene summary the next session opens with. */
+  hooked?: string;
 }
 
 export interface SessionsApi {

@@ -433,6 +433,8 @@ export interface PartsApi {
   preview(scope: Scope, kind: "prompt" | "tool", name: string, text?: string, fields?: JsonObject): Promise<PartPreview>;
   /** The values the part was last rendered with for an agent of this chat (a part of lines: each line's, by its name); undefined before it ever was. */
   lastFields(scope: Scope, kind: "prompt" | "tool", name: string): Promise<JsonObject | undefined>;
+  /** Keeps `fields` as a part's last values in this chat, for a part the host renders itself (RPE's world-state layout), where `lastFields` reads them. */
+  keep(scope: Scope, kind: "prompt" | "tool", name: string, fields: JsonObject): Promise<void>;
 }
 
 // ---------------------------------------------------------------- the live view

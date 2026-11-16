@@ -112,5 +112,9 @@ export function partsApi(env: Pick<Environment, "files" | "store">): PartsApi {
     },
 
     lastFields,
+
+    async keep(scope, kind, name, fields) {
+      await env.store.set({ user: scope.user }, fieldsKey(scope.chat, KIND[kind], name), fields);
+    },
   };
 }

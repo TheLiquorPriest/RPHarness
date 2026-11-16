@@ -10,6 +10,7 @@ import { fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, replyR
 import { BASE_TOOLS, baseTools } from "../tools/base";
 import type { BaseToolsDeps } from "../tools/base/deps";
 import { SEARCH_TOOLS, searchTools, type ToolReach } from "../tools/search";
+import type { GuidesGiven } from "../tools/search/tools";
 import { toolTextOf } from "./means";
 import type { Settings } from "./settings";
 
@@ -50,6 +51,8 @@ export interface OwnToolsDeps {
   keepLore?: NonNullable<BaseToolsDeps["keepLore"]>;
   /** The scene's copy of the prompt map, which a map the agent saves replaces (§11, §4.8); none keeps none. */
   sceneMap?: SceneMap;
+  /** The families whose guide a tool search gave each agent, for as long as its session lasts; none keeps them for as long as the tools are. */
+  guidesGiven?: GuidesGiven;
 }
 
 export function ownTools(d: OwnToolsDeps): OwnTool[] {
@@ -80,6 +83,7 @@ export function ownTools(d: OwnToolsDeps): OwnTool[] {
       texts,
       hits: settings.searchHits,
       perCall: settings.perCall,
+      ...(d.guidesGiven !== undefined ? { guidesGiven: d.guidesGiven } : {}),
     }),
   ];
 }

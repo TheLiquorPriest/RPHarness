@@ -23,6 +23,9 @@ export function loreKey(id: string): string {
 /** The key the scene's prompt map is kept under. */
 export const PROMPT_MAP_KEY = "prompt-map";
 
+/** The key the families whose guide a tool search gave the session's lead are kept under, as a JSON list. */
+export const GUIDES_KEY = "guides-given";
+
 /** What stands in the cache on the path that ends at `to`: the newest entry of each key, a turn off the path's left out. */
 export function standing(log: SessionLog, to: string | null): Map<string, CachedEntry> {
   const out = new Map<string, CachedEntry>();

@@ -19,7 +19,7 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
 import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, LoreEntry, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
-import { CACHE, type CacheDeps, hostCached, keepCached, loreKey, PROMPT_MAP_KEY, readCached, standing } from "../sessions/cache";
+import { CACHE, type CacheDeps, GUIDES_KEY, hostCached, keepCached, loreKey, PROMPT_MAP_KEY, readCached, standing } from "../sessions/cache";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
@@ -36,6 +36,7 @@ import { answer, type OwnTool, Registry, TodoLists, type ToolText, type Words } 
 import { changedText, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
+import type { GuidesGiven } from "../tools/search/tools";
 import type { JobsWork } from "../jobs/tool";
 import { noticeLines, noticeWords, type PromptView, promptSlice, promptTurn, promptViews, type SceneMap, type TurnPrompt, type ViewWrites, writeViews } from "../prompt";
 import { AgentRuns } from "./agent-run";
@@ -125,6 +126,8 @@ export class Turn {
   readonly #trace: RunTrace;
   readonly #lead: AgentRef;
   readonly #desk = new ReplyDesk();
+  /** The families whose guide a tool search gave each agent of the turn but the lead (the lead's are the session's, in its cache). */
+  readonly #guides = new Map<string, Set<string>>();
   readonly #todos = new TodoLists();
   /** Every agent's work in flight, with its runner, so a stop or the turn's time reaches each. */
   readonly #working = new Set<{ runner: AgentRunner; work: Work }>();
@@ -794,6 +797,7 @@ export class Turn {
       reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
       keepLore: (ctx, entry) => this.#keepLore(ctx, entry),
       sceneMap: this.#sceneMap(),
+      guidesGiven: this.#guidesGiven(),
     });
   }
 
@@ -922,6 +926,41 @@ export class Turn {
         const file = this.#file;
         const places = this.#places;
         if (file !== undefined && places !== undefined) await keepCached(file, this.#cacheDeps(places), this.scope.turn, PROMPT_MAP_KEY, text, meta);
+      },
+    };
+  }
+
+  /** The families whose guide a tool search gave (`tool_search`): the lead's for the whole session, read on this turn's path from the session's cache and kept there as this turn's work; any other agent's for its run. */
+  #guidesGiven(): GuidesGiven {
+    const lead = (agent: AgentRef): boolean => agent.id === this.#lead.id;
+    const leads = async (): Promise<Set<string>> => {
+      const file = this.#file;
+      const places = this.#places;
+      const entry = file === undefined ? undefined : standing(file.log, file.log.tip(this.scope.turn) ?? null).get(GUIDES_KEY);
+      const text = entry === undefined || places === undefined ? undefined : await readCached(this.#cacheDeps(places), entry);
+      let list: unknown = [];
+      try {
+        if (text !== undefined) list = JSON.parse(text);
+      } catch {
+        // A list someone spoiled is read as none: each guide is given again, once.
+      }
+      return new Set(Array.isArray(list) ? list.filter((family): family is string => typeof family === "string") : []);
+    };
+    return {
+      given: async (agent) => (lead(agent) ? leads() : (this.#guides.get(agent.id) ?? new Set())),
+      add: async (agent, families) => {
+        if (!lead(agent)) {
+          const given = this.#guides.get(agent.id) ?? new Set<string>();
+          for (const family of families) given.add(family);
+          this.#guides.set(agent.id, given);
+          return;
+        }
+        const file = this.#file;
+        const places = this.#places;
+        if (file === undefined || places === undefined) return;
+        const given = await leads();
+        for (const family of families) given.add(family);
+        await keepCached(file, this.#cacheDeps(places), this.scope.turn, GUIDES_KEY, JSON.stringify([...given]));
       },
     };
   }

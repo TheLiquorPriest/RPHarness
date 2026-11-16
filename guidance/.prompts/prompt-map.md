@@ -1,5 +1,5 @@
 ---
-description: The words of the prompt map - what the prompt tool answers, how a part of the prompt is laid out when an agent reads it or is given it, and the views of the prompt written in each turn's folder. The notices about the prompt's shape are worded in the notices part. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)". Under views, each file of the turn's folder is given the part of the prompt named beside it, by the names prompt reads; take a file out and it is not written.
+description: The words of the prompt map - what the prompt tool answers, what the answers to a write of the map and to the player's edits of it say, how a part of the prompt is laid out when an agent reads it or is given it, and the views of the prompt written in each turn's folder. The notices about the prompt's shape are worded in the notices part. One line per name, a name, a colon, then its text. Change the words freely. Delete a line and that answer is given with no words; on some connections the model is then shown its provider's own note that the tool gave nothing, such as "(no tool output)". Under views, each file of the turn's folder is given the part of the prompt named beside it, by the names prompt reads; take a file out and it is not written.
 format: lines
 views:
   assembled-preset-prompt.md: "*"
@@ -37,3 +37,9 @@ write_same_start: {{marker}} and {{other}} begin at the same place. Give the lat
 write_left_empty: {{marker}} is left with no text of its own.
 write_players: {{marker}} is the player's own marker for another part of the prompt. Choose another.
 view_left_out: Messages #{{from}} to #{{last}} of the chat are not in this prompt{{#covered}}; the story's record covers them{{/covered}}. chat_read reads them.
+edit_unmapped: This turn's prompt is not mapped, so there is nothing to edit.
+edit_no_marker: The map has no slice with the marker {{marker}}.
+edit_taken: {{marker}} is another slice's marker already.
+edit_merge_two: A merge needs two slices or more.
+edit_not_found: {{marker}} is not in this turn's prompt, so its text cannot be taken.
+edit_no_words: The text of {{marker}} does not hold "{{words}}" past its start, so it cannot be split there.

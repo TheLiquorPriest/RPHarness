@@ -275,3 +275,14 @@ test("the prompt's shape notices are worded in the notices part and no longer in
   expect(map.line("layout_piece", { name: "history[4]", length: 900, role: "assistant", history: { index: 4 }, summarized: true })).toBe("history[4] - 900 characters, assistant, chat message #4, a summary the chat application put in place of messages");
   expect(map.line("layout_piece", { name: "style", length: 120, role: "system" })).toBe("style - 120 characters, system");
 });
+
+test("each refusal of the owner's edit of the prompt map says what is so and fills in", async () => {
+  const map = await shippedParts().part("prompt-map");
+  if (map?.format !== "lines") throw new Error("prompt-map is a lines part");
+  const fields: Record<string, Record<string, string>> = { edit_unmapped: {}, edit_no_marker: { marker: "style" }, edit_taken: { marker: "style" }, edit_merge_two: {}, edit_not_found: { marker: "style" }, edit_no_words: { marker: "style", words: "At dusk" } };
+  for (const [name, given] of Object.entries(fields)) {
+    const said = map.line(name, given) ?? "";
+    expect({ name, said: said.length > 0, unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ name, said: true, unfilled: false, asks: false });
+  }
+  expect(map.line("edit_no_words", fields["edit_no_words"] ?? {})).toBe('The text of style does not hold "At dusk" past its start, so it cannot be split there.');
+});

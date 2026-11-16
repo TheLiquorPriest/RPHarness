@@ -325,3 +325,12 @@ test("a suggestion past the most the chat holds is told as not kept, and suggest
   expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
   expect(Object.keys((await shippedTool("suggest")).arguments)).toEqual(["file", "lore", "new_lore", "text", "reason", "book", "title", "keys", "was"]);
 });
+
+test("a search that finds a tool of a family whose guide the agent does not hold gives the guide once and names it after", async () => {
+  const part = await shippedParts().part("tool-search");
+  if (part?.format !== "lines") throw new Error("tool-search is a lines part");
+  const said = part.line("guide", { family: "things", guide: "Each of these names a thing by `item`." }) ?? "";
+  expect(said).toBe("How to use the things tools: Each of these names a thing by `item`.");
+  expect(part.line("guide_given", { family: "things" })).toBe("The guide to the things tools was given earlier in this session.");
+  expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
+});

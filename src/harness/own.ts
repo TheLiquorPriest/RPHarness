@@ -8,6 +8,7 @@ import { JOB_SEARCHED, jobTools } from "../jobs/tools";
 import { PROMPT_TOOLS, promptMapWrite, promptTool, type TurnPrompt } from "../prompt";
 import { fileFind, fileRead, type FileToolsDeps, fileWrite, type OwnTool, replyRelease, type ReplyWork, todo, type TodoDeps, TodoLists, type ToolText, type Words, writeReply } from "../tools";
 import { BASE_TOOLS, baseTools } from "../tools/base";
+import type { BaseToolsDeps } from "../tools/base/deps";
 import { SEARCH_TOOLS, searchTools, type ToolReach } from "../tools/search";
 import { toolTextOf } from "./means";
 import type { Settings } from "./settings";
@@ -45,6 +46,8 @@ export interface OwnToolsDeps {
   prompt(): Promise<TurnPrompt | undefined>;
   /** What an agent may reach by searching, and the runner that runs a found tool as the agent. */
   reach: ToolReach;
+  /** Each lore entry an agent read in full, for the session's cache (§11); none keeps none. */
+  keepLore?: NonNullable<BaseToolsDeps["keepLore"]>;
 }
 
 export function ownTools(d: OwnToolsDeps): OwnTool[] {
@@ -63,7 +66,7 @@ export function ownTools(d: OwnToolsDeps): OwnTool[] {
     agentDrop(d.team, texts.get("agent_drop")),
     jobStart(d.jobs, texts.get(JOB_START), settings.jobs.perRun),
     ...jobTools(d.jobs, texts, settings.perCall),
-    ...baseTools({ env, guidance, texts, ids: () => d.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}) }),
+    ...baseTools({ env, guidance, texts, ids: () => d.ids(), gapHits: settings.gapHits, perCall: settings.perCall, ...(env.web !== undefined ? { web: env.web } : {}), ...(d.keepLore !== undefined ? { keepLore: d.keepLore } : {}) }),
     promptTool({ prompt: () => d.prompt(), guidance, texts, env }),
     promptMapWrite({ prompt: () => d.prompt(), guidance, texts, env, signatureHead: settings.signatureHead }),
     ...searchTools({

@@ -143,6 +143,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       now: () => env.clock.now(),
       keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).compaction.keepTurns,
       closed: sessionClosed,
+      log: env.log,
       told,
     }),
 

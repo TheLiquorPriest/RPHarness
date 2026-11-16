@@ -187,6 +187,22 @@ export interface OpeningEntry extends EntryBase {
 }
 
 /**
+ * Something the session's cache keeps (§11, R-111), as the work of `turn`: `key` says what (a scratch
+ * file it carries, by its path in a turn's folder, `scratch/scene.md`; a lore entry read in full,
+ * `lore/<id>`; the scene's prompt map, `prompt-map`), and `file` names its text in the cache folder,
+ * by what it is and its text's hash, so each version is its own file. The newest of a key on a path
+ * is the one that stands there, so a swipe or a delete finds the cache as it stood at that turn's
+ * start, and a branch takes it as it stood at the branch point.
+ */
+export interface CachedEntry extends EntryBase {
+  type: "cached";
+  turn: string;
+  key: string;
+  file: string;
+  meta?: JsonObject;
+}
+
+/**
  * What a turn's runs have spent so far (N-22), written as each run of it ends: the calls and tokens
  * of every agent of its runs, their answers that called tools (`rounds`, absent in a mark written
  * before they were counted), and their wall time in milliseconds, added up. The newest for a turn,
@@ -201,7 +217,7 @@ export interface SpentEntry extends EntryBase {
   ms: number;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | OpensWithEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
+export type SessionEntry = OpeningEntry | OpenedEntry | OpensWithEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | CachedEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -237,6 +253,8 @@ function isEntry(v: Record<string, unknown>): boolean {
       return str(v["turn"]) && str(v["callId"]) && str(v["tool"]) && v["args"] !== undefined;
     case "result":
       return str(v["turn"]) && str(v["callId"]) && str(v["tool"]) && str(v["text"]) && optional(v["reports"], (r) => Array.isArray(r) && r.every(str));
+    case "cached":
+      return str(v["turn"]) && str(v["key"]) && str(v["file"]) && optional(v["meta"], isMapping);
     case "closed":
       return optional(v["turn"], str) && optional(v["by"], (by) => by === "user");
     case "reopened":

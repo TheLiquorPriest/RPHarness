@@ -4,8 +4,9 @@
 // compaction asked for, and each session as it stands now. Every change is told as it happens, to
 // the host's trace and the chat's live view (§13.1: RPH reports everything it does). Code never
 // closes a session for its size, and nothing here is a step of a turn.
-import type { FilesPort, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
+import type { FilesPort, Log, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
 import type { SessionBook, SessionFile } from "./book";
+import { copyCache } from "./cache";
 import { compactionAt, pathTurns } from "./carry";
 import type { ClosedEntry, SessionEntry, SessionLog } from "./file";
 
@@ -54,6 +55,7 @@ const ANY_SESSION = "any";
 
 export interface SessionsDeps {
   files: FilesPort;
+  log: Log;
   now(): number;
   /** How many of a session's newest turns a summary never stands for, as the user's settings for its chat say. */
   keepTurns(scope: Scope): Promise<number>;
@@ -153,6 +155,10 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
           if (opens !== undefined) entries.push({ ...opens, parent: tip });
           target.copy(entries, { chat: from.chat, session: from.session, turn: from.turn });
           await target.settled();
+          // And the session's cache folder, the host's files with RPH's: the branch's turns find it as it stood.
+          const fromScope: Scope = { user: from.user, chat: from.chat, session: from.session };
+          const toScope: Scope = { user: to.user, chat: to.chat, session: to.session };
+          await copyCache(d.files, { scope: fromScope, places: await d.files.places(fromScope) }, { scope: toScope, places: await d.files.places(toScope) }, d.log);
           d.told(to, { session: to.session, change: "forked", from: from.session, turn: from.turn });
           return view(target);
         });

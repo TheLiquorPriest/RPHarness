@@ -18,7 +18,8 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
-import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
+import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, LoreEntry, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
+import { CACHE, type CacheDeps, hostCached, keepCached, loreKey, PROMPT_MAP_KEY, readCached, standing } from "../sessions/cache";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
@@ -240,6 +241,8 @@ export class Turn {
     if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
     // Each sub-agent's session closes with the turn's end.
     await this.#runs?.close();
+    // Its own version of each scratch file the session carries becomes the standing one, as its work.
+    await this.#keepScratch().catch((error: unknown) => env.log.error("The session's cache could not keep the turn's scratch files.", { turn: this.scope.turn, run: this.run, error: errorWords(error) }));
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
     await this.#tell(env.events.ended(this.scope, outcome));
@@ -305,6 +308,8 @@ export class Turn {
     // Where this run's work starts on the path: before the turn, or after what a continued turn did already. What the session carries and what the rules remembered are read there.
     const from = continued === undefined ? begun.parent : (file.log.tip(scope.turn) ?? continued.id);
     this.#sessionTurns = pathTurns(file.log, file.log.tip(scope.turn) ?? begun.id).length;
+    // The scratch files the session carries, as they stand on this turn's path, put in its own scratch (R-111): a swipe starts from its parent's. A continue has its own already.
+    if (continued === undefined) await this.#carryIn(file, from, places, settings.sessions.carried);
     this.#progress = lines(progress);
     const answers = lines(toolNotices);
     this.#words = (name, fields) => answers?.line(name, fields);
@@ -725,6 +730,8 @@ export class Turn {
       ...(opening.form === "two-step" && opening.intentFile !== undefined && places.turn !== undefined ? { intent_path: `${places.turn}${opening.intentFile}` } : {}),
       // The reply contract as it stands now, rendered for the session's form: the template decides whether and where.
       ...(block.contract !== undefined && block.contract !== "" ? { reply_contract: block.contract } : {}),
+      // What the session's cache holds (§11 l.1361): what it has already looked up, and where each is.
+      ...(await this.#cacheFields(places)),
     };
     const text = layout.render(fields).text;
     return text.trim() === "" ? undefined : text;
@@ -768,6 +775,7 @@ export class Turn {
       ids: () => this.#c.ids(),
       prompt: async () => this.#prompt,
       reach: { of: (agent) => this.#reach(agent), run: (tool, args, ctx) => this.#runAs(tool, args, ctx) },
+      keepLore: (ctx, entry) => this.#keepLore(ctx, entry),
     });
   }
 
@@ -839,6 +847,62 @@ export class Turn {
       "session.turns": { count: this.#sessionTurns },
       ...(left !== undefined ? { "limits.left": left } : {}),
     };
+  }
+
+  /** Where the session's cache is, as the cache's functions take it: the session's own scope (a write there belongs to no turn) and its places. */
+  #cacheDeps(places: Places): CacheDeps {
+    const { env } = this.#c;
+    return { files: env.files, scope: { user: this.scope.user, chat: this.scope.chat, session: this.scope.session }, places, log: env.log };
+  }
+
+  /** Each scratch file the session carries that stands on the path at `from`, written into this turn's own scratch. */
+  async #carryIn(file: SessionFile, from: string | null, places: Places, carried: readonly string[]): Promise<void> {
+    const at = places.turn;
+    if (at === undefined || carried.length === 0) return;
+    const d = this.#cacheDeps(places);
+    const kept = standing(file.log, from);
+    for (const path of carried) {
+      const entry = kept.get(path);
+      const text = entry === undefined ? undefined : await readCached(d, entry);
+      if (text === undefined) continue;
+      const written = await d.files.write(this.scope, `${at}${path}`, { op: "write", text }, "harness");
+      if (written.status !== "written") d.log.warn("A scratch file the session carries could not be put in the turn's scratch.", { turn: this.scope.turn, path, status: written.status });
+    }
+  }
+
+  /** At the turn's end: the turn's own version of each carried scratch file becomes the standing one, as its work. */
+  async #keepScratch(): Promise<void> {
+    const file = this.#file;
+    const places = this.#places;
+    if (file === undefined || places?.turn === undefined) return;
+    const d = this.#cacheDeps(places);
+    for (const path of this.#settings.sessions.carried) {
+      const read = await d.files.read(this.scope, `${places.turn}${path}`);
+      if (read.status === "read") await keepCached(file, d, this.scope.turn, path, read.text);
+    }
+  }
+
+  /** A lore entry read in full by an agent that plays no character, kept in the session's cache as this turn's work. */
+  #keepLore(ctx: ToolCtx, entry: LoreEntry): void {
+    const file = this.#file;
+    const places = this.#places;
+    if (ctx.agent.plays !== undefined || file === undefined || places === undefined) return;
+    void this.#tell(keepCached(file, this.#cacheDeps(places), this.scope.turn, loreKey(entry.id), entry.text, { id: entry.id, title: entry.title, source: entry.source, ...(entry.revision !== undefined ? { revision: entry.revision } : {}) }));
+  }
+
+  /** The briefing's `cache` field: the scratch files carried into this turn, the lore entries kept, the prompt map, and the host's own files there, each with where it is. */
+  async #cacheFields(places: Places): Promise<Fields> {
+    const file = this.#file;
+    if (file === undefined) return {};
+    const d = this.#cacheDeps(places);
+    const folder = `${places.session}${CACHE}`;
+    const kept = standing(file.log, file.log.tip(this.scope.turn) ?? null);
+    const carried = places.turn === undefined ? [] : this.#settings.sessions.carried.filter((path) => kept.has(path)).map((path) => ({ path: `${places.turn}${path}` }));
+    const lore = [...kept.values()].flatMap((entry) => (entry.key.startsWith("lore/") && entry.meta !== undefined ? [{ id: entry.meta["id"] ?? "", title: entry.meta["title"] ?? "", path: `${folder}${entry.file}` }] : []));
+    const map = kept.get(PROMPT_MAP_KEY);
+    const host = (await hostCached(d, file.log)).map((path) => ({ path }));
+    if (carried.length === 0 && lore.length === 0 && map === undefined && host.length === 0) return {};
+    return { cache: { folder, ...(carried.length > 0 ? { carried } : {}), ...(lore.length > 0 ? { lore } : {}), ...(map !== undefined ? { prompt_map: `${folder}${map.file}` } : {}), ...(host.length > 0 ? { host } : {}) } };
   }
 
   /**

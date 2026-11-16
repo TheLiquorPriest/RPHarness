@@ -242,18 +242,20 @@ export class UsageBook implements UsageApi {
 
   /** Every record of a run, as it happens. */
   record(record: TraceRecord): void {
-    const { event } = record;
+    const { event, agent } = record;
+    // A record of the host's word outside any agent's work (a session opened or closed by a call of the sessions API) spent nothing.
+    if (agent === undefined) return;
     // A run is its user's, as its first record names him: the run and its user are the harness's, never the asker's.
     const book = this.#runs.get(record.run);
     if (book !== undefined) book.user ??= record.scope.user;
-    const working = JSON.stringify([record.run, record.agent.id]);
-    const kind: SpentIn = record.agent.job !== undefined ? "job" : "turn";
+    const working = JSON.stringify([record.run, agent.id]);
+    const kind: SpentIn = agent.job !== undefined ? "job" : "turn";
     if (event.kind === "agent_started") {
       this.#ended.set(working, emptyUsage());
       return;
     }
     if (event.kind === "call_ended") {
-      const gauge = this.#gauges.get(gaugeKey(record.scope, record.agent.id));
+      const gauge = this.#gauges.get(gaugeKey(record.scope, agent.id));
       // What the call was sent is what the agent's context held.
       if (gauge !== undefined && event.usage.input > 0) gauge.used = event.usage.input;
       const ended = this.#ended.get(working);
@@ -264,9 +266,9 @@ export class UsageBook implements UsageApi {
     if (event.kind !== "agent_ended") return;
     if (book !== undefined) {
       addUsage(book.total, event.usage);
-      const entry = book.agents.get(record.agent.id) ?? { agent: record.agent, usage: emptyUsage() };
+      const entry = book.agents.get(agent.id) ?? { agent, usage: emptyUsage() };
       addUsage(entry.usage, event.usage);
-      book.agents.set(record.agent.id, entry);
+      book.agents.set(agent.id, entry);
     }
     // What its work spent beyond the calls that ended whole: a call a stop or a limit cut off.
     const ended = this.#ended.get(working) ?? emptyUsage();

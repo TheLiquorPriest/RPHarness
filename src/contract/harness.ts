@@ -546,8 +546,9 @@ export interface RebuiltRequest {
 export interface Harness {
   /**
    * Answers one turn. The reply goes to `sink` as it is written, ending at release with `finish`;
-   * the lead's run may go on after (§10.9). Resolves once the lead's run is over, after
-   * `TurnEvents.ended`. The signal stops every agent of the turn.
+   * the lead's run may go on after (§10.9), and a kept sub-agent past it (§13.4). `TurnEvents.ended`
+   * is told once the lead's run is over; resolves once every agent of the turn has ended. The signal
+   * stops every agent of the turn.
    */
   answer(req: TurnRequest, sink: ReplySink, signal: AbortSignal): Promise<TurnOutcome>;
   /**

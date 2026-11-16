@@ -424,6 +424,13 @@ export class AgentRunner {
     return new Budget("agent", o.limits ?? {}, o.turn, o.terms.cachedWeight !== undefined ? { cachedWeight: o.terms.cachedWeight } : {});
   }
 
+  /** A message for the agent while it works, from a file or his own hooks: it goes in with its next call. False where it is not working. */
+  tell(text: string): boolean {
+    if (this.#stint === undefined || this.#stint.halt !== undefined) return false;
+    this.#pi.steer(this.#message([text]));
+    return true;
+  }
+
   /** Ends the work in flight at a limit that is not its own (the turn's time): as a stop, with that limit. */
   limit(hit: LimitHit): void {
     const stint = this.#stint;

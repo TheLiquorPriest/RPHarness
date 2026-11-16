@@ -27,7 +27,8 @@ import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/s
 import type { JobCount } from "../harness/usage";
 import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
-import { type JobAsk, type JobCore, type PreparedJob, prepareJob } from "./run";
+import { joined } from "../agents/attachments";
+import { type JobAsk, type JobCore, type JobHooked, type PreparedJob, prepareJob } from "./run";
 import type { JobCall, JobsWork, RunJobs } from "./tool";
 
 /** The lines `job_start` answers with (`.prompts/jobs.md`). */
@@ -61,7 +62,7 @@ interface Live {
 }
 
 /** What came of making a job: the job, as it stands once it had its chance at a place; the user's limit it would pass; why none may be made; or the answer that says why none could be made. */
-type Begun = { view: JobView } | { hit: LimitHit } | { refusal: JobRefusal } | LoopToolResult;
+type Begun = { view: JobView } | { hit: LimitHit } | { refusal: JobRefusal } | JobHooked | LoopToolResult;
 
 function isObject(value: JsonValue | undefined): value is { [key: string]: JsonValue } {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -163,6 +164,8 @@ export class Jobs implements JobsApi, JobsWork {
     }
     if (!("view" in begun)) run.started -= 1;
     if ("content" in begun) return begun;
+    // His job-start hook kept it from starting: its reason is the answer.
+    if ("blocked" in begun) return answer(begun.blocked.reason, true);
     if ("refusal" in begun) return answer(part?.line("off", { agent: call.agent }), true);
     if ("hit" in begun) {
       const { hit } = begun;
@@ -267,6 +270,7 @@ export class Jobs implements JobsApi, JobsWork {
   /** The job a start made, or why it made none. */
   #started(begun: Begun, agent: string): JobView | JobRefusal {
     if ("view" in begun) return { ...begun.view };
+    if ("blocked" in begun) return { refused: "hook", hook: begun.blocked.hook, reason: begun.blocked.reason };
     if ("refusal" in begun) return begun.refusal;
     if ("hit" in begun) {
       const { hit } = begun;
@@ -375,6 +379,7 @@ export class Jobs implements JobsApi, JobsWork {
         goOn: { used: view.usage, ...(view.more !== undefined ? { more: view.more } : {}), ...(said !== undefined ? { line: said } : {}) },
       },
     );
+    if ("blocked" in prepared) return { refused: "hook", hook: prepared.blocked.hook, reason: prepared.blocked.reason };
     if (!("run" in prepared)) return { refused: "agent", agent: view.agent };
     const hit = prepared.day.reached(prepared.agent)[0];
     if (hit !== undefined) return { refused: "day-tokens", max: hit.max, value: hit.value };
@@ -568,7 +573,9 @@ export class Jobs implements JobsApi, JobsWork {
           const stoppedAs = signal.aborted ? (signal.reason as JobState) : undefined;
           const state: JobState = stoppedAs ?? (outcome.status === "failed" ? "failed" : outcome.status === "stopped" ? "cancelled" : "done");
           if (outcome.status === "failed") this.#core.env.log.warn("A job's agent could not go on.", { job: live.view.id, failure: outcome.failure ?? "harness", error: outcome.error ?? "" });
-          const report = outcome.text.trim() !== "" ? outcome.text : live.view.report;
+          // What his job-end hooks added goes into its report (§5.4 "Hooks").
+          const said = outcome.text.trim() !== "" ? outcome.text : live.view.report;
+          const report = end.added !== undefined ? joined([said ?? "", ...end.added]) : said;
           this.#end(live, { ...live.view, state, usage: end.usage, ...(report !== undefined ? { report } : {}), ...(end.limit !== undefined && stoppedAs === undefined ? { limit: end.limit } : {}) });
         },
         (error: unknown) => {

@@ -191,6 +191,8 @@ export class Turn {
   #hooks: Hooks | undefined;
   /** What his turn-start hooks added, for the briefing. */
   #hooked = "";
+  /** The lead's runner, once made: what his after-release hooks add goes in with its next call. */
+  #leadRunner: AgentRunner | undefined;
   #intentWritten = false;
   /** The lead's last message that ended whole with any text outside every mark, that text, trimmed: what a run with no reply hands the host. */
   #lastText: string | undefined;
@@ -444,6 +446,7 @@ export class Turn {
       compacted: (agent, summary, facts) => this.#agentRuns().compacted(agent, summary, facts),
       compaction: () => this.#settings.compaction,
       atRunEnd: (agent, parent) => hooks.atRunEnd(scope, { agent, ...(parent !== undefined ? { parent } : {}) }),
+      hooks,
       slice,
       numbers: session.handles,
       signal: this.#stopping.signal,
@@ -623,6 +626,7 @@ export class Turn {
       ...(earlierTurns !== undefined ? { earlier: earlierTurns } : {}),
       // A summary of the lead's own older calls is the turn's compaction too; it stands for those entries, which the file keeps.
       written: (summary, facts) => void file.add({ type: "compacted", parent: file.log.tip(scope.turn) ?? begun.id, turn: scope.turn, summary, kept: begun.id, of: "run", ...facts }),
+      hooks,
     });
     const streamRules = rules.stream(this.#lead);
     const holdBack = heldSentences(streamRules, settings.heldSentences);
@@ -688,6 +692,7 @@ export class Turn {
     if (places.turn !== undefined) await this.#writeBriefing(places.turn, sentMessages(messages));
 
     const runner = new AgentRunner({ ...leadOptions, point: compactor.point(model.limits.contextWindow?.tokens) });
+    this.#leadRunner = runner;
     if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
     let outcome: AgentOutcome | undefined;
     if (!this.#ended()) {
@@ -1115,6 +1120,15 @@ export class Turn {
     }
     // Each sub-agent not kept ends with the reply (§13.4).
     this.#team?.released();
+    // His after-release hooks, with the reply as released (§5.4 "Hooks"): what they add goes to the lead's run, which may go on (§10.9).
+    const hooks = this.#hooks;
+    if (hooks !== undefined) {
+      this.#tell(
+        hooks.run("after-release", { scope: scopeJson(this.scope), release: { form, text, by: agentJson(by) } }, { agent: by }).then((hooked) => {
+          if (hooked.added.length > 0) this.#leadRunner?.tell(joined(hooked.added));
+        }),
+      );
+    }
   }
 
   /**

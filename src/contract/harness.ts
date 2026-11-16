@@ -134,7 +134,9 @@ export type JobRefusal =
   /** The job is not in a state the control applies to. */
   | { refused: "state"; id: string; state: JobState; applies: JobState[] }
   /** The job did not stop at one of its own limits, so more of one would not let it go on. */
-  | { refused: "not-at-limit"; id: string };
+  | { refused: "not-at-limit"; id: string }
+  /** His job-start hook kept the job from starting (§5.4 "Hooks"): the hook, and its reason in its own words. */
+  | { refused: "hook"; hook: string; reason: string };
 
 /**
  * The Jobs page's way to the jobs (§13.5). Each member names the user it acts for, and a job is found

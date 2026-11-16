@@ -32,6 +32,7 @@ import { answer, type Held, type HeldTool, type Words } from "../tools";
 import { changedText, openingOf, pinsOf } from "../harness/opening";
 import { attach, joined, type Wanted } from "./attachments";
 import type { AskCall, ConsentArgument, DelegateCall, DropCall, MessageCall, TeamWork } from "./tools";
+import type { Hooks } from "../external/hooks";
 
 /** The frame every brief is laid out by (`.prompts/delegate-brief.md`). */
 const BRIEF_PART = "delegate-brief";
@@ -105,6 +106,8 @@ export interface TeamDeps {
   end?(agent: AgentRef): void;
   /** His run-end hooks for an agent the team made, at the moment its work would end (§5.4, §13.3): a block's reason, which it goes on with for one more call. None asks nothing. */
   atRunEnd?(agent: AgentRef, parent: ParentCall | undefined): Promise<string | undefined>;
+  /** His hooks, asked before each compaction of an agent the team made; none asks none. */
+  hooks?: Hooks;
 }
 
 interface Member {
@@ -391,6 +394,7 @@ export class Team implements TeamWork {
             track: (entry) => d.track(entry),
             stopped: () => false,
             written: (summary, facts) => d.compacted?.(ref, summary, facts),
+            ...(d.hooks !== undefined ? { hooks: d.hooks } : {}),
             before: (request) => {
               const saving = d.keep?.(ref, "save");
               return saveBeforeCompaction(request, { options, rules, saveCalls: compaction.saveCalls, ...(saving !== undefined ? { keep: saving } : {}), track: (entry) => d.track(entry), stopped: () => request.signal.aborted });

@@ -16,7 +16,8 @@ import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harne
 import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
-import { hookSettings, Hooks } from "../external/hooks";
+import { agentJson, hookSettings, Hooks, scopeJson } from "../external/hooks";
+import { joined } from "../agents/attachments";
 import { type SessionBook, sessionScope } from "../sessions/book";
 import { keptWork } from "../sessions/work";
 import { userMessage } from "../harness/prompt";
@@ -76,6 +77,13 @@ export interface JobEnd {
   outcome: AgentOutcome;
   usage: Usage;
   limit?: LimitHit;
+  /** What his job-end hooks added (§5.4 "Hooks"), for the job's report. */
+  added?: string[];
+}
+
+/** A job his job-start hook kept from starting (§5.4 "Hooks"): the hook, and its reason for whoever started it. */
+export interface JobHooked {
+  blocked: { hook: string; reason: string };
 }
 
 /** A job's run, made and ready: the settings and connection its limits are read from, its trace, what its agents spend, and the user's day, held to its settings. */
@@ -101,7 +109,7 @@ export interface JobHearing {
 }
 
 /** Makes a job's run and its first agent, or gives the answer (in `.prompts/delegation.md`'s words) that says why none can be made. */
-export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJob | LoopToolResult> {
+export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJob | LoopToolResult | JobHooked> {
   const { env } = core;
   const { scope } = ask;
   // Each part rendered for the job's agents keeps the values it was rendered with, for the Prompts page's preview (C17).
@@ -250,6 +258,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     session: (agent, kind, by) => runs.session(agent, kind, by),
     compacted: (agent, summary, facts) => runs.compacted(agent, summary, facts),
     atRunEnd: (agent, parent) => hooks.atRunEnd(scope, { agent, ...(parent !== undefined ? { parent } : {}) }),
+    hooks,
   });
   const own = new Map<string, ToolText>();
   for (const [name, part] of await Promise.all(JOB_TOOLS.map(async (name) => [name, await guidance.tool(name)] as const))) {
@@ -295,8 +304,13 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   registry = new Registry(tools, await env.tools.all(scope), await core.external.tools(guidance, settings, words));
   if (registry.shadowed.length > 0) env.log.warn("Host tools, and his own, that take the name of a tool before them are left out.", { tools: registry.shadowed });
 
+  // His job-start hooks, with the job's brief (§5.4 "Hooks"): what they add goes into the brief; a block keeps the job from starting.
+  const asJob: AgentRef = { id: ask.id, definition: ask.call.agent, job: ask.id };
+  const starting = await hooks.run("job-start", { scope: scopeJson(scope), job: { id: ask.id, agent: ask.call.agent, brief: ask.call.brief, ...(ask.goOn !== undefined ? { goesOn: true } : {}) }, agent: agentJson(ask.by ?? asJob) }, { agent: ask.by ?? asJob, ...(ask.parent !== undefined ? { parent: ask.parent } : {}) });
+  if (starting.blocked !== undefined) return { blocked: starting.blocked };
+  const call = starting.added.length > 0 ? { ...ask.call, brief: joined([ask.call.brief, ...starting.added]) } : ask.call;
   // Its agent's own session is the job's: its work is kept there, and a job that goes on reads it back.
-  const made = await team.first(ask.call, ask.by, ask.parent, scope.session);
+  const made = await team.first(call, ask.by, ask.parent, scope.session);
   if (!("runner" in made)) return made;
   if (made.missing.length > 0) env.log.warn("A job's agent was not given what nobody could find.", { job: ask.id, agent: made.ref.id, missing: made.missing });
   const definition = await guidance.definition(ask.call.agent);
@@ -378,10 +392,13 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       signal.addEventListener("abort", stop, { once: true });
       if (signal.aborted) stop();
       let outcome: AgentOutcome;
+      let ended: string[] = [];
       try {
         outcome = await work.done;
         // What the judging model still has under way is part of the run.
         await judges.settled();
+        // His job-end hooks: what they add goes into the job's report.
+        ended = (await hooks.run("job-end", { scope: scopeJson(scope), job: { id: ask.id, agent: ref.definition }, outcome: { status: outcome.status, text: outcome.text } }, { agent: ref })).added;
         // The sessions of the job's agents close at its end, and their lines settle with its request files and transcripts before its end is told, as a turn's do.
         await runs.close();
         while (pending.size > 0) await Promise.allSettled([...pending]);
@@ -394,7 +411,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         core.hub.ended(ask.id);
       }
       const reached = outcome.limit ?? hit;
-      return { outcome, usage: { ...budget.used }, ...(reached !== undefined ? { limit: reached } : {}) };
+      return { outcome, usage: { ...budget.used }, ...(reached !== undefined ? { limit: reached } : {}), ...(ended.length > 0 ? { added: ended } : {}) };
     },
   };
 }

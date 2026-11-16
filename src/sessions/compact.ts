@@ -8,15 +8,19 @@
 // Each summary is written from the compaction part, its material laid out by the carried part, by
 // calls of the agent's model in sessions of their own, in pieces where the material is more than one
 // call takes; and each compaction is told to the trace: why, what it summarized, its sizes as counted
-// before and after, and whose session.
+// before and after, and whose session. His before-compaction hooks see each piece of material as it
+// is about to be summarized (§5.4 "Hooks", §11 l.1378): a block keeps what is carried as it is, an
+// answer's `summary` stands in place of the summary written, and what a hook adds goes after it.
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Message } from "@earendil-works/pi-ai";
 import type { AgentRef, JsonObject, Log, TraceEvent } from "../contract";
+import { agentJson, type Hooks, scopeJson } from "../external/hooks";
 import type { Fields, RuleRun, TemplatePart } from "../files/api";
 import { type AgentOutcome, AgentRunner, type Budget, type CallTerms, type KeepRequest, type RunnerOptions, type RunnerTexts, type RunTrace, type Work } from "../loop";
 import type { PendingRequest, RequestPoint, RequestSpan } from "../loop/types";
 import type { AgentModel } from "../model/source";
 import { messageText, promptTokens, tokensOf } from "../model/tokens";
+import { joined } from "../agents/attachments";
 import { nextPiece } from "./carry";
 
 /** Why a compaction was made (S-9). */
@@ -76,6 +80,8 @@ export interface CompactorDeps {
   earlier?: EarlierTurns;
   /** Where a summary of the run's own older calls is kept as the run's: the agent's session file. */
   written?(summary: string, facts: CompactFacts): void;
+  /** His hooks, asked before each compaction's summary; none asks none. */
+  hooks?: Hooks;
 }
 
 /** What an agent's save call at the moment before compaction is made with. */
@@ -243,7 +249,13 @@ export class Compactor {
     let size = request.tokens;
     const told = (of: "turns" | "run", before: number, keptTurns?: number): void =>
       d.trace.event(d.agent, undefined, { kind: "compacted", session: d.session, reason, of, before, after: size, ...(keptTurns !== undefined ? { keptTurns } : {}) });
-    const summarize: Summarize = (layout, summary, turns) => this.#summarize(parts, layout, summary, turns, fits);
+    const summarize: Summarize = async (layout, summary, turns) => {
+      // His before-compaction hooks, with what is about to be summarized: a block keeps the carried block as it is; `summary` replaces the one written; what they add goes after it.
+      const hooked = await d.hooks?.run("before-compaction", { scope: scopeJson(d.trace.scope), agent: agentJson(d.agent), reason, ...(summary !== undefined ? { summary } : {}), turns: [...turns] }, { agent: d.agent }, request.signal);
+      if (hooked?.blocked !== undefined) return undefined;
+      const made = hooked?.summary ?? (await this.#summarize(parts, layout, summary, turns, fits));
+      return made === undefined || hooked === undefined || hooked.added.length === 0 ? made : joined([made, ...hooked.added]);
+    };
     if (earlier) {
       const done = await d.earlier!.compact(summarize, { reason, before: size });
       if (done !== undefined) {

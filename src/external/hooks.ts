@@ -33,6 +33,8 @@ export interface HookAnswer {
   blocked?: { hook: string; reason: string };
   added: string[];
   input?: JsonObject;
+  /** Before a compaction: the summary a hook gives in place of the one that would be written (§11 l.1378). */
+  summary?: string;
 }
 
 /** The settings hooks run under (`hooks.*`): the timeout where a hook names none, the exit code that blocks, the most read of an answer, and what of stderr is kept as a reason. */
@@ -131,9 +133,11 @@ export class Hooks {
       }
       const context = typeof said["context"] === "string" && said["context"].trim() !== "" ? said["context"] : undefined;
       const changed = on === "before-tool" && isObject(said["input"]) ? said["input"] : undefined;
+      const summary = on === "before-compaction" && typeof said["summary"] === "string" ? said["summary"] : undefined;
       if (changed !== undefined) answer.input = changed;
+      if (summary !== undefined) answer.summary = summary;
       if (context !== undefined) answer.added.push(context);
-      traced(changed !== undefined ? "changed" : context !== undefined ? "added" : "ok", result.ms, context);
+      traced(changed !== undefined || summary !== undefined ? "changed" : context !== undefined ? "added" : "ok", result.ms, context);
     }
     return answer;
   }

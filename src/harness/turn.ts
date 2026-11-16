@@ -51,7 +51,7 @@ import { callTerms, DEFAULT_SETTINGS, formFor, interruptFor, readSettings, type 
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
-const RELEASED_FILE = "output/reply.md";
+export const RELEASED_FILE = "output/reply.md";
 /** What the lead was told at its run's start, in the turn's folder (§5.3). */
 const BRIEFING_FILE = "briefing.md";
 

@@ -8,7 +8,7 @@ How a turn is run is not in this code. It is in markdown files the user owns: ag
 
 ## Status
 
-Working, and young. One host embeds it today: [LumiRPEngine](https://github.com/TheLiquorPriest/LumiRPEngine), a roleplay engine for Lumiverse. A second, small host ships here (`src/hosts/folder/`): point it at a folder and it runs. The contract between a host and RPH (`src/contract/`) may still change.
+Working, and young. One host embeds it today: [LumiRPEngine](https://github.com/TheLiquorPriest/LumiRPEngine), a roleplay engine for Lumiverse. A second, small host ships here (`src/hosts/folder/`): point it at a folder and it runs. The contract between a host and RPH (`src/contract/`) is frozen: it changes only with the lead's sign-off, recorded with its date and the plan's line, and with both hosts' suites passing the kit.
 
 What it has:
 
@@ -34,7 +34,7 @@ What it does not have yet: hooks.
 
 | Path | What it holds |
 |---|---|
-| `src/contract/` | What a host implements and what RPH offers it. The only thing a host imports besides `createHarness`. |
+| `src/contract/` | What a host implements and what RPH offers it. A host imports only this, `createHarness` (with the members of `Harness`, `parts` among them), the pure helpers of `rp-harness/helpers`, and the entries `rp-harness/hosts/folder`, `rp-harness/testing/rig` and `rp-harness/testing/kit`. |
 | `src/harness/` | `createHarness`: a whole turn for the lead; the gate; settings; the judge. |
 | `src/loop/` | The agent runner on pi: limits, stop codes, rules in the loop, trace. |
 | `src/reply/` | The reply and its forms. |

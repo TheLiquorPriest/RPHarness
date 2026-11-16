@@ -3,6 +3,7 @@
 // can drop that agent's writes (§13.4). A scope that names only the user sees the shipped and global
 // levels alone, and writes nowhere.
 
+import { createHash, type Hash } from "node:crypto";
 import { appendFile, mkdir, readdir, readFile, rm, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import type { FileHit, FileOp, FileQuery, FileRead, FilesPort, FindStopped, Found, LayerLevel, OwnerWrite, Range, Refused, RunScope, Scope, Unapplied, UserScope, Writer, Written } from "../../contract/index";
@@ -111,9 +112,49 @@ function occurrences(text: string, old: string): number {
   return n;
 }
 
-/** Applies a change to a file the writer may write, and gives the result with the file's text before it (null: none). */
-async function apply(at: Located, op: FileOp): Promise<{ result: Written | Unapplied; old: string | null }> {
+/**
+ * A file's SHA-256 as the host last left it, kept running with its size and time on disk, so a line
+ * appended to a session file or a transcript (as RPE appends them) is hashed without reading the
+ * file again. A file something else changed since reads once, and runs on from there.
+ */
+interface Running {
+  hash: Hash;
+  size: number;
+  modified: number;
+}
+
+/** The running hashes of the files this host wrote, by their place on disk. */
+type RunningHashes = Map<string, Running>;
+
+/** Keeps a file's running hash as a change left it. */
+async function keepRunning(running: RunningHashes, disk: string, hash: Hash): Promise<void> {
+  const info = await stat(disk);
+  running.set(disk, { hash, size: info.size, modified: info.mtimeMs });
+}
+
+/** Appends to a file that is there by its running hash, reading it only when something else changed it since. */
+async function appendRunning(at: Located, text: string, running: RunningHashes): Promise<Written> {
+  const info = await stat(at.disk);
+  let kept = running.get(at.disk);
+  if (kept === undefined || kept.size !== info.size || kept.modified !== info.mtimeMs) {
+    const data = await readFile(at.disk);
+    kept = { hash: createHash("sha256").update(data), size: data.byteLength, modified: info.mtimeMs };
+  }
+  const before = kept.hash.copy().digest("hex");
+  const next = kept.hash.copy().update(text, "utf8");
+  await appendFile(at.disk, text, "utf8");
+  await keepRunning(running, at.disk, next);
+  return { status: "written", path: at.path, kind: at.kind, op: "append", bytes: kept.size + Buffer.byteLength(text, "utf8"), hash: next.copy().digest("hex"), before };
+}
+
+/**
+ * Applies a change to a file the writer may write, and gives the result with the file's text before
+ * it (null: none). An append whose old text nobody keeps (`keepOld` false: no turn's journal takes
+ * it) runs on the file's running hash instead of reading it, and gives no old text.
+ */
+async function apply(at: Located, op: FileOp, running: RunningHashes, keepOld: boolean): Promise<{ result: Written | Unapplied; old: string | null }> {
   if (at.is === "folder") return { result: { status: "unapplied", path: at.path, reason: "folder" }, old: null };
+  if (op.op === "append" && at.is === "file" && !keepOld) return { result: await appendRunning(at, op.text, running), old: null };
   const old = at.is === "file" ? await readFile(at.disk, "utf8") : null;
   let after: string | null;
   switch (op.op) {
@@ -139,13 +180,16 @@ async function apply(at: Located, op: FileOp): Promise<{ result: Written | Unapp
   if (after === null) await rm(at.disk);
   else if (op.op === "append" && old !== null) await appendFile(at.disk, op.text, "utf8");
   else await writeWhole(at.disk, after);
+  const hash = after === null ? undefined : createHash("sha256").update(after, "utf8");
+  if (hash === undefined) running.delete(at.disk);
+  else await keepRunning(running, at.disk, hash);
   const result: Written = {
     status: "written",
     path: at.path,
     kind: at.kind,
     op: op.op,
     bytes: after === null ? 0 : Buffer.byteLength(after, "utf8"),
-    hash: after === null ? null : sha256(after),
+    hash: hash === undefined ? null : hash.copy().digest("hex"),
     before: old === null ? null : sha256(old),
   };
   return { result, old };
@@ -153,6 +197,7 @@ async function apply(at: Located, op: FileOp): Promise<{ result: Written | Unapp
 
 /** The file port. `serial` runs one change at a time per file, shared with whatever else changes the tree's files (dropping an agent's writes), so two changes to one file both land. */
 export function folderFiles(site: Site, serial: Serial): FilesPort {
+  const running: RunningHashes = new Map();
   /** Where a scope's levels are on disk: its chat's, or, with no chat in view, the tree's folder alone. */
   async function locationOf(scope: RunScope | UserScope): Promise<TreeLocation> {
     if (namesChat(scope)) return site.location(scope);
@@ -286,7 +331,9 @@ export function folderFiles(site: Site, serial: Serial): FilesPort {
         // Found again in this file's turn, so a write that waited sees what the one before it left.
         const again = await locate(loc, path);
         if (!again.ok) return refusal(scope, again.path, again.reason, by);
-        const { result, old } = await apply(again.at, op);
+        // An agent's write in a turn keeps the file's old text in the turn's journal; any other append runs on the file's running hash.
+        const journaled = by !== "harness" && by !== "owner" && run.turn !== undefined;
+        const { result, old } = await apply(again.at, op, running, journaled);
         if (result.status === "written" && by !== "harness" && by !== "owner" && run.turn !== undefined) {
           const line: JournalLine = { agent: by, path: result.path, before: old, after: result.hash };
           const journal = journalPath(site, run.chat, run.turn);

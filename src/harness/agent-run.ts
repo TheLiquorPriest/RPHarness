@@ -69,6 +69,11 @@ export class AgentRuns {
     this.#sessions?.compacted(agent, summary, facts);
   }
 
+  /** One agent ended before the run did (a sub-agent at the turn's reply): its session is closed and written now. */
+  end(agent: AgentRef): void {
+    this.#sessions?.end(agent);
+  }
+
   /** The run ended, whatever the end: each of its agents' sessions is closed and written. */
   async close(): Promise<void> {
     await this.#sessions?.close();

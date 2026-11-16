@@ -124,20 +124,29 @@ export class RunSessions {
     this.#d.tell(done.catch((error: unknown) => this.#d.log.error("An agent's session file could not be written.", { session: opened.scope.session, error: error instanceof Error ? error.message : String(error) })));
   }
 
+  /** One agent ended before its run did (a sub-agent at the turn's reply, §13.4): its session is closed now, and let go once written. */
+  end(agent: AgentRef): void {
+    const opened = this.#opened.get(agent.id);
+    if (opened === undefined) return;
+    this.#opened.delete(agent.id);
+    this.#d.tell(this.#closed(opened).catch((error: unknown) => this.#d.log.error("An agent's session file could not be written.", { session: opened.scope.session, error: error instanceof Error ? error.message : String(error) })));
+  }
+
   /** The run ended: each of its sessions is closed as the work of its turn, and let go once written. */
   async close(): Promise<void> {
     const opened = [...this.#opened.values()];
     this.#opened.clear();
-    await Promise.allSettled(
-      opened.map(async (one) => {
-        const { file, release } = await one.held;
-        try {
-          if (file.log.entries.every((entry) => entry.type !== "closed")) file.add({ type: "closed", parent: file.log.tip(this.#turn) ?? file.log.leaf, turn: this.#turn });
-          await file.settled();
-        } finally {
-          release();
-        }
-      }),
-    );
+    await Promise.allSettled(opened.map((one) => this.#closed(one)));
+  }
+
+  /** Closes one session as the work of its turn, and lets it go once written. */
+  async #closed(one: Opened): Promise<void> {
+    const { file, release } = await one.held;
+    try {
+      if (file.log.entries.every((entry) => entry.type !== "closed")) file.add({ type: "closed", parent: file.log.tip(this.#turn) ?? file.log.leaf, turn: this.#turn });
+      await file.settled();
+    } finally {
+      release();
+    }
   }
 }

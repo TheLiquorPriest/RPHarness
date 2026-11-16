@@ -107,7 +107,7 @@ export interface RunnerOptions {
   settings?(request: CallRequest): CallSettings | undefined;
   /** The run's point before each request (§11). None: each request goes out as set, and nothing waits. */
   point?: RequestPoint;
-  /** Its own limits, over all its work in the run. `time` holds for each stretch of work. */
+  /** Its own limits, counted afresh for each stretch of its work (each a `delegate` or an `agent_message` starts); the run's limits (`turn`) count over all of them. */
   limits?: AgentLimits;
   /** The budget it counts against besides its own: its turn's or its job's, with every budget above that one. */
   turn?: Budget;
@@ -241,7 +241,8 @@ export class AgentRunner {
   readonly #o: RunnerOptions;
   readonly #pi: Agent;
   readonly #clock: LoopClock;
-  readonly #budget: Budget;
+  /** Its own limits' count, for the stretch of work under way (or the next). */
+  #budget: Budget;
   /** Where an answer's tool calls wait for a place past its tool calls at once (`limits.toolsAtOnce`); none: all run at once. */
   readonly #line: PlaceLine | undefined;
   /** The last tool call it made and how many times in a row, with the run's writes when it was made: the loop's count (`limits.repeats`). */
@@ -274,7 +275,7 @@ export class AgentRunner {
     this.agent = options.agent;
     this.#o = options;
     this.#clock = options.trace.clock;
-    this.#budget = new Budget("agent", options.limits ?? {}, options.turn, options.terms.cachedWeight !== undefined ? { cachedWeight: options.terms.cachedWeight } : {});
+    this.#budget = this.#ownBudget();
     const atOnce = options.limits?.toolsAtOnce ?? options.terms.toolsAtOnce;
     this.#line = atOnce !== undefined ? new PlaceLine(atOnce) : undefined;
     for (const tool of options.tools ?? []) {
@@ -353,6 +354,8 @@ export class AgentRunner {
       first = () => this.#pi.prompt(input.messages);
     }
     this.#asked = undefined;
+    // Its own limits count per stretch of work, the run's over all of them (§13.4): a sub-agent continued has its own calls again.
+    this.#budget = this.#ownBudget();
     const { promise, resolve } = Promise.withResolvers<AgentOutcome>();
     const stint: Stint = {
       parent: options.parent,
@@ -399,6 +402,12 @@ export class AgentRunner {
     }
     void this.#drive(stint, first);
     return { done: promise, stop: () => this.#halt(stint, { status: "stopped" }) };
+  }
+
+  /** A fresh count of its own limits, counted into the run's budget too. */
+  #ownBudget(): Budget {
+    const o = this.#o;
+    return new Budget("agent", o.limits ?? {}, o.turn, o.terms.cachedWeight !== undefined ? { cachedWeight: o.terms.cachedWeight } : {});
   }
 
   /** Ends the work in flight at a limit that is not its own (the turn's time): as a stop, with that limit. */
@@ -1230,6 +1239,8 @@ export class AgentRunner {
             if (answered || stint.halt !== undefined) return;
             this.#emit(stint, { kind: "tool_update", callId, tool: tool.name, partial });
           },
+          // A found tool's call is closing where its carrier's was.
+          ...((own ? isClosing(params as JsonValue) : stint.carried.get(callId)?.closing === true) ? { closing: true as const } : {}),
         };
         // One past the agent's tool calls at once waits for a place, in line; a found tool runs in its carrier's place.
         const free = own ? await this.#place(stint, callId, tool.name, signal) : () => {};

@@ -188,6 +188,8 @@ export class Turn {
   #lastText: string | undefined;
   #notices = 0;
   #stopped = false;
+  /** Fires once nothing more of the turn may start (stopped, left, out of time): a kept agent's work past the lead's run ends with it (§13.4). */
+  readonly #stopping = new AbortController();
   #timer: unknown;
   /** The turn's own time ran out, at this limit: nothing of the turn starts after it (§10.11). */
   #timeUp: LimitHit | undefined;
@@ -222,7 +224,11 @@ export class Turn {
     };
   }
 
-  /** Runs the turn to the end of the lead's run. The reply goes to the sink at release, or the sink is told why there is none. */
+  /**
+   * Runs the turn: the lead's run, then whatever a kept agent goes on with past it (§13.4), the host
+   * told the run ended once the lead's is over; resolves once every agent of the turn has ended. The
+   * reply goes to the sink at release, or the sink is told why there is none.
+   */
   async answer(signal: AbortSignal): Promise<TurnOutcome> {
     const { env, hub, usage } = this.#c;
     this.#startedAt = env.clock.now();
@@ -230,7 +236,7 @@ export class Turn {
     usage.begin(this.run);
     this.#trace.event(this.#lead, undefined, { kind: "run_started", run: "turn", turn: this.#req.kind, lead: this.#req.lead });
     const onAbort = (): void => this.stop();
-    if (signal.aborted) this.#stopped = true;
+    if (signal.aborted) this.stop();
     else signal.addEventListener("abort", onAbort, { once: true });
     let outcome: RunOutcome;
     try {
@@ -238,31 +244,40 @@ export class Turn {
     } catch (error) {
       env.log.error("A turn failed in the harness.", { turn: this.scope.turn, run: this.run, error: errorWords(error) });
       outcome = this.#outcome({ status: "failed", error: { code: "failed", detail: errorWords(error) } });
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-      if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     }
+    this.#keep?.stop();
+    if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
+    // The lead's run is over. Where a kept agent goes on past it, the host is told so now (C-T10),
+    // and the turn ends once that work has, under the turn's limits and stop; its spend counts too.
+    const going = this.#team?.going === true;
+    if (going) {
+      await this.#told();
+      await this.#tell(env.events.ended(this.scope, outcome));
+    }
+    // Every sub-agent ends with the turn's work: its session closes.
+    await this.#team?.over();
+    if (going) outcome = { ...outcome, usage: this.#usage() };
+    signal.removeEventListener("abort", onAbort);
+    if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     // What the turn's runs have spent, this run's added: a later run of the turn counts on from it (N-22).
     const begun = this.#file?.log.turn(this.scope.turn);
     if (begun !== undefined) this.#file?.add({ type: "spent", parent: begun.id, turn: begun.turn, usage: { ...this.#budget.used }, rounds: this.#budget.rounds, ms: (this.#earlier?.ms ?? 0) + env.clock.now() - this.#startedAt });
-    this.#keep?.stop();
-    if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
-    // Each sub-agent's session closes with the turn's end.
     await this.#runs?.close();
     // Its own version of each scratch file the session carries becomes the standing one, as its work.
     await this.#keepScratch().catch((error: unknown) => env.log.error("The session's cache could not keep the turn's scratch files.", { turn: this.scope.turn, run: this.run, error: errorWords(error) }));
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
-    await this.#tell(env.events.ended(this.scope, outcome));
+    if (!going) await this.#tell(env.events.ended(this.scope, outcome));
     usage.end(this.run);
     hub.ended(this.run);
     return { ...outcome, reply: this.#released?.text ?? "", ...(this.#released !== undefined ? { form: this.#released.form } : {}) };
   }
 
-  /** Stops every agent of the turn where it stands (the signal, or the turn left the path). */
+  /** Stops every agent of the turn where it stands (the signal, or the turn left the path), and nothing more of it starts. */
   stop(): void {
     this.#stopped = true;
     for (const { work } of this.#working) work.stop();
+    this.#stopping.abort();
   }
 
   /** Whether the turn was stopped, or its own time ran out: nothing more of it starts. */
@@ -417,6 +432,9 @@ export class Turn {
       compacted: (agent, summary, facts) => this.#agentRuns().compacted(agent, summary, facts),
       compaction: () => this.#settings.compaction,
       slice,
+      numbers: session.handles,
+      signal: this.#stopping.signal,
+      end: (agent) => this.#agentRuns().end(agent),
     });
     this.#team = team;
     const registry = new Registry(this.#ownTools(texts, team, guidance), await env.tools.all(scope), await this.#c.external.tools(guidance, settings, this.#words));
@@ -1073,6 +1091,8 @@ export class Turn {
         () => undefined,
       );
     }
+    // Each sub-agent not kept ends with the reply (§13.4).
+    this.#team?.released();
   }
 
   /**
@@ -1257,6 +1277,7 @@ export class Turn {
     const hit = { limit: "time" as const, per: "turn" as const, max, value: (this.#earlier?.ms ?? 0) + this.#c.env.clock.now() - this.#startedAt };
     this.#timeUp = hit;
     for (const { runner } of this.#working) runner.limit(hit);
+    this.#stopping.abort();
   }
 
   /** Every record of the run: the usage, the lead's entries in the session file, progress lines, and what each fired rule's agent did next. */
@@ -1340,21 +1361,28 @@ export class Turn {
     return told;
   }
 
-  async #settled(): Promise<void> {
+  /** Waits until everything the host is being told, and everything being written for the turn, has settled. */
+  async #told(): Promise<void> {
     while (this.#pending.size > 0) await Promise.allSettled([...this.#pending]);
+  }
+
+  async #settled(): Promise<void> {
+    await this.#told();
     await this.#file?.settled();
     (await this.#holding?.catch(() => undefined))?.release();
   }
 
-  #outcome(ended: Pick<RunOutcome, "status"> & Partial<RunOutcome>): RunOutcome {
-    // What this run spent: the turn's counts less what its earlier runs had spent (N-22).
+  /** What this run spent: the turn's counts less what its earlier runs had spent (N-22). */
+  #usage(): Usage {
     const used = this.#budget.used;
     const before = this.#earlier?.usage;
-    const usage: Usage =
-      before === undefined
-        ? { ...used }
-        : { calls: used.calls - before.calls, input: used.input - before.input, cacheRead: used.cacheRead - before.cacheRead, cacheWrite: used.cacheWrite - before.cacheWrite, output: used.output - before.output, ...(used.reasoning !== undefined ? { reasoning: used.reasoning - (before.reasoning ?? 0) } : {}) };
-    return { released: this.#desk.released, usage, ...ended };
+    return before === undefined
+      ? { ...used }
+      : { calls: used.calls - before.calls, input: used.input - before.input, cacheRead: used.cacheRead - before.cacheRead, cacheWrite: used.cacheWrite - before.cacheWrite, output: used.output - before.output, ...(used.reasoning !== undefined ? { reasoning: used.reasoning - (before.reasoning ?? 0) } : {}) };
+  }
+
+  #outcome(ended: Pick<RunOutcome, "status"> & Partial<RunOutcome>): RunOutcome {
+    return { released: this.#desk.released, usage: this.#usage(), ...ended };
   }
 
   #outcomeOf(outcome: AgentOutcome): RunOutcome {

@@ -7,6 +7,11 @@
 // Several run at once. Each is an agent of the turn's run: its events carry the call that started
 // or continued it, it is counted and shown under its own name, and its writes go through the gate
 // the lead's do, as itself.
+// A sub-agent's work ends with the turn's reply unless the agent that started it keeps it (`keep`):
+// a kept one may be continued after the reply, given what of its definition's items changed since
+// it was last given them, and a closing message sets it working past the end of the lead's run,
+// which the turn's end waits for (§13.4). Its own limits count per stretch of work, the turn's over
+// all of them. A handle is its turn's: the session numbers each definition's agents on.
 //
 // Code holds a sub-agent to the user's limits on how deep, how many and how many at once (one past
 // it waits for a place), and to its definition's count of messages after its first answer, and to
@@ -36,6 +41,8 @@ const JOB_BRIEF_PART = "job-brief";
 const QUESTION_PART = "question";
 /** The lines of the team's answers, and how a chat message and a lore entry are laid out in what an agent is given (`.prompts/delegation.md`). */
 const LINES_PART = "delegation";
+/** How a definition's items given again are laid out when a message continues its agent (`.prompts/given.md`). */
+const GIVEN_PART = "given";
 /** The mark on a result that is a sub-agent's question (§10.5), which a rule's condition can name (`marked question`). */
 const QUESTION_MARK = "question";
 
@@ -90,6 +97,12 @@ export interface TeamDeps {
   compacted?(agent: AgentRef, summary: string, facts: CompactFacts): void;
   /** The job this team's run is, when it is one: every agent the team makes carries it (`AgentRef.job`), so the host keeps their writes as the job's. */
   job?: string;
+  /** How many agents of each definition the session has started, for their handles, so a handle names an agent of one turn alone. None: counted in this team. */
+  numbers?: Map<string, number>;
+  /** Fires once nothing more of the turn may start (stopped, left, out of time): a kept agent's work past the call that set it going ends with it, as does its wait for a place. None: no work goes on past its call. */
+  signal?: AbortSignal;
+  /** A sub-agent ended before its run did (at the reply, §13.4): its session closes now. */
+  end?(agent: AgentRef): void;
 }
 
 interface Member {
@@ -107,6 +120,18 @@ interface Member {
   messages: number;
   /** A message to it waits for a place: another is answered as one to an agent at work. */
   waiting: boolean;
+  /** The agent that started it asked to keep it past the turn's reply (`keep`). */
+  kept: boolean;
+  /** It ends once the stretch of work under way does: the reply went out while it worked. */
+  ending: boolean;
+  /** It ended: its session is closed, and a message to it is answered with the `ended` line. */
+  over: boolean;
+  /** The task its brief gave it, told to the host each time its items are asked (C-T13). */
+  task: string;
+  /** Its definition's `given:` names, asked again when a message continues it, each with its text as last given. */
+  again: Map<string, string | undefined>;
+  /** Its own session with its model, let go when it ends; none for one the team did not make. */
+  session?: string;
 }
 
 /** A sub-agent made and ready to start, its brief its runner's fixed context: itself, what it was given by name, what nobody could give, and its model's room. */
@@ -118,6 +143,8 @@ interface Made {
   /** Its definition's count of messages after its first answer. */
   most?: number;
   limits: ModelLimits;
+  again: Map<string, string | undefined>;
+  session: string;
 }
 
 /** Who an agent is made for: the agent whose call starts it, and the call its work hangs under; neither for a job the user started. */
@@ -142,6 +169,7 @@ interface Loaded {
   question: TemplatePart | undefined;
   lines: LinesPart | undefined;
   words: Words;
+  given: TemplatePart | undefined;
 }
 
 /** A stretch of a member's work under way: the turn forgets it when it ends, and the call's stop is let go then. */
@@ -184,15 +212,18 @@ export class Team implements TeamWork {
   readonly #d: TeamDeps;
   /** Every sub-agent started this turn, by its handle. */
   readonly #members = new Map<string, Member>();
-  /** How many of each definition were started, for their handles. */
-  readonly #numbers = new Map<string, number>();
+  /** How many of each definition were started, for their handles: the session's count where the turn gives it. */
+  readonly #numbers: Map<string, number>;
   #started = 0;
   #loaded: Promise<Loaded> | undefined;
   /** Where a sub-agent's work waits for a place past the sub-agents at once, made at its first use. */
   #line: PlaceLine | undefined;
+  /** Its members' stretches of work still going, a kept agent's past its call among them: the turn's end waits for them all. */
+  readonly #going = new Set<Promise<unknown>>();
 
   constructor(deps: TeamDeps) {
     this.#d = deps;
+    this.#numbers = deps.numbers ?? new Map();
   }
 
   async delegate(call: DelegateCall, ctx: ToolCtx): Promise<LoopToolResult> {
@@ -222,7 +253,7 @@ export class Team implements TeamWork {
       this.#started -= 1;
       return "runner" in made ? said("") : made;
     }
-    const member: Member = { ref: made.ref, runner: made.runner, level, parent, messages: 0, waiting: false, ...(made.most !== undefined ? { most: made.most } : {}) };
+    const member: Member = { ref: made.ref, runner: made.runner, level, parent, messages: 0, waiting: false, kept: call.keep === true, ending: false, over: false, task: call.brief, again: made.again, session: made.session, ...(made.most !== undefined ? { most: made.most } : {}) };
     const fields = fieldsOf(member.ref);
     this.#members.set(member.ref.id, member);
     d.session?.(member.ref, "agent", parent);
@@ -230,8 +261,8 @@ export class Team implements TeamWork {
     d.progress?.("delegate", fields);
     const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
     if (working > 1) d.progress?.("agents", { count: working });
-    const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx, free);
-    return this.#end(member, work, ctx, made.missing, loaded);
+    const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx.signal, free);
+    return this.#hold(this.#end(member, work, ctx.signal, made.missing, loaded));
   }
 
   /**
@@ -357,8 +388,10 @@ export class Team implements TeamWork {
           });
     const runner = new AgentRunner({ ...options, ...(compactor !== undefined ? { point: compactor.point(model.limits.contextWindow?.tokens) } : {}) });
     if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
+    // Its definition's items as given now: a message that continues it gives again only those that changed.
+    const again = new Map<string, string | undefined>(definition.given.map((name) => [name, given.blocks.find((block) => block.name === name)?.text]));
     // Its start record names only what it was handed.
-    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
+    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, again, session, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {
@@ -368,26 +401,119 @@ export class Team implements TeamWork {
   }
 
   async message(call: MessageCall, ctx: ToolCtx): Promise<LoopToolResult> {
+    const d = this.#d;
     const loaded = await this.#load();
     const member = this.#members.get(call.agent);
-    // A handle is held by the agent that started it (§10.5, §13.4): no other answers, continues or grants it consent.
+    // A handle is held by the agent that started it (§10.5, §13.4), in the turn it started it: no other answers, continues or grants it consent.
     if (member === undefined || member.ref.parent !== ctx.agent.id) return answer(loaded.words("no_handle", { agent: call.agent }), true);
+    // One the reply ended while it worked outside the team's own calls (the writer) is over once that work is.
+    if (member.ending && !member.runner.working && !member.waiting) this.#finish(member);
+    if (member.over) return answer(loaded.words("ended", fieldsOf(member.ref)), true);
     // Nothing is awaited between this and its place in line, so two messages to one agent cannot both begin.
     if (member.runner.working || member.waiting) return answer(loaded.words("busy", fieldsOf(member.ref)), true);
     if (ctx.signal.aborted) return said("");
     // A message past its definition's count after its first answer is answered, and the agent is not run.
-    if (member.most !== undefined && member.messages >= member.most) return answer(this.#d.texts().pastMessageCount?.({ agent: member.ref.definition, max: member.most }), true);
+    if (member.most !== undefined && member.messages >= member.most) return answer(d.texts().pastMessageCount?.({ agent: member.ref.definition, max: member.most }), true);
+    if (call.keep !== undefined) member.kept = call.keep;
     member.messages += 1;
     member.waiting = true;
-    const free = await this.#place(ctx, "agent_message");
-    member.waiting = false;
-    if (free === undefined) {
+    const parent: ParentCall = { agent: ctx.agent.id, run: ctx.run, call: ctx.callId };
+    // A closing message to a kept agent needs no answer (§10.7): its work goes on past the call, and
+    // past the lead's run, until it ends or the turn's stop reaches it; the turn ends once it has.
+    if (ctx.closing === true && member.kept && d.signal !== undefined) {
+      void this.#hold(this.#continued(member, call, ctx, parent, d.signal, loaded)).catch((error: unknown) => d.env.log.error("A kept sub-agent's work past the lead's call failed in the harness.", { agent: member.ref.id, error: error instanceof Error ? error.message : String(error) }));
+      return said("");
+    }
+    return this.#hold(this.#continued(member, call, ctx, parent, ctx.signal, loaded));
+  }
+
+  /**
+   * Continues a member with a message, under `parent`'s call, in a place it waits for (in the order
+   * asked, its wait traced, `signal` taking it out of the line): what of its definition's items
+   * changed since it was last given them comes with the message. Its answer, or none where it was
+   * stopped before it began.
+   */
+  async #continued(member: Member, call: MessageCall, ctx: ToolCtx, parent: ParentCall, signal: AbortSignal, loaded: Loaded): Promise<LoopToolResult> {
+    let free: (() => void) | undefined;
+    let changed = "";
+    try {
+      free = await this.#place(ctx, "agent_message", signal);
+      if (free !== undefined && !signal.aborted) changed = await this.#again(member, call.message, loaded);
+    } catch (error) {
+      free?.();
+      throw error;
+    } finally {
+      member.waiting = false;
+    }
+    if (free === undefined || signal.aborted) {
+      free?.();
       member.messages -= 1;
       return said("");
     }
-    const work = this.#begin(member, { message: call.message }, { parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId } }, ctx, free);
+    const work = this.#begin(member, { message: joined([changed, call.message]) }, { parent }, signal, free);
     if (call.consent !== undefined) await this.#consent(member, call.consent, ctx);
-    return this.#end(member, work, ctx, [], loaded);
+    return this.#end(member, work, signal, [], loaded);
+  }
+
+  /**
+   * What of a member's definition's items changed since it was last given them, asked again as a
+   * message continues it (`from: "again"`, C-T11), with the moment it is for (its task and the
+   * message, C-T13): laid out by the given part, each marked changed; nothing unchanged is given
+   * again. Empty where nothing changed.
+   */
+  async #again(member: Member, message: string, loaded: Loaded): Promise<string> {
+    if (member.again.size === 0) return "";
+    const d = this.#d;
+    const slice = d.slice?.bind(d);
+    const given = await attach({ env: d.env, scope: d.trace.scope, lines: loaded.lines, most: d.perCall(), moment: { task: member.task, message }, ...(slice !== undefined ? { slice } : {}) }, member.ref, [...member.again.keys()].map((ref) => ({ ref, from: "again" as const })));
+    const changed = given.blocks.filter((block) => member.again.get(block.name) !== block.text);
+    for (const block of given.blocks) member.again.set(block.name, block.text);
+    if (changed.length === 0) return "";
+    // Without the given part, what changed goes as it is, one after another.
+    return loaded.given?.render({ again: true, attachments: changed.map((block) => ({ name: block.name, text: block.text, changed: true })) }).text ?? joined(changed.map((block) => block.text));
+  }
+
+  /**
+   * The turn's reply went out (§13.4): each sub-agent not kept ends, its session closing, and a later
+   * message to it is answered with the `ended` line; one at work or waiting for a place ends once
+   * that work does.
+   */
+  released(): void {
+    for (const member of this.#members.values()) {
+      if (member.kept || member.over) continue;
+      if (member.runner.working || member.waiting) member.ending = true;
+      else this.#finish(member);
+    }
+  }
+
+  /** Whether any member's work goes on: at the lead's run's end, a kept agent's that a closing message set going. */
+  get going(): boolean {
+    return this.#going.size > 0;
+  }
+
+  /** The turn's work is over once every agent of it has ended (§13.4): waits for each member's work still going, then ends every member. */
+  async over(): Promise<void> {
+    while (this.#going.size > 0) await Promise.allSettled([...this.#going]);
+    for (const member of this.#members.values()) this.#finish(member);
+  }
+
+  /** A member ends: its session closes, and its model's session is let go. */
+  #finish(member: Member): void {
+    if (member.over) return;
+    member.over = true;
+    member.ending = false;
+    this.#d.end?.(member.ref);
+    if (member.session !== undefined) this.#d.models.ended?.(this.#d.trace.scope.user, member.session);
+  }
+
+  /** Work the turn's end waits for, until it settles. */
+  #hold<T>(work: Promise<T>): Promise<T> {
+    this.#going.add(work);
+    void work.then(
+      () => this.#going.delete(work),
+      () => this.#going.delete(work),
+    );
+    return work;
   }
 
   /** Drops what an agent the caller started wrote this turn, which the host staged under the turn (§13.4); the host says what that undoes. */
@@ -410,9 +536,9 @@ export class Team implements TeamWork {
   #load(): Promise<Loaded> {
     this.#loaded ??= (async (): Promise<Loaded> => {
       const { guidance } = this.#d;
-      const [brief, jobBrief, question, lines] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(JOB_BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART)]);
+      const [brief, jobBrief, question, lines, given] = await Promise.all([guidance.part(BRIEF_PART), guidance.part(JOB_BRIEF_PART), guidance.part(QUESTION_PART), guidance.part(LINES_PART), guidance.part(GIVEN_PART)]);
       const wordLines = lines?.format === "lines" ? lines : undefined;
-      return { brief: template(brief), jobBrief: template(jobBrief), question: template(question), lines: wordLines, words: (name, fields) => wordLines?.line(name, fields) };
+      return { brief: template(brief), jobBrief: template(jobBrief), question: template(question), lines: wordLines, given: template(given), words: (name, fields) => wordLines?.line(name, fields) };
     })().catch((error: unknown) => {
       // A read that failed is tried again by the next call.
       this.#loaded = undefined;
@@ -423,16 +549,16 @@ export class Team implements TeamWork {
 
   /**
    * A place for a sub-agent's work (`limits.turn.agentsAtOnce`), the run's: at once, or after a wait
-   * the trace of the agent that called is told of as it begins and ends; undefined where its call's
-   * stop took it out of the line.
+   * the trace of the agent that called is told of as it begins and ends; undefined where `signal`
+   * (its call's stop, or for work past its call the turn's) took it out of the line.
    */
-  async #place(ctx: ToolCtx, tool: string): Promise<(() => void) | undefined> {
+  async #place(ctx: ToolCtx, tool: string, signal: AbortSignal = ctx.signal): Promise<(() => void) | undefined> {
     const d = this.#d;
     const line = (this.#line ??= new PlaceLine(d.settings().agentsAtOnce));
     const parent = this.#members.get(ctx.agent.id)?.parent;
     const from = d.trace.clock.now();
     let waited = false;
-    const free = await line.take(ctx.signal, () => {
+    const free = await line.take(signal, () => {
       waited = true;
       d.trace.event(ctx.agent, parent, { kind: "waiting", for: "agent", callId: ctx.callId, tool });
     });
@@ -440,27 +566,28 @@ export class Team implements TeamWork {
     return free;
   }
 
-  /** Starts a stretch of a member's work under `parent`'s call, in the place it took: the turn tracks it, and the call's own stop stops it. */
-  #begin(member: Member, input: WorkInput, options: WorkOptions & { parent: ParentCall }, ctx: ToolCtx, free: () => void): Begun {
+  /** Starts a stretch of a member's work under `parent`'s call, in the place it took: the turn tracks it, and `signal` stops it. */
+  #begin(member: Member, input: WorkInput, options: WorkOptions & { parent: ParentCall }, signal: AbortSignal, free: () => void): Begun {
     member.parent = options.parent;
     const work = member.runner.start(input, options);
     const untrack = this.#d.track({ runner: member.runner, work });
     const stop = (): void => work.stop();
-    ctx.signal.addEventListener("abort", stop, { once: true });
+    signal.addEventListener("abort", stop, { once: true });
     return { work, untrack, stop, free };
   }
 
-  /** Waits for the stretch of work to end, gives its place back, and gives the call its answer. */
-  async #end(member: Member, begun: Begun, ctx: ToolCtx, missing: readonly string[], loaded: Loaded): Promise<LoopToolResult> {
+  /** Waits for the stretch of work to end, gives its place back, ends the member where the reply ended it meanwhile, and gives the call its answer. */
+  async #end(member: Member, begun: Begun, signal: AbortSignal, missing: readonly string[], loaded: Loaded): Promise<LoopToolResult> {
     let outcome: AgentOutcome;
     try {
       outcome = await begun.work.done;
     } finally {
       begun.free();
       begun.untrack();
-      ctx.signal.removeEventListener("abort", begun.stop);
+      signal.removeEventListener("abort", begun.stop);
     }
     member.ended?.(outcome);
+    if (member.ending) this.#finish(member);
     if (outcome.status === "asked") this.#d.progress?.("question", fieldsOf(member.ref));
     if (outcome.status === "failed") this.#d.env.log.warn("A sub-agent's work failed.", { agent: member.ref.id, failure: outcome.failure ?? "harness", error: outcome.error ?? "" });
     return this.#result(member.ref, outcome, missing, loaded);
@@ -481,7 +608,7 @@ export class Team implements TeamWork {
     const hit: LimitHit | undefined = level > depth ? { limit: "depth", per, max: depth, value: level } : agents !== undefined && this.#started >= agents ? { limit: "agents", per, max: agents, value: this.#started } : undefined;
     if (hit === undefined) {
       this.#started += 1;
-      this.#members.set(ref.id, { ref, runner, level, parent, messages: 0, waiting: false, ...(ended !== undefined ? { ended } : {}) });
+      this.#members.set(ref.id, { ref, runner, level, parent, messages: 0, waiting: false, kept: false, ending: false, over: false, task: "", again: new Map(), ...(ended !== undefined ? { ended } : {}) });
       return undefined;
     }
     const { words } = await this.#load();

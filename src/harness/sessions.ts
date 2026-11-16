@@ -48,6 +48,8 @@ export interface SessionState {
   memories: Map<string, RuleMemory>;
   /** The tools each agent definition lists that nobody registered, as the log was told them, by the definition. */
   unregistered: Map<string, Set<string>>;
+  /** How many agents of each definition the session's turns have started, for their handles: a handle names an agent of one turn alone (§13.4). */
+  handles: Map<string, number>;
 }
 
 /** Of the tools a definition lists that nobody registered, those the log has not been told of in this session: each is said once, when it is first found. */
@@ -157,7 +159,7 @@ export class Sessions {
     const key = keyOf(scope);
     let state = this.#sessions.get(key);
     if (state === undefined) {
-      state = { openings: new Map(), memories: new Map(), unregistered: new Map() };
+      state = { openings: new Map(), memories: new Map(), unregistered: new Map(), handles: new Map() };
       this.#sessions.set(key, state);
     }
     return state;

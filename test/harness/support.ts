@@ -15,6 +15,7 @@ import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValu
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { createHarness, SHIPPED_GUIDANCE } from "../../src/index";
+import { layLead } from "../lead-file";
 import type { AgentChoice } from "../../src/model/source";
 import { type Answer, FakeClock, scriptedModel, type ScriptedModel } from "../../src/testing/rig";
 import { SinkRecorder, textOf, TraceRecorder } from "../loop/support";
@@ -210,6 +211,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
   const files = join(dir, "files");
   const shipped = join(files, "defaults");
   await cp(SHIPPED_GUIDANCE, shipped, { recursive: true });
+  await layLead(shipped);
   if (options.drafted === true) await cp(DRAFTED, shipped, { recursive: true });
   await mkdir(join(files, "chats", CHARACTER, CHAT), { recursive: true });
   if (options.config !== undefined) await writeFile(join(files, "config.yml"), options.config, "utf8");

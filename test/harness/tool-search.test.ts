@@ -9,6 +9,7 @@ import { afterEach, expect, test } from "bun:test";
 import { join } from "node:path";
 import type { ApprovalsPort, JsonValue } from "../../src/contract";
 import { SHIPPED_GUIDANCE } from "../../src/index";
+import { LEAD_FILE } from "../lead-file";
 import { request, said, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;
@@ -97,7 +98,7 @@ test("a host's tool the lead does not list is found, called through tool_use as 
 });
 
 test("a family the lead's definition keeps out of reach is neither found nor called, and the setting caps how many tools a search gives", async () => {
-  const shipped = await Bun.file(join(SHIPPED_GUIDANCE, ".agents", "lead.md")).text();
+  const shipped = LEAD_FILE;
   const lead = shipped.replace(/^tools: .*$/m, (line) => `${line}\nout_of_reach: [weather]`);
   expect(lead).toContain("out_of_reach: [weather]");
   const ran: string[] = [];

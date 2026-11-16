@@ -11,6 +11,7 @@ import type { Guidance } from "../../../src/files/api";
 import { TurnGate } from "../../../src/harness/gate";
 import { DEFAULT_SETTINGS } from "../../../src/harness/settings";
 import { SHIPPED_GUIDANCE } from "../../../src/harness/shipped";
+import { layLead } from "../../lead-file";
 import type { FolderHost } from "../../../src/hosts/folder";
 import { RunTrace } from "../../../src/loop/trace";
 import type { LoopToolResult } from "../../../src/loop/types";
@@ -42,6 +43,7 @@ export async function bench(files: Readonly<Record<string, string>> = {}): Promi
   const place = await mkdtemp(join(tmpdir(), "rph-base-tools-"));
   await layFolderSeed(KIT_SEED, place);
   await cp(SHIPPED_GUIDANCE, join(place, "files", "defaults"), { recursive: true });
+  await layLead(join(place, "files", "defaults"));
   for (const [path, text] of Object.entries(files)) {
     await mkdir(dirname(join(place, "files", path)), { recursive: true });
     await writeFile(join(place, "files", path), text, "utf8");

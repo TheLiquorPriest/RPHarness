@@ -6,7 +6,7 @@
 // header of RPH's own parts or tools holds a field nothing reads. Each row is the shipped file's own
 // line, rendered as the harness renders it. Every name is invented.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { expect, test } from "bun:test";
 import type { LinesPart, TemplatePart } from "../../src/files/api";
@@ -83,11 +83,8 @@ test("no header of RPH's own parts or tools holds a field nothing reads, and wri
   expect(Object.keys(headerOf(readFileSync(join(SHIPPED_GUIDANCE, ".tools", "write_reply.md"), "utf8")))).toEqual(["description", "arguments"]);
 });
 
-test("every definition RPH ships names its model and its effort", () => {
-  for (const file of readdirSync(join(SHIPPED_GUIDANCE, ".agents"))) {
-    const header = headerOf(readFileSync(join(SHIPPED_GUIDANCE, ".agents", file), "utf8"));
-    expect({ file, model: typeof header.model, effort: typeof header.effort }).toEqual({ file, model: "string", effort: "string" });
-  }
+test("RPH ships no agent definition: its own layer is parts, rules and tools, and a host's folder holds its lead", () => {
+  expect(existsSync(join(SHIPPED_GUIDANCE, ".agents"))).toBe(false);
 });
 
 /** Words that ask an agent to do something of its turn: a line that says what is so holds none of them. */

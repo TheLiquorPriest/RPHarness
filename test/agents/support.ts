@@ -23,6 +23,7 @@ import { callTerms, readSettings } from "../../src/harness/settings";
 import { UsageBook } from "../../src/harness/usage";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/index";
+import { layLead } from "../lead-file";
 import { type AgentOutcome, AgentRunner, Budget, type ParentCall, type RunnerTexts, RunTrace, type Work } from "../../src/loop";
 import { type FileToolsDeps, fileFind, fileRead, fileWrite, type HeldTool, Registry, type ToolText, type Words } from "../../src/tools";
 import { type Answer, FakeClock, scriptedModel, type ScriptedModel, scriptedSource } from "../../src/testing/rig";
@@ -187,6 +188,7 @@ export async function stage(options: StageOptions): Promise<Stage> {
 async function staged(dir: string, options: StageOptions, hosted: (host: FolderHost) => void): Promise<Stage> {
   const files = join(dir, "files");
   await cp(SHIPPED_GUIDANCE, join(files, "defaults"), { recursive: true });
+  await layLead(join(files, "defaults"));
   await mkdir(join(files, "chats", CHARACTER, CHAT), { recursive: true });
   for (const [path, text] of Object.entries(options.files ?? {})) {
     await mkdir(dirname(join(files, path)), { recursive: true });

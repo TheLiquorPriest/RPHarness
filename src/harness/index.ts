@@ -26,6 +26,7 @@ import { openingOf } from "./opening";
 import { listedTools, ownTexts } from "./own";
 import { keptOpening, Sessions } from "./sessions";
 import { rebuildRequest } from "./requests";
+import { switchRule, testRule } from "./ruletest";
 import { formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
 import { Registry } from "../tools";
@@ -164,6 +165,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         for (const fact of facts) if (fact.clash === true) env.log.warn("A host fact takes the name of one of RPH's own facts; rules read RPH's.", { fact: fact.name });
         return facts;
       },
+      switch: (scope, rule, on, level) => switchRule(env, scope, rule, on, level),
+      test: (scope, rule, turn) => testRule({ env, book, hub, models: options.models ?? layer, connections: layer.api, ids }, scope, rule, turn),
     },
 
     live: hub,

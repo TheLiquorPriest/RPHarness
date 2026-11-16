@@ -213,7 +213,7 @@ export class Turn {
         places: (scope) => files.places(scope),
         find: (scope, query) => files.find(scope, query),
         write: (scope, path, op, by) => {
-          this.#writing(path, by);
+          if (by !== "owner") this.#writing(path, by);
           return files.write(scope, path, op, by);
         },
         read: async (scope, path, range) => {

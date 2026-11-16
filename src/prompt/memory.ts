@@ -4,7 +4,7 @@
 // reads no retention setting: a turn before is compared only while the host still keeps its turn
 // folder, and what RPH kept of a turn's prompt is let go once its folder is gone, whatever the host
 // prunes its folders by (RPE by its own `retention.turnFolders`).
-import type { AgentRef, Environment, FilesPort, JsonValue, LocatedSlices, PromptMessage, Scope, StorePort } from "../contract";
+import type { AgentRef, Environment, FilesPort, JsonObject, JsonValue, LocatedSlices, PromptMap, PromptMessage, Scope, StorePort } from "../contract";
 import { TurnPrompt } from "./prompt";
 import { locatedOf, type PromptRecord, recordOf } from "./shape";
 import { messageText, textHash } from "./text";
@@ -121,6 +121,48 @@ export interface PromptTurnInput {
   parent: string | null | undefined;
   /** The agent the turn is run for: a map the breakdown corrected is saved under its name. */
   by: AgentRef;
+  /** The scene's copy of the map in the session's cache (§11, HT-23); absent: the host's map alone is used. */
+  sceneMap?: SceneMap;
+}
+
+/** The scene's copy of the prompt map, as the session's cache keeps it on the turn's path (§11, R-111). */
+export interface SceneMap {
+  /** The scene's copy of the map, as the session's cache holds it on this turn's path. */
+  standing(): Promise<{ text: string; meta?: JsonObject } | undefined>;
+  /** Keeps a map as the scene's copy from this turn on (the same text and meta again writes nothing). */
+  keep(text: string, meta?: JsonObject): Promise<void>;
+}
+
+/** A map as the scene's copy holds it, where it reads as one. */
+function mapOf(text: string | undefined): PromptMap | undefined {
+  if (text === undefined) return undefined;
+  try {
+    const value = JSON.parse(text) as unknown;
+    return typeof value === "object" && value !== null && "slices" in value && "preset" in value ? (value as PromptMap) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Keeps a map as the scene's copy, with its preset and revision beside it. */
+export function keepSceneMap(scene: SceneMap, map: PromptMap): Promise<void> {
+  return scene.keep(JSON.stringify(map), { preset: map.preset.id, ...(map.preset.revision !== undefined ? { revision: map.preset.revision } : {}) });
+}
+
+/**
+ * The map a scene finds its slices by: the host's as the turn starts, kept as the scene's copy
+ * where the copy is none, another, or of another preset or revision; where the host has none, the
+ * scene's copy for the preset the prompt is from.
+ */
+async function sceneMapped(prompt: TurnPrompt, scene: SceneMap): Promise<void> {
+  const standing = mapOf((await scene.standing())?.text);
+  const host = prompt.facts.map;
+  if (host !== undefined) {
+    if (standing === undefined || JSON.stringify(standing) !== JSON.stringify(host)) await keepSceneMap(scene, host);
+    return;
+  }
+  const now = prompt.preset;
+  if (standing !== undefined && now !== null && standing.preset.id === now.id && standing.preset.revision === now.revision) prompt.remap(standing);
 }
 
 /**
@@ -137,6 +179,7 @@ export async function promptTurn(input: PromptTurnInput): Promise<{ prompt: Turn
   };
   const memory = new PromptMemory(env.store, env.files);
   const [prompt, before] = await Promise.all([TurnPrompt.read({ env, scope, messages: input.messages }), memory.before(scope, input.parent).catch(told("What the turn before held of its prompt could not be read."))]);
+  if (input.sceneMap !== undefined) await sceneMapped(prompt, input.sceneMap).catch(told("The scene's copy of the prompt map could not be read or kept."));
   prompt.compareWith(before);
   const located = locatedOf(prompt, before);
   const corrected = prompt.corrected();

@@ -6,7 +6,7 @@
 import { expect, test } from "bun:test";
 import type { PromptNotice } from "../../src/contract";
 import { promptTurn } from "../../src/prompt/memory";
-import { noticeLines, promptWords } from "../../src/prompt/words";
+import { noticeLines, noticeWords } from "../../src/prompt/words";
 import { A_MAP, B_MAP, type BuiltPrompt, LEAD, memoryHost, type MemoryHost, presetA, presetB, SCOPE, shippedParts, write } from "./support";
 
 const LORE = [["e-1"], ["e-2", "e-3"], ["e-3"], ["e-1", "e-4"], ["e-2"], ["e-4"], ["e-1", "e-2", "e-3"], ["e-3", "e-1"], ["e-2"], ["e-4", "e-2"]];
@@ -68,7 +68,7 @@ test("preset B: ten turns give no notice, nor does the note that changes with th
 test("each notice is one line of the file, for the briefing and the prompt tool", async () => {
   const host = await mappedA();
   const { prompt } = await play(host, "lines", presetA({ history: 24, lore: ["e-2"], text: { style: "Present tense." } }, ["main", "style", "persona", "card"], { after: "card", text: "Be brief." }), ["e-2"], "t-10");
-  expect(noticeLines(prompt, await promptWords(shippedParts()))).toEqual([
+  expect(noticeLines(prompt, await noticeWords(shippedParts()))).toEqual([
     "The text of preset.style, which the map says is fixed, has changed since the turn before.",
     "preset.after is not in this prompt.",
     "Text that belongs to no part of the map: message[4], 9 characters.",

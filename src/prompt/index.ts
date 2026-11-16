@@ -4,7 +4,7 @@
 // and the map as the Prompt page shows and edits it.
 export { keptPrompt, promptMapApi } from "./edit";
 export { type Learned, learn, type WrittenSlice } from "./learn";
-export { type HeldPrompt, type PromptTurnInput, PromptMemory, promptTurn } from "./memory";
+export { type HeldPrompt, type PromptTurnInput, PromptMemory, promptTurn, type SceneMap } from "./memory";
 export { findName, type Item, SLICE_KINDS } from "./names";
 export { type PromptFacts, type PromptSources, type Slice, type SliceFrom, TurnPrompt } from "./prompt";
 export { locatedOf, noticesOf, type PromptRecord, recordOf } from "./shape";

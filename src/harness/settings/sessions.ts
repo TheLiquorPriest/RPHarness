@@ -7,6 +7,8 @@ export const SESSIONS = worded(
   {
     // The scene sheet, which the shipped sandbox skill and the GM's definition name.
     carried: { key: "sessions.carried", takes: { type: "texts" }, default: ["scratch/scene.md"], perConnection: false, at: "sessions.carried" },
+    // Sessions whose file the harness keeps read in memory between their turns, the one used least recently let go first; 0 reads each turn's file afresh.
+    held: { key: "sessions.held", takes: { type: "whole", least: 0 }, default: 8, perConnection: false, at: "sessions.held" },
   },
   SESSIONS_WORDS,
 );

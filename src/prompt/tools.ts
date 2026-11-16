@@ -7,6 +7,7 @@ import type { Guidance } from "../files/api";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, type ToolText } from "../tools/kit";
 import { BEHAVIOURS, learn, type WrittenSlice } from "./learn";
 import { findName, promptName, SLICE_KINDS } from "./names";
+import { keepSceneMap, type SceneMap } from "./memory";
 import type { TurnPrompt } from "./prompt";
 import { laid, listing, noticeWords, promptWords } from "./words";
 
@@ -22,6 +23,8 @@ export interface PromptToolsDeps {
   /** Each tool's file, by tool name. */
   texts: ReadonlyMap<string, ToolText>;
   env: Pick<Environment, "prompt">;
+  /** The scene's copy of the map, which a saved map replaces from this turn on; absent: the host's map alone is kept. */
+  sceneMap?: SceneMap;
 }
 
 export function promptTool(deps: PromptToolsDeps): OwnTool {
@@ -94,6 +97,7 @@ export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }
         return answer(said.length === 0 ? undefined : said.join("\n"), true);
       }
       await deps.env.prompt.saveMap(ctx.scope, learned.map, ctx.agent);
+      if (deps.sceneMap !== undefined) await keepSceneMap(deps.sceneMap, learned.map);
       prompt.remap(learned.map);
       const name = learned.map.preset.name ?? learned.map.preset.id;
       // What changed, then the map as it now stands, laid out as `prompt` lays it out (the player's kept slices and any text of no slice among it), so no read is needed after (§6.8).

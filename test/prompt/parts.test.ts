@@ -334,3 +334,9 @@ test("a search that finds a tool of a family whose guide the agent does not hold
   expect(part.line("guide_given", { family: "things" })).toBe("The guide to the things tools was given earlier in this session.");
   expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
 });
+
+test("a sub-agent's question is shown with what it looked up before asking, only when it said something", async () => {
+  const part = await template("question");
+  expect(part.render({ agent: "gm-1", question: "Which quay?", searched: "Two quays." }).text.trim()).toBe("gm-1 stopped to ask before going on:\n\nWhich quay?\n\nWhat it looked up before asking:\n\nTwo quays.");
+  expect(part.render({ agent: "gm-1", question: "Which quay?" }).text).not.toContain("looked up");
+});

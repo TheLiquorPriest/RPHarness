@@ -295,3 +295,13 @@ test("an agent that ended with the reply and an agent given more than its model 
   expect(said).toBe("gm-1 was not started: what it is given is 90000 tokens, and its model has room for 32000. chat:history[scene] is 60000 tokens. file:plan.md is 8000 tokens.");
   expect({ asks: ASKS.test(said), unfilled: said.includes("{{") }).toEqual({ asks: false, unfilled: false });
 });
+
+test("the briefing says what the session has already looked up and where it is kept, only when the cache holds something", async () => {
+  const part = await template("briefing");
+  const cache = { folder: "sessions/s-1/cache/", carried: [{ path: "sessions/s-1/turns/t-3/scratch/scene.md" }], lore: [{ id: "e-12", title: "The Gilded Hart", path: "sessions/s-1/cache/lore/e-12.md" }], prompt_map: "sessions/s-1/cache/prompt-map.md", host: [{ path: "sessions/s-1/cache/base/wren.md" }] };
+  const said = part.render({ turn: { kind: "reply" }, cache } as never).text;
+  expect(said).toContain("## What this session has already looked up\n\nIt is kept in the session's cache folder, sessions/s-1/cache/, to be read from there; nothing writes in it.");
+  for (const line of ["- Carried into this turn as it stood: sessions/s-1/turns/t-3/scratch/scene.md", "- Lore entry [e-12] The Gilded Hart, read in full: sessions/s-1/cache/lore/e-12.md", "- The prompt map as this session has it: sessions/s-1/cache/prompt-map.md", "- From the host: sessions/s-1/cache/base/wren.md"]) expect(said).toContain(line);
+  expect(part.render({ turn: { kind: "reply" } } as never).text).not.toContain("already looked up");
+  expect(ASKS.test(said)).toBe(false);
+});

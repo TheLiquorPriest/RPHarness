@@ -262,3 +262,16 @@ test("carried lays out an agent's own older work in its run: for a summary call,
   const lead = part.render({ compacting: true, turns: [{ n: 1, items: [{ call: { tool: "roll", args: "{}" } }] }] }).text;
   expect(lead).toContain("The lead called `roll`");
 });
+
+test("the prompt's shape notices are worded in the notices part and no longer in the map's, and a summary the chat application put in place of messages is told as one", async () => {
+  const notices = await shippedParts().part("notices");
+  const map = await shippedParts().part("prompt-map");
+  if (notices?.format !== "lines" || map?.format !== "lines") throw new Error("notices and prompt-map are lines parts");
+  const shape = ["notice_unmapped", "notice_incomplete", "notice_changed", "notice_gone", "notice_unclaimed", "notice_order", "notice_preset"];
+  expect(shape.filter((name) => !notices.lines.has(name))).toEqual([]);
+  expect(shape.filter((name) => map.lines.has(name))).toEqual([]);
+  expect(notices.line("notice_changed", { marker: "style" })).toBe("The text of style, which the map says is fixed, has changed since the turn before.");
+  expect(map.line("history_head", { index: 4, id: "m-4", role: "assistant", summarized: true })).toBe("#4 (m-4), assistant, a summary the chat application put in place of messages");
+  expect(map.line("layout_piece", { name: "history[4]", length: 900, role: "assistant", history: { index: 4 }, summarized: true })).toBe("history[4] - 900 characters, assistant, chat message #4, a summary the chat application put in place of messages");
+  expect(map.line("layout_piece", { name: "style", length: 120, role: "system" })).toBe("style - 120 characters, system");
+});

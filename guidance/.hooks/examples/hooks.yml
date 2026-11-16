@@ -1,0 +1,57 @@
+# Example. Not in force while it sits in `examples/`: nothing in this folder is read as a hook. Copy the hooks you want into `hooks.yml` in the hooks folder (`.hooks/` for every chat, `hooks/` in one chat's own files) to switch them on.
+#
+# A hook is a command of yours, run as you at its moment: its `name`, its `command` exactly as you would type it (it is run by the shell, so give a script's whole path), and a `timeout` in seconds where it needs a different one from the setting hooks.timeout. The hooks of a moment run one after another, the farthest level's first and each file in its written order; one in a nearer level with the name of a farther one replaces it, and `hooks/<name>` under `off:` switches one off. A hook runs only once the host has switched commands on for you.
+#
+# What a hook is given: the moment's JSON on its standard input, `{hook, event, scope, agent, tool, callId, args}`: its own name, the moment, the run's scope, the agent it runs for, and, at the moments that are a tool call's, the tool, the call's id and its arguments.
+# What a hook answers, as JSON on its standard output:
+#   {"decision": "block", "reason": "..."}  stops what was about to happen and tells the agent why
+#   {"context": "..."}                      adds a line to what the agent is told
+#   {"input": {...}}                        before a tool only: the arguments the call is to go with
+# A hook that exits with the code hooks.blockExit (2 as shipped) blocks too, and what it wrote on its standard error is the reason. Any other failure, an answer longer than hooks.answerMax, or running past its timeout blocks nothing; the Files page shows what happened.
+#
+# RPH runs turn-start, before-tool, after-tool, run-end, job-start and job-end today; before-release, after-release, session-close and before-compaction are read from the file and kept for when it runs them.
+
+# At a turn's start, before the agent's first call. What `context` says is shown to the lead in its briefing, under what your hooks added.
+turn-start:
+  - name: say-the-hour
+    command: sh /path/to/say-the-hour.sh
+
+# Before each tool call, for any agent. A block stops the call and the agent is told the reason; `input` changes the arguments it goes with. This is the hook that refuses a write with no source: see check-source.sh beside this file.
+before-tool:
+  - name: sourced-writes
+    command: sh /path/to/check-source.sh
+    timeout: 10
+
+# After each tool call, with its arguments and its answer too. A block here is shown to the agent in place of the answer's own words; `context` adds a line after them.
+after-tool:
+  - name: log-calls
+    command: sh /path/to/log-call.sh
+
+# When the reply is about to go to the chat, and again once it has gone.
+before-release:
+  - name: check-the-reply
+    command: sh /path/to/check-reply.sh
+after-release:
+  - name: tell-the-phone
+    command: sh /path/to/notify.sh
+
+# When an agent's run would end. A block gives the agent the reason to go on with, for one more call.
+run-end:
+  - name: nothing-left-open
+    command: sh /path/to/check-todos.sh
+
+# When a session closes, and just before a session's earlier turns are compacted.
+session-close:
+  - name: keep-a-copy
+    command: sh /path/to/copy-session.sh
+before-compaction:
+  - name: note-the-size
+    command: sh /path/to/note-size.sh
+
+# When a job starts and when it ends; the end carries how it ended and its report.
+job-start:
+  - name: job-begun
+    command: sh /path/to/job-begun.sh
+job-end:
+  - name: job-done
+    command: sh /path/to/job-done.sh

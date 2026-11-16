@@ -336,6 +336,15 @@ test("the briefing says when the session's file could not be read, whole or in l
   expect(ASKS.test(whole + partly)).toBe(false);
 });
 
+test("the briefing says what the player's hooks added at the turn's start, under its own heading and only when they added something", async () => {
+  const part = await template("briefing");
+  const added = part.render({ turn: { kind: "reply" }, rules_due: "A RULE", hooks: "It is dusk by the clock on the wall." } as never).text;
+  expect(added).toContain("## From the player's hooks\n\nIt is dusk by the clock on the wall.");
+  expect(added.indexOf("A RULE")).toBeLessThan(added.indexOf("From the player's hooks"));
+  expect(part.render({ turn: { kind: "reply" } } as never).text).not.toContain("hooks");
+  expect(ASKS.test(added)).toBe(false);
+});
+
 test("a suggestion past the most the chat holds is told as not kept, and suggest takes a new entry's book, title and keys and an edit's passage as it stands", async () => {
   const base = await shippedParts().part("base-tools");
   if (base?.format !== "lines") throw new Error("base-tools is a lines part");

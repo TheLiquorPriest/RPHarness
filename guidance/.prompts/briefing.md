@@ -1,5 +1,5 @@
 ---
-description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. Take a part out and it is no longer shown. Its last part is the reply contract again, as the files stand now (the opening block holds it as it stood when the session opened, and a change since is told under the files changed), so it is the last thing read before the reply is written, with this turn's folder and, where the lead writes its intent record to a file itself, that file's whole path; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing.
+description: The layout of the briefing the lead is given at the start of every turn. Each part appears only when there is something to show. The host's own parts come in the order the host gives them, each under its own name. What the player's hooks added at the turn's start comes after what the rules say, under its own heading. Take a part out and it is no longer shown. Its last part is the reply contract again, as the files stand now (the opening block holds it as it stood when the session opened, and a change since is told under the files changed), so it is the last thing read before the reply is written, with this turn's folder and, where the lead writes its intent record to a file itself, that file's whole path; take that part out and the contract is in the opening block only. It lays facts out; it asks for nothing.
 ---
 # Briefing for this turn
 
@@ -54,6 +54,12 @@ Some lines of it could not be read and were passed over, so what this session ca
 
 {{rules_due}}
 {{/rules_due}}
+{{#hooks}}
+
+## From the player's hooks
+
+{{hooks}}
+{{/hooks}}
 {{#blocks}}
 
 ## {{name}}

@@ -597,6 +597,7 @@ class TreeGuidance implements Guidance {
     if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
     // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
     const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope).#triggered();
-    return createRuleRun({ scope, rules: await this.#triggered(), read, facts: options.facts, ...(options.memory !== undefined ? { memory: options.memory } : {}), ...(options.window !== undefined ? { window: options.window } : {}) });
+    const { facts, memory, window, patternTime, ranOut, stops } = options;
+    return createRuleRun({ scope, rules: await this.#triggered(), read, facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}) });
   }
 }

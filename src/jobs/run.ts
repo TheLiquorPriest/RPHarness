@@ -12,7 +12,7 @@ import { AgentRuns } from "../harness/agent-run";
 import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
-import { callTerms, readSettings, type Settings } from "../harness/settings";
+import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
 import { type AgentOutcome, type AgentRunner, Budget, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
 import type { ModelSource } from "../model/source";
@@ -100,7 +100,20 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       const left = leftFact([...working].find((entry) => entry.runner.agent.id === agent.id)?.runner.left() ?? {}, budget.left());
       return { "todo.open": { count: open.length, names: open.map((item) => item.text) }, ...(left !== undefined ? { "limits.left": left } : {}) };
     }),
-    window: settings.ruleWindow,
+    ...(settings.ruleWindow !== undefined ? { window: settings.ruleWindow } : {}),
+    patternTime: settings.patternTime,
+    // A pattern that ran out of time is shown in the run's trace and the log (R-55).
+    ranOut: (agent, rule, length) => {
+      trace.event(agent, undefined, { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "time", length });
+      env.log.warn("A rule's pattern ran out of time on a text; that check counted as no match.", { job: ask.id, rule: rule.rule, path: rule.path, length });
+    },
+    // A stream rule that interrupts reminds instead where the agent's connection is set to.
+    stops: async (agent) => {
+      const definition = await guidance.definition(agent.definition);
+      if (definition === undefined) return interruptFor(settings, { id: null, name: null }) === "stop";
+      const connection = await connectionOf(core.connections, scope, definition, env.log);
+      return interruptFor(settings, connection) === "stop";
+    },
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
   // The settings' limits on a job's run, each given by the start standing in place of the setting where the owner started the job (his word for it, looser or tighter, §12), and made tighter, never looser, where an agent did. The day's limits hold either way.

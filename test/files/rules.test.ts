@@ -31,7 +31,7 @@ async function drafts(): Promise<Bench> {
 async function run(memory?: RuleMemory, window?: number): Promise<RuleRun> {
   if (b === undefined) throw new Error("No bench.");
   const facts = createFacts(b.host.facts, () => own);
-  return loadGuidance(b.host.files, scope).ruleRun({ facts, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}) });
+  return loadGuidance(b.host.files, scope).ruleRun({ facts, patternTime: 50, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}) });
 }
 
 const STAGE: FactValue = {
@@ -183,31 +183,21 @@ describe("a pattern", () => {
 });
 
 describe("a pattern's cost", () => {
-  test("one that could take time without end on some text is a problem when the rules are read, and its rule is not in force", async () => {
+  test("a pattern that could take time without end on some text is in force; only one that cannot be parsed is broken", async () => {
     const rule = (condition: string) => `---\ndescription: Fixture.\nagents: all\nscope: [reply]\ncondition: '${condition}'\n---\nText.\n`;
     b = await bench({
       chat: {
         "rules/nested.md": rule("(a+)+$"),
-        "rules/overlapping.md": rule("(a|aa)*$"),
         "rules/backwards.md": rule("(\\w+) \\1"),
-        "rules/open.md": rule("a.*b.*c.*z"),
-        "rules/fine.md": rule("(shivers? down (her|his) spine|a.{0,40}b.*c\\(.*\\))"),
+        "rules/unread.md": rule("(a"),
       },
     });
     const g = loadGuidance(b.host.files, scope);
     expect((await g.rules()).map((r) => [r.name, r.inForce, r.why])).toEqual([
-      ["backwards", false, "broken"],
-      ["fine", true, undefined],
-      ["nested", false, "broken"],
-      ["open", false, "broken"],
-      ["overlapping", false, "broken"],
+      ["backwards", true, undefined],
+      ["nested", true, undefined],
+      ["unread", false, "broken"],
     ]);
-    const problems = Object.fromEntries((await g.problems()).map((p) => [p.path, p.message]));
-    expect(problems["rules/nested.md"]).toContain("repeats a group that holds a repeat or alternatives of its own");
-    expect(problems["rules/overlapping.md"]).toContain("repeats a group that holds a repeat or alternatives of its own");
-    expect(problems["rules/backwards.md"]).toContain("refers back to a group it matched");
-    expect(problems["rules/open.md"]).toContain("repeats things with no bound more than 2 times");
-    expect(problems["rules/fine.md"]).toBeUndefined();
   });
 
   test("it looks at the newest stretch of what is written, and at a tool's text a stretch at a time, so a long text costs no more than its stretches", async () => {
@@ -267,7 +257,7 @@ describe("a question", () => {
     const rule = file.status === "read" ? parseRule(file, "no-player-voice", []).rule : undefined;
     if (rule === undefined) throw new Error("The rule does not read.");
     const facts = createFacts(b.host.facts, () => own);
-    const runOf = (memory?: RuleMemory): RuleRun => createRuleRun({ scope, rules: [rule], read: async () => [rule], facts, ...(memory !== undefined ? { memory } : {}) });
+    const runOf = (memory?: RuleMemory): RuleRun => createRuleRun({ scope, rules: [rule], read: async () => [rule], facts, patternTime: 50, ...(memory !== undefined ? { memory } : {}) });
     const r = runOf();
     expect(r.questions(gm, { text: "Rolled.", reply: "x" })).toEqual([]);
     const [q] = r.questions(author, { text: "<reply>Wren nods.</reply>", reply: "Wren nods." });

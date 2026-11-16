@@ -4,7 +4,10 @@
 // force are read as the files stand at each moment a rule would fire (decision 16), not fixed when
 // the run began: a rule switched off, or held by a `needs:` no longer in force, stops at once, an
 // edited one fires as it now reads, and `repeat:` counts carry across, by the rule's name. On the
-// stream, whose check cannot wait, the rules are those read at the start of the model call.
+// stream, whose check cannot wait, the rules are those read at the start of the model call. Every
+// pattern runs where it can be stopped (pattern.ts), under `rules.patternTime`: one that runs out of
+// time counts as no match, is told (`ranOut`), and the rule stays in force (R-55). A stream rule that
+// interrupts reminds instead where the agent's connection is set to (`stops`), and its firing says so.
 
 import type { AgentRef, FactDef, FactValue, RuleMoment, Scope, ToolResult } from "../contract/index";
 import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../loop/rules";
@@ -12,6 +15,7 @@ import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Ques
 import type { FactTest } from "./facts";
 import { factFields, factsNamed, holds } from "./facts";
 import type { Rule, RuleScope } from "./rules";
+import { runPattern } from "./pattern";
 
 export interface RuleRunInput {
   scope: Scope;
@@ -23,6 +27,12 @@ export interface RuleRunInput {
   memory?: RuleMemory;
   /** How many characters a pattern looks at at a time; absent, the whole text. */
   window?: number;
+  /** Milliseconds one pattern may run on one text (`rules.patternTime`). */
+  patternTime: number;
+  /** Told of a rule whose pattern ran out of time on a text, with the text's length: the check counted as no match. */
+  ranOut?(agent: AgentRef, rule: { rule: string; path: string }, length: number): void;
+  /** Whether a stream rule that interrupts may stop `agent`'s call, as its connection's setting says (`rules.interrupt`, `rules.interrupts`); absent: it may. Asked at each model call's start. */
+  stops?(agent: AgentRef): Promise<boolean>;
 }
 
 /** The fields a pattern's text has besides the facts: what it matched, and the tool, on a tool's arguments or result. */
@@ -38,21 +48,25 @@ function isStreamScope(scope: RuleScope): boolean {
 }
 
 /**
- * A pattern's first match in a whole text (a tool's arguments or result), looked for in stretches
- * of `window` characters, each starting half a stretch after the one before: no run of the pattern
- * sees more than a stretch, and every match up to half a stretch long is found.
+ * A pattern's first match in a text, through the facility under `ms`; with a `window`, looked for in
+ * stretches of that many characters, each starting half a stretch after the one before, so every
+ * match up to half a stretch long is found. `timedOut` where a run ran out of time.
  */
-function matchIn(pattern: RegExp, text: string, window: number | undefined): RegExpExecArray | null {
-  if (window === undefined || text.length <= window) return pattern.exec(text);
+export function matchIn(pattern: RegExp, text: string, window: number | undefined, ms: number): { matched: string | undefined; timedOut?: true } {
+  if (window === undefined || text.length <= window) {
+    const run = runPattern(pattern, text, ms);
+    return "timedOut" in run ? { matched: undefined, timedOut: true } : { matched: run.match?.text };
+  }
   const step = Math.max(1, Math.floor(window / 2));
   for (let from = 0; ; from += step) {
-    const match = pattern.exec(text.slice(from, from + window));
-    if (match !== null || from + window >= text.length) return match;
+    const run = runPattern(pattern, text.slice(from, from + window), ms);
+    if ("timedOut" in run) return { matched: undefined, timedOut: true };
+    if (run.match !== null || from + window >= text.length) return { matched: run.match?.text };
   }
 }
 
 /** What a pattern on a tool's result looks at: its text, its reports, and a line `marked <mark>` for each mark. */
-function resultText(result: ToolResult): string {
+export function resultText(result: ToolResult): string {
   return [...result.content.flatMap((c) => (c.type === "text" ? [c.text] : []))]
     .concat(result.reports ?? [], (result.marks ?? []).map((mark) => `marked ${mark}`))
     .join("\n");
@@ -113,6 +127,11 @@ class Run implements RuleRun {
   readonly #factNames: ReadonlySet<string>;
   readonly #memory: RuleMemory & { session: NonNullable<RuleMemory["session"]> };
   readonly #window: number | undefined;
+  readonly #patternTime: number;
+  readonly #ranOut: RuleRunInput["ranOut"];
+  readonly #stopsFor: RuleRunInput["stops"];
+  /** Each agent's connection's word, as last asked at a model call's start: may a stream rule stop its call. */
+  readonly #stops = new Map<string, boolean>();
   /** `<rule> <agent id>`: what fired in this run, for `once per turn`. */
   readonly #thisRun = new Set<string>();
   /** `<rule> <agent id> <call>`: what fired on one model call's text. */
@@ -129,6 +148,9 @@ class Run implements RuleRun {
     this.#inForce = input.read;
     this.#facts = input.facts;
     this.#window = input.window;
+    this.#patternTime = input.patternTime;
+    this.#ranOut = input.ranOut;
+    this.#stopsFor = input.stops;
     this.#defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
     this.#factNames = new Set(this.#defs.keys());
     const memory: RuleMemory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
@@ -262,17 +284,28 @@ class Run implements RuleRun {
 
   stream(agent: AgentRef): StreamRules {
     const rules = (): Rule[] => this.#for(agent).filter((rule) => rule.when.trigger === "pattern" && rule.when.scope.some(isStreamScope));
+    const stops = (): boolean => this.#stops.get(agent.id) ?? true;
     return {
-      // Every form reads the reply out of what the agent writes, so a rule on its text covers the reply as surely as one on the reply.
+      // Every form reads the reply out of what the agent writes, so a rule on its text covers the reply as surely as one on the reply; on a connection set to remind, none holds the reply back.
       get coverReply() {
-        return rules().some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply" || s.watch === "text"));
+        return stops() && rules().some((rule) => rule.when.trigger === "pattern" && rule.when.interrupt && rule.when.scope.some((s) => s.watch === "reply" || s.watch === "text"));
       },
-      fresh: () => this.#now(),
-      check: (written) => this.#check(agent, rules(), written),
+      fresh: async () => {
+        const [, mode] = await Promise.all([this.#now(), this.#stopsFor?.(agent)]);
+        if (mode !== undefined) this.#stops.set(agent.id, mode);
+      },
+      check: (written) => this.#check(agent, rules(), written, stops()),
     };
   }
 
-  #check(agent: AgentRef, rules: readonly Rule[], written: Written): StreamFired | undefined {
+  /** A pattern run on a text for `agent`, through the facility: what it matched, or nothing; one that ran out of time is told. */
+  #match(agent: AgentRef, rule: Rule, pattern: RegExp, text: string, window: number | undefined): string | undefined {
+    const run = matchIn(pattern, text, window, this.#patternTime);
+    if (run.timedOut === true) this.#ranOut?.(agent, { rule: rule.name, path: rule.path }, text.length);
+    return run.matched;
+  }
+
+  #check(agent: AgentRef, rules: readonly Rule[], written: Written, stops: boolean): StreamFired | undefined {
     for (const rule of rules) {
       if (rule.when.trigger !== "pattern") continue;
       const callKey = `${rule.name} ${agent.id} ${written.call}`;
@@ -283,14 +316,16 @@ class Run implements RuleRun {
         const seen = scope.watch === "text" ? written.text : scope.watch === "thinking" ? written.thinking : written.reply;
         if (seen === undefined || seen === "") continue;
         // What was written before the newest stretch was looked at as it came.
-        const match = rule.when.pattern.exec(this.#window === undefined ? seen : seen.slice(-this.#window));
-        if (match === null) continue;
+        const matched = this.#match(agent, rule, rule.when.pattern, this.#window === undefined ? seen : seen.slice(-this.#window), undefined);
+        if (matched === undefined) continue;
         this.#inCall.add(callKey);
         this.#mark(rule, agent);
+        // On a connection set to remind, a rule that would stop the call fires as `interrupt: never` does, and says why.
+        const reminded = rule.when.interrupt && !stops;
         return {
-          firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "stream", watched: scope.watch, matched: match[0] },
-          text: rule.text.render({ matched: match[0] }).text,
-          interrupt: rule.when.interrupt,
+          firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "stream", watched: scope.watch, matched, ...(reminded ? { reminded: "connection" as const } : {}) },
+          text: rule.text.render({ matched }).text,
+          interrupt: rule.when.interrupt && stops,
         };
       }
     }
@@ -303,8 +338,8 @@ class Run implements RuleRun {
     for (const rule of this.#for(agent)) {
       if (rule.when.trigger !== "pattern" || !this.#may(rule, agent)) continue;
       if (!rule.when.scope.some((s) => s.watch === watch && "tool" in s && s.tool.match(tool))) continue;
-      const match = matchIn(rule.when.pattern, seen, this.#window);
-      if (match !== null) out.push({ rule, matched: match[0], hold: rule.when.hold });
+      const matched = this.#match(agent, rule, rule.when.pattern, seen, this.#window);
+      if (matched !== undefined) out.push({ rule, matched, hold: rule.when.hold });
     }
     return out;
   }

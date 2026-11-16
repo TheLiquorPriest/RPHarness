@@ -145,6 +145,8 @@ export type TraceEvent =
   | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal }
   /** A rule fired (§5.4), as it fired: its `then` comes later, in `TurnEvents.ruleFired`. */
   | { kind: "rule_fired"; firing: RuleFiring }
+  /** A rule's pattern ran out of `rules.patternTime` on a text (R-55): that check counted as no match, and the rule stays in force. `length`: the text's, in characters. */
+  | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number }
   /** A hook ran (§5.4 "Hooks"): what it did, and how long it took. */
   | { kind: "hook"; hook: string; on: HookEvent; outcome: "ok" | "added" | "changed" | "blocked" | "failed" | "timed-out"; ms: number }
   /** A write to a lane set to Confirm waits for the user's word (§6.8). */

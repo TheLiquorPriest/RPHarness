@@ -242,7 +242,7 @@ export async function play(b: Bench, options: { answers: Answer[]; fixed: string
     log: b.host.log,
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
     places: await b.host.files.places(SCOPE),
-    rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})) }),
+    rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})), patternTime: DEFAULT_SETTINGS.patternTime }),
     words: b.notices,
     // The gate knows every tool the agent may reach, so a found tool's tier and lane are its own.
     tools: new Map<string, HeldTool>([...own.map((tool) => [tool.name, { ...tool, from: "rph" as const }] as const), ...hosted.map((tool) => [tool.name, { ...tool, from: "host" as const }] as const)]),

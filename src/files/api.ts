@@ -359,6 +359,12 @@ export interface RuleRunOptions {
    * stretches of a tool's arguments or result. Absent: the whole text.
    */
   window?: number;
+  /** Milliseconds one pattern may run on one text (`rules.patternTime`). */
+  patternTime: number;
+  /** Told of a rule whose pattern ran out of time on a text, with the text's length; the run's trace and log say so. */
+  ranOut?(agent: AgentRef, rule: { rule: string; path: string }, length: number): void;
+  /** Whether a stream rule that interrupts may stop `agent`'s call, as its connection's setting says; asked at each model call's start. Absent: it may. */
+  stops?(agent: AgentRef): Promise<boolean>;
 }
 
 /** A tool call as the rules see it before the tool runs. */

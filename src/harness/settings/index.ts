@@ -438,6 +438,12 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
   return { form: named ?? settings.form, stream: keys.some((key) => settings.streamAnyway.includes(key)) };
 }
 
+/** Whether a stream rule that interrupts stops a call on this connection (`stop`) or reminds after it (`remind`), by the connection's id or name (`rules.interrupts`), else `rules.interrupt`. */
+export function interruptFor(settings: Settings, connection: { id: string | null; name: string | null }): "stop" | "remind" {
+  const keys = [connection.id, connection.name].filter((key): key is string => key !== null);
+  return keys.map((key) => (Object.hasOwn(settings.ruleInterrupts, key) ? settings.ruleInterrupts[key] : undefined)).find((mode) => mode !== undefined) ?? settings.ruleInterrupt;
+}
+
 /**
  * How each model call of an agent is measured and sampled (§10.2 l.1165; Appendix D.1 l.2419,
  * l.2421): the characters per token every estimate before a provider counts is made at, the least

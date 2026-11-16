@@ -91,7 +91,7 @@ export async function turnGate(b: Bench, options: { clipChars?: number; approval
     log: b.host.log,
     ...(options.approvals !== undefined ? { approvals: options.approvals } : {}),
     places: await b.host.files.places(SCOPE),
-    rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})) }),
+    rules: await b.guidance.ruleRun({ facts: createFacts(b.host.facts, () => ({})), patternTime: DEFAULT_SETTINGS.patternTime }),
     words: (name, fields) => lines?.line(name, fields),
     tools: new Map((options.tools ?? []).map((tool) => [tool.name, { ...tool, from: "rph" as const }])),
     clipChars: options.clipChars ?? DEFAULT_SETTINGS.clipChars,

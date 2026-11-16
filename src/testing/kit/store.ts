@@ -152,6 +152,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
     tool_update: { kind: "tool_update", callId: "kit-call-1", tool: "kit_tally", partial: { content: [{ type: "text", text: "counting" }] } },
     tool_ended: { kind: "tool_ended", callId: "kit-call-1", tool: "kit_tally", result: { content: [{ type: "text", text: "3" }] }, clean: true, endedRun: true, ms: 2 },
     rule_fired: { kind: "rule_fired", firing: { rule: "kit-quiet", path: ".rules/kit-quiet.md", level: "global", moment: "run-end", agent, action: "follow-up" } },
+    rule_failed: { kind: "rule_failed", rule: "kit-quiet", path: ".rules/kit-quiet.md", why: "time", length: 4_000 },
     hook: { kind: "hook", hook: "kit-hook", on: "before-tool", outcome: "ok", ms: 5 },
     approval_asked: { kind: "approval_asked", callId: "kit-call-2", tool: "kit_tally", lane: "engine" },
     approval_answered: { kind: "approval_answered", callId: "kit-call-2", tool: "kit_tally", lane: "engine", answer: { go: false, reason: "Not now." } },

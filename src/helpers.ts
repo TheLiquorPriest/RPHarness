@@ -20,6 +20,9 @@
 // - `placeOf`: the form of the place a connection's key and headers' values were given for (its
 //   provider and its address's origin and path), so a host that writes keys for the layer (the
 //   migration) writes their places as the layer records them (C22, R-53).
+// - `runPattern`: the one pattern facility (R-55): a pattern's first match in a text, run where it
+//   is stopped after the time given, so a host's own searches (RPE's grep) never refuse a pattern
+//   for being slow and never stall its process.
 
 export { mergedConfig, SETTINGS } from "./harness/settings";
 export { checkSettingValue } from "./harness/settings/check";
@@ -27,3 +30,4 @@ export { DEFINITION_FIELDS } from "./files/api";
 export { parseDefinition } from "./files/definitions";
 export { OWNER_ONLY } from "./owner";
 export { placeOf } from "./model/place";
+export { runPattern, type PatternRun } from "./files/pattern";

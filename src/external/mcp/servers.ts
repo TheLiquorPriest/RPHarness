@@ -119,6 +119,11 @@ export class McpServers {
       servers.map(async (server): Promise<HostTool[]> => {
         const running = await this.#running(user, server, terms);
         if ("failed" in running) this.#log.warn("An MCP server could not be started or reached; its tools are not offered this time.", { server: server.name, why: running.failed });
+        // A server that waits is never started, so its tools are not known: it stands in the registry as itself, so a search finds it waiting, and a call of it is refused as one.
+        if ("not" in running && running.not === "waiting") {
+          const thing = { kind: "mcp-server" as const, name: server.name, target: McpServers.target(server) };
+          return [{ name: server.name, family: server.name, tier: "external", description: server.description ?? "", parameters: { type: "object", properties: {} }, switchable: thing, run: async () => answer(words("not_switched_on", { tool: server.name, name: server.name, kind: "mcp-server", waiting: true }), true) }];
+        }
         if (!("client" in running)) return [];
         return Promise.all(
           running.client.tools.map(async (tool): Promise<HostTool> => {

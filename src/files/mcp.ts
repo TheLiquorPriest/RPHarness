@@ -2,8 +2,10 @@
 // each started by a command (`command`, its `args`, and `env`: variables given the values of the
 // secrets named) or reached at an address (`address`, and `headers`: each header given the value of
 // the secret named). No value is ever written in the file: it names secrets, which the secrets
-// document keeps (C4). A nearer level's server replaces a farther one's of the same name. A server
-// that cannot be read whole is a problem on the Files page, and left out; nothing is guessed.
+// document keeps (C4). `description`, his words for what the server is for, is what a search finds it
+// by while it waits to be switched on, when its tools are not yet known. A nearer level's server
+// replaces a farther one's of the same name. A server that cannot be read whole is a problem on the
+// Files page, and left out; nothing is guessed.
 
 import type { FileText, LayerLevel } from "../contract/index";
 import type { Problem } from "./api";
@@ -18,6 +20,8 @@ export interface McpServer {
   runs: { command: string } | { address: string; headers: Record<string, string> };
   /** For a server started by a command: each environment variable, with the name of the secret its value is. */
   env: Record<string, string>;
+  /** His words for what it is for: what a search finds it by while it waits. */
+  description?: string;
   path: string;
   level: LayerLevel;
 }
@@ -80,8 +84,11 @@ export function parseMcp(file: FileText): { servers: McpRead[]; problems: Proble
     let runs: McpServer["runs"] | undefined;
     let written: string | undefined;
     let env: Record<string, string> = {};
+    let description: string | undefined;
     if (!isObject(given)) problem("A server is an object: a `command` it is started by, or an `address` it is reached at.");
     else {
+      if (typeof given.description === "string" && given.description.trim() !== "") description = given.description.trim();
+      else if (given.description !== undefined) problem("`description` is one line of text: what the server is for.");
       const command = typeof given.command === "string" && given.command.trim() !== "" ? given.command.trim() : undefined;
       const address = typeof given.address === "string" && given.address.trim() !== "" ? given.address.trim() : undefined;
       if ((command === undefined) === (address === undefined)) problem("A server is started by a `command` or reached at an `address`: one of the two.");
@@ -106,7 +113,7 @@ export function parseMcp(file: FileText): { servers: McpRead[]; problems: Proble
       }
     }
     for (const message of own) problems.push({ path: file.path, level: file.level, message: `Server ${name}: ${message}` });
-    servers.push({ name, path: file.path, level: file.level, ...(own.length === 0 && runs !== undefined ? { server: { name, runs, env, path: file.path, level: file.level } } : {}), ...(written !== undefined ? { written } : {}), problems: own });
+    servers.push({ name, path: file.path, level: file.level, ...(own.length === 0 && runs !== undefined ? { server: { name, runs, env, ...(description !== undefined ? { description } : {}), path: file.path, level: file.level } } : {}), ...(written !== undefined ? { written } : {}), problems: own });
   }
   return { servers, problems };
 }

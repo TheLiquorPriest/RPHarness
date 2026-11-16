@@ -146,6 +146,11 @@ test("a tool of the player's own that ran out of time, answered too much or not 
   expect(part.line("server_stopped", { tool: "tides_now", server: "tides" })).toBe("tides_now did not finish: its server tides stopped during the call. It is started again at the next call.");
 });
 
+test("a tool that needs a chat, called in a job that belongs to none, says it did nothing and why", async () => {
+  const part = await lines();
+  expect(part.line("no_chat", { tool: "chat_read" })).toBe("chat_read did nothing: this job belongs to no chat, so there is no chat for it to read or write.");
+});
+
 test("a call a spent limit kept from starting says it did not run, apart from one stopped part-way; the two notes beside a tool's own answer say what could not be done and that the answer stands", async () => {
   const part = await lines();
   const never = part.line("not_started", { tool: "file_write" }) ?? "";

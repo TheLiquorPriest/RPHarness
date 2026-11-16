@@ -19,10 +19,10 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { type Api, isContextOverflow, type Model } from "@earendil-works/pi-ai";
 import { attach, fieldsOf, Team, type TeamWork } from "../agents";
 import type { Wanted } from "../agents/attachments";
-import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TraceRecord, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
+import type { AgentRef, Environment, JsonObject, JsonValue, KeptMessage, LimitHit, ModelsApi, Places, Release, ReleaseForm, ReplyError, ReplySink, RuleFiring, RuleThen, RunOutcome, ToolCtx, TurnOutcome, TurnRequest, Usage, Writer } from "../contract";
 import { createFacts, loadGuidance } from "../files";
 import type { AgentDefinition, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
-import { type AgentOutcome, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
+import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
@@ -1209,7 +1209,7 @@ export class Turn {
   }
 
   /** Every record of the run: the usage, the lead's entries in the session file, progress lines, and what each fired rule's agent did next. */
-  #watch(record: TraceRecord): void {
+  #watch(record: AgentRecord): void {
     this.#c.usage.record(record);
     this.#record(record);
     const { event } = record;
@@ -1249,7 +1249,7 @@ export class Turn {
   }
 
   /** The lead's work, into the session file as it happens (§11): its intent records, what it wrote in each call, its calls and what came back. Never its thinking. */
-  #record(record: TraceRecord): void {
+  #record(record: AgentRecord): void {
     const file = this.#file;
     if (file === undefined || record.agent.id !== this.#lead.id) return;
     const turn = this.scope.turn;

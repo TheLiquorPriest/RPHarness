@@ -180,8 +180,8 @@ describe("the narrator", () => {
     expect(s.model.requests[0]!.options.temperature).toBeUndefined();
     // The lead read the draft.
     expect(lastToolResult(s.model.requests[2]!.messages)).toBe(" has not come, Wren says, and turns back to the brass.");
-    const narratorStarted = s.trace.of("agent_started").find((record) => record.agent.definition === "narrator");
-    expect(narratorStarted?.parent).toEqual({ agent: s.trace.of("run_started")[0]?.agent.id, run: s.trace.of("run_started")[0]?.run, call: "call_1_1" });
+    const narratorStarted = s.trace.of("agent_started").find((record) => record.agent?.definition === "narrator");
+    expect(narratorStarted?.parent).toEqual({ agent: s.trace.of("run_started")[0]!.agent!.id, run: s.trace.of("run_started")[0]?.run, call: "call_1_1" });
   });
 
   test("draft first, under a rule on the reply that names the narrator: the rule sees the draft as it is written, the phrase never reaches the lead, and the narrator goes on under the rule's text", async () => {
@@ -205,7 +205,7 @@ describe("the narrator", () => {
     expect(outcome).toMatchObject({ status: "released", form: "narrator", reply: "Wren turns and says it plainly." });
     expect(sink.text).toBe("Wren turns and says it plainly.");
     expect(s.model.requests).toHaveLength(4);
-    expect(s.trace.of("rule_fired").map((record) => [record.agent.definition, record.event.firing.rule, record.event.firing.action, record.event.firing.dropped])).toEqual([["narrator", "fixture-shiver", "cut", "Wren turns. A shiver down her spine"]]);
+    expect(s.trace.of("rule_fired").map((record) => [record.agent?.definition, record.event.firing.rule, record.event.firing.action, record.event.firing.dropped])).toEqual([["narrator", "fixture-shiver", "cut", "Wren turns. A shiver down her spine"]]);
     // Nothing of the draft had been shown, so the narrator goes on under the rule's text alone.
     expect(textOf(s.model.requests[2]!.messages.at(-1)!)).toBe(rule);
     expect(lastToolResult(s.model.requests[3]!.messages)).toBe("Wren turns and says it plainly.");

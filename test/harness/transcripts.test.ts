@@ -25,7 +25,7 @@ test("a turn with a GM sub-agent on the folder host, whose trace writes nothing 
 
   const folder = join(s.dir, "files", "chats", CHARACTER, CHAT, "sessions", "s1", "turns", "t1", "transcripts");
   const names = (await Array.fromAsync(new Bun.Glob("*.jsonl").scan({ cwd: folder }))).sort();
-  const agents = s.trace.of("agent_started").map((record) => `${record.agent.definition}-${record.agent.id}.jsonl`.replace(/[^A-Za-z0-9_.-]/g, "-"));
+  const agents = s.trace.of("agent_started").map((record) => `${record.agent?.definition}-${record.agent?.id}.jsonl`.replace(/[^A-Za-z0-9_.-]/g, "-"));
   expect(names).toEqual([...agents].sort());
   const lines = async (name: string) =>
     (await readFile(join(folder, name), "utf8"))

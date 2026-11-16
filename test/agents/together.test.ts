@@ -60,10 +60,10 @@ test("two started in one step work side by side; both ask, both are answered, bo
   expect(results(lead[2]!.messages).slice(-2)).toEqual(["gm-1 answered:\n\nRuled on Twenty feet.", "keeper-1 answered:\n\nRecalled The second vow."]);
   // Each asked, then finished; the lead ended last. Which of the two came back first is theirs to decide.
   const ended = s.trace.of("agent_ended");
-  for (const id of ["gm-1", "keeper-1"]) expect(ended.filter((record) => record.agent.id === id).map((record) => record.event.status)).toEqual(["asked", "done"]);
-  expect(ended.at(-1)?.agent.id).toBe(turn.lead.id);
+  for (const id of ["gm-1", "keeper-1"]) expect(ended.filter((record) => record.agent?.id === id).map((record) => record.event.status)).toEqual(["asked", "done"]);
+  expect(ended.at(-1)?.agent?.id).toBe(turn.lead.id);
   // Both questions were in the lead's hands before either agent went on.
-  const order = ended.map((record) => `${record.agent.id} ${record.event.status}`);
+  const order = ended.map((record) => `${record.agent?.id} ${record.event.status}`);
   expect(Math.max(order.indexOf("gm-1 asked"), order.indexOf("keeper-1 asked"))).toBeLessThan(Math.min(order.indexOf("gm-1 done"), order.indexOf("keeper-1 done")));
   // The thinking block says who is at work, how many at once, and who has a question, in the progress file's words.
   expect([...s.progress].sort()).toEqual(["2 agents at work.", "Asking gm-1.", "Asking keeper-1.", "gm-1 has a question.", "keeper-1 has a question."]);
@@ -92,7 +92,7 @@ test("a stop ends every one of them where it stands, and leaves no model call ru
 
   expect(outcome.status).toBe("stopped");
   // Every agent of the turn ended stopped, each after its model call was given up: nothing of theirs is still running.
-  expect(s.trace.of("agent_ended").map((record) => [record.agent.id, record.event.status]).sort()).toEqual([
+  expect(s.trace.of("agent_ended").map((record) => [record.agent?.id, record.event.status]).sort()).toEqual([
     ["gm-1", "stopped"],
     ["keeper-1", "stopped"],
     [turn.lead.id, "stopped"],
@@ -102,6 +102,6 @@ test("a stop ends every one of them where it stands, and leaves no model call ru
   expect(s.models["keeper-model"]!.requests).toHaveLength(1);
   expect(s.models["lead-model"]!.requests).toHaveLength(1);
   // Nothing about any of them came after its end.
-  const last = new Map(s.trace.records.map((record, at) => [record.agent.id, { at, kind: record.event.kind }]));
+  const last = new Map(s.trace.records.map((record, at) => [record.agent?.id, { at, kind: record.event.kind }]));
   for (const { kind } of last.values()) expect(kind).toBe("agent_ended");
 });

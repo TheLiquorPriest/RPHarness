@@ -84,10 +84,25 @@ export interface ResultEntry extends EntryBase {
   error?: true;
 }
 
-/** The host closed the session (§11), as the work of `turn` where it named one: closing belongs to that turn. */
+/**
+ * The host closed the session (§11), as the work of `turn` where it named one: closing belongs to that
+ * turn. `by`: the owner's own close (S-3), hung after the chat's newest turn, which his `reopen` takes
+ * back.
+ */
 export interface ClosedEntry extends EntryBase {
   type: "closed";
   turn?: string;
+  by?: "user";
+}
+
+/**
+ * The owner took back his own close (S-4): the closing `closing` no longer stands, wherever it is on
+ * a path. A mark of his word: it belongs to no turn, and is never the leaf.
+ */
+export interface ReopenedEntry extends EntryBase {
+  type: "reopened";
+  closing: string;
+  turn?: undefined;
 }
 
 /** The host said a turn is off the path (swiped away, deleted). A mark: no entry follows it. */
@@ -163,7 +178,7 @@ export interface SpentEntry extends EntryBase {
   ms: number;
 }
 
-export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
+export type SessionEntry = OpeningEntry | OpenedEntry | TurnEntry | IntentEntry | MessageEntry | CallEntry | ResultEntry | ClosedEntry | ReopenedEntry | LeftEntry | ShownEntry | CompactedEntry | CompactEntry | AppliedEntry | SpentEntry;
 
 /** One line of the file, as written. */
 export function lineOf(item: SessionHeader | SessionEntry): string {
@@ -200,7 +215,9 @@ function isEntry(v: Record<string, unknown>): boolean {
     case "result":
       return str(v["turn"]) && str(v["callId"]) && str(v["tool"]) && str(v["text"]) && optional(v["reports"], (r) => Array.isArray(r) && r.every(str));
     case "closed":
-      return optional(v["turn"], str);
+      return optional(v["turn"], str) && optional(v["by"], (by) => by === "user");
+    case "reopened":
+      return v["turn"] === undefined && str(v["closing"]);
     case "left":
       return str(v["turn"]);
     case "shown":
@@ -273,7 +290,9 @@ export function parseSession(text: string): ParsedSession {
  *   owner's "Apply now" mark, in the order of the file, wherever either stands; neither mark is ever
  *   the leaf;
  * - what a turn's runs spent stands from its mark until a newer one for that turn is written; the
- *   mark is never the leaf, nor its turn's tip.
+ *   mark is never the leaf, nor its turn's tip;
+ * - the owner's undo of his close takes that closing back wherever it stands; the mark is never the
+ *   leaf.
  *
  * Each entry keeps its place in the file, so what the host said can be told apart from what was
  * written before it (a summary written before a turn it stands for left the path).
@@ -299,6 +318,8 @@ export class SessionLog {
   readonly #openings = new Map<string, OpeningEntry>();
   /** What each turn's runs spent, the newest mark of each, in the order of the file. */
   readonly #spent = new Map<string, SpentEntry>();
+  /** The owner's undo of each closing he took back, by the closing. */
+  readonly #reopened = new Map<string, ReopenedEntry>();
 
   constructor(entries: readonly SessionEntry[] = []) {
     for (const entry of entries) this.add(entry);
@@ -358,6 +379,9 @@ export class SessionLog {
       case "spent":
         this.#spent.set(entry.turn, entry);
         return;
+      case "reopened":
+        if (!this.#reopened.has(entry.closing)) this.#reopened.set(entry.closing, entry);
+        return;
       default: {
         if (entry.type === "compacted") this.#asked = undefined;
         if (entry.turn !== undefined) this.#tips.set(entry.turn, entry.id);
@@ -398,6 +422,11 @@ export class SessionLog {
   /** What a turn's runs have spent so far: its newest mark, in the order of the file. */
   spent(turn: string): SpentEntry | undefined {
     return this.#spent.get(turn);
+  }
+
+  /** The owner's undo that took back the closing `id`, if he took it back. */
+  reopened(id: string): ReopenedEntry | undefined {
+    return this.#reopened.get(id);
   }
 
   /** A turn's first entry. */

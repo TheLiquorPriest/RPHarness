@@ -79,7 +79,7 @@ describe("a simple turn", () => {
 
     const marks = s.trace.records.filter((record) => record.event.kind === "intent_began" || record.event.kind === "intent");
     expect(marks.map((record) => record.event)).toEqual([{ kind: "intent_began" }, { kind: "intent", text: "Wants: news of the boat." }]);
-    expect(marks.every((record) => record.agent.definition === "author" && record.run === marks[0]!.run)).toBe(true);
+    expect(marks.every((record) => record.agent?.definition === "author" && record.run === marks[0]!.run)).toBe(true);
   });
 
   test("the reply reaches the sink as it is written, while the model is still writing it", async () => {

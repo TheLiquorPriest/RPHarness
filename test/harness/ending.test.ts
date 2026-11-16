@@ -350,7 +350,7 @@ describe("stop", () => {
 
     expect(outcome).toMatchObject({ status: "stopped", released: false });
     expect(s.model.requests).toHaveLength(1);
-    expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["author"]);
+    expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["author"]);
     expect(sink.errors).toEqual([{ code: "stopped" }]);
     expect(sink.text).toBe("");
     expect(sink.finished).toEqual([]);

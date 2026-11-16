@@ -43,7 +43,7 @@ export class TraceRecorder implements TracePort {
 
   /** The kinds of the records about one agent, in order. */
   kinds(agent?: string): string[] {
-    return this.records.filter((record) => agent === undefined || record.agent.id === agent).map((record) => record.event.kind);
+    return this.records.filter((record) => agent === undefined || record.agent?.id === agent).map((record) => record.event.kind);
   }
 
   of<K extends TraceRecord["event"]["kind"]>(kind: K): (TraceRecord & { event: Extract<TraceRecord["event"], { kind: K }> })[] {

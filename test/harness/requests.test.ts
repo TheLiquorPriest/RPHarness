@@ -67,7 +67,7 @@ function plain(file: RebuiltRequest): { role: string; text: string }[] {
 
 /** The path of the request kept for an agent's call. */
 function keptFor(s: Stage, agent: string, call: number): string {
-  const started = s.trace.of("call_started").find((record) => record.agent.id === agent && record.event.call === call);
+  const started = s.trace.of("call_started").find((record) => record.agent?.id === agent && record.event.call === call);
   const path = started?.event.request;
   if (path === undefined) throw new Error(`No request kept for ${agent}'s call ${call}.`);
   return path;
@@ -146,7 +146,7 @@ test("the lead's first kept request names each block: opening, frame, prompt, se
   expect((await s.turn(request("t1", { lead: "chief", carry: "continuing" }))).outcome.status).toBe("released");
   expect((await s.turn(request("t2", { lead: "chief", carry: "continuing", parent: "t1" }))).outcome.status).toBe("released");
 
-  const lead = s.trace.of("call_started").filter((record) => record.event.request?.includes("/turns/t2/") === true)[0]!.agent.id;
+  const lead = s.trace.of("call_started").filter((record) => record.event.request?.includes("/turns/t2/") === true)[0]!.agent!.id;
   const first = await kept(s, keptFor(s, lead, 1));
   expect(plain(first)).toEqual(asSent(s.model.requests[1]!));
   const named = ["opening", "frame", ...PROMPT.map(() => "prompt"), "session:carry", "briefing", "file:persistent-workspace/notes.md"];
@@ -188,8 +188,8 @@ async function textAt(s: Stage, path: string): Promise<string> {
 
 /** The handle of the lead whose first call is kept in the turn's folder, by the order its runs began. */
 function leadIn(s: Stage, turnId: string, run = 0): string {
-  const started = s.trace.of("call_started").filter((record) => record.event.request?.includes(`/turns/${turnId}/`) === true && record.agent.parent === undefined && record.event.call === 1);
-  const agent = started[run]?.agent.id;
+  const started = s.trace.of("call_started").filter((record) => record.event.request?.includes(`/turns/${turnId}/`) === true && record.agent?.parent === undefined && record.event.call === 1);
+  const agent = started[run]?.agent?.id;
   if (agent === undefined) throw new Error(`No lead's first call kept in ${turnId}.`);
   return agent;
 }
@@ -232,7 +232,7 @@ test("rebuilding a turn's first requests from the turn folder gives, byte for by
   }));
   expect((await team.turn(request("t1", { lead: "chief" }))).outcome.status).toBe("released");
   const teamStarted = team.trace.of("call_started");
-  expect(teamStarted.filter((record) => record.event.request !== undefined).map((record) => record.agent.definition)).toEqual(["chief", "gm"]);
+  expect(teamStarted.filter((record) => record.event.request !== undefined).map((record) => record.agent?.definition)).toEqual(["chief", "gm"]);
   for (const [at, record] of teamStarted.entries()) {
     if (record.event.request === undefined) continue;
     const rebuilt = await kept(team, record.event.request);

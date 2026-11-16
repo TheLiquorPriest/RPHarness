@@ -164,8 +164,14 @@ export type TraceEvent =
   | { kind: "progress_missing"; time: number }
   /** A session was compacted (§11): its tokens before and after, and how many of its newest turns were kept as they were. */
   | { kind: "compacted"; session: string; before: number; after: number; keptTurns: number }
-  /** A session opened, closed, forked from another, or opened again because the turn that closed it left the path (§11). */
-  | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened"; from?: string }
+  /**
+   * A session opened, closed, forked from another (`from`, the session it was forked from), or opened
+   * again: by the owner's undo of his own close (`by`), or because the turn that closed it left the
+   * path (§11). `turn`: the turn whose work the change is, or that left or was shown again; `by`: the
+   * change was the owner's own press (S-3, S-4). `unreadable`: its file could not be read, `reason`
+   * saying why (§17.2: failure is allowed, and visible).
+   */
+  | { kind: "session"; session: string; change: "opened" | "closed" | "forked" | "reopened" | "unreadable"; from?: string; turn?: string; by?: "user"; reason?: string }
   /** A job's state changed (§13.5). */
   | { kind: "job"; job: JobView }
   /** An agent's run ended. */
@@ -184,8 +190,12 @@ export interface TraceRecord {
   run: string;
   scope: Scope;
   at: number;
-  /** The agent it is about; for a run's own events, the agent the run started with. */
-  agent: AgentRef;
+  /**
+   * The agent it is about; for a run's own events, the agent the run started with. Absent for a
+   * record of the host's word outside any agent's work (a session opened, closed, forked or opened
+   * again by a call of the sessions API): a run of its own, numbered 1 (S-1).
+   */
+  agent?: AgentRef;
   /** For a sub-agent or a job: the agent, run and tool call that started it, so the live view shows the tree (§13.4). */
   parent?: { agent: string; run: string; call: string };
   event: TraceEvent;

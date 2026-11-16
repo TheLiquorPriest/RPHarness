@@ -61,7 +61,7 @@ export class LiveHub implements LiveApi {
     return {
       event: (record) => {
         port.event(record);
-        if (record.event.kind === "agent_started") this.#joined(record.run, record.agent);
+        if (record.event.kind === "agent_started" && record.agent !== undefined) this.#joined(record.run, record.agent);
         this.#send({ type: "event", record }, record.scope, record.run, backlog);
       },
       delta: (delta) => {

@@ -67,7 +67,7 @@ test("a call held by its connection's throttle shows the wait in the trace", asy
   s.clock.advance(60_000);
   expect((await second).outcome.status).toBe("released");
   const waits = s.trace.records.filter((record) => record.event.kind === "connection_wait");
-  expect(waits.map((record) => [record.scope.turn, record.agent.definition, record.event])).toEqual([
+  expect(waits.map((record) => [record.scope.turn, record.agent?.definition, record.event])).toEqual([
     ["t2", "lead", { kind: "connection_wait", connection: "Harbour", for: "minute" }],
     ["t2", "lead", { kind: "connection_wait", connection: "Harbour", for: "minute", ms: 60_000 }],
   ]);

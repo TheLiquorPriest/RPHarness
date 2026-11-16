@@ -61,7 +61,7 @@ test("a sub-agent's calls are counted and shown under its own name", async () =>
   expect(await s.usage.window({ user: USER, chat: CHAT, session: "s1", turn: "t1" }, "gm-1")).toEqual({ used: 640, window: 64_000, reserve: 4_000 });
   // The live run lists it beside the lead, and its events and text came under its name, tied to the lead's call.
   expect(s.hub.running(USER)[0]?.agents).toEqual([turn.lead, gm]);
-  const own = items.flatMap((item) => (item.type === "event" && item.record.agent.id === "gm-1" ? [item.record] : []));
+  const own = items.flatMap((item) => (item.type === "event" && item.record.agent?.id === "gm-1" ? [item.record] : []));
   expect(own.map((record) => record.event.kind)).toEqual(["agent_started", "call_started", "call_ended", "tool_started", "tool_ended", "call_started", "call_ended", "agent_ended"]);
   expect(own.every((record) => record.parent?.call === "d-1")).toBe(true);
   const text = items.flatMap((item) => (item.type === "delta" && item.delta.agent === "gm-1" && item.delta.text !== undefined ? [item.delta.text] : []));

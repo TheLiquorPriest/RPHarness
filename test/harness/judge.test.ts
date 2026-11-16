@@ -62,7 +62,7 @@ test("with `interrupt: always` the lead waits for the answer before its next cal
   expect(sent(s, 1)).toContain("A reward awaits whoever climbs.");
   expect(sent(s, 2)).toContain(TEXT);
   expect(s.trace.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.moment, record.event.firing.action])).toEqual([["fixture-reward", "after-message", "remind"]]);
-  const judge = s.trace.of("agent_started").find((record) => record.agent.parent !== undefined && record.event.definition === "lead");
+  const judge = s.trace.of("agent_started").find((record) => record.agent?.parent !== undefined && record.event.definition === "lead");
   expect(judge?.event.connection).toBe("fixture-judge");
   expect(outcome.usage.calls).toBe(3);
 });
@@ -77,11 +77,11 @@ test("without it the lead goes on; an answer that comes once its work has ended 
 
   const first = s.turn(request("t1", { lead: "lead" }));
   // The lead's work ends with its reply while the judge has not answered; the turn waits for it.
-  await s.trace.seen((record) => record.event.kind === "agent_ended" && record.agent.parent === undefined);
+  await s.trace.seen((record) => record.event.kind === "agent_ended" && record.agent?.parent === undefined);
   slow.open();
   expect((await first).outcome.status).toBe("released");
   expect(s.trace.of("rule_fired").map((record) => record.event.firing.action)).toEqual(["briefing"]);
-  expect(s.trace.of("agent_started").find((record) => record.agent.parent !== undefined)?.event.connection).toBe("fixture-setting");
+  expect(s.trace.of("agent_started").find((record) => record.agent?.parent !== undefined)?.event.connection).toBe("fixture-setting");
 
   expect((await s.turn(request("t2", { lead: "lead" }))).outcome.status).toBe("released");
   const second = s.model.requests.findLastIndex((req) => req.messages.some((message) => textOf(message).includes("Fixture lead: you run the turn.")));

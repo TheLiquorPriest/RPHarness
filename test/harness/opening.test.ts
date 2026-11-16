@@ -168,7 +168,7 @@ test("the writer write_reply starts is handed whole a file pinned for it and a f
   expect(writer).toContain(openingText(parts));
   const given = writer.find((text) => text.includes(PLAN));
   expect(given).toContain(STYLE);
-  const started = s.trace.of("agent_started").find((record) => record.agent.definition === "narrator");
+  const started = s.trace.of("agent_started").find((record) => record.agent?.definition === "narrator");
   expect(started?.event.given).toEqual(["prompt:*", "file:persistent-workspace/style.md", "file:persistent-workspace/plan.md", "brief"]);
   const told = s.told.filter((told) => told.kind === "attachments").flatMap((told) => (told.payload as AttachmentRef[]).map((ref) => [ref.ref, ref.from]));
   expect(told).toEqual([

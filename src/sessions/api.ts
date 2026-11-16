@@ -1,22 +1,37 @@
 // Sessions as the host and the pages reach them (Appendix A `SessionsApi`): opened and closed only
 // when the host says so (§11: it ties them to its scenes), closing as the work of the turn that did
-// it, a branch begun from a turn of another session, a compaction asked for, and each session as it
-// stands now. Code never closes a session for its size, and nothing here is a step of a turn.
-import type { FilesPort, Scope, SessionsApi, SessionView } from "../contract";
+// it, or as the owner's own close and its undo; a branch begun from a turn of another session, a
+// compaction asked for, and each session as it stands now. Every change is told as it happens, to
+// the host's trace and the chat's live view (§13.1: RPH reports everything it does). Code never
+// closes a session for its size, and nothing here is a step of a turn.
+import type { FilesPort, Scope, SessionsApi, SessionView, TraceEvent } from "../contract";
 import type { SessionBook, SessionFile } from "./book";
 import { compactionAt, pathTurns } from "./carry";
-import type { ClosedEntry, SessionEntry } from "./file";
+import type { ClosedEntry, SessionEntry, SessionLog } from "./file";
+
+/** A change of a session, as its trace record tells it. */
+export type SessionChange = Omit<Extract<TraceEvent, { kind: "session" }>, "kind">;
 
 /**
- * A session as it stands at its leaf. A closing is judged by its turn, wherever it sits in the file:
- * one that names no turn (the host's own) holds; one made as the work of a turn holds while that turn
- * is on the path, or, for a turn the file never saw begin, until the host says it left.
+ * The closings that stand at the leaf, in the order of the file. A closing is judged by its turn,
+ * wherever it sits in the file: one that names no turn (the host's own) holds; one made as the work
+ * of a turn, or the owner's hung after one, holds while that turn is on the path, or, for a turn the
+ * file never saw begin, until the host says it left; and none that the owner took back holds.
  */
+function standing(log: SessionLog, onPath: ReadonlySet<string>): ClosedEntry[] {
+  return log.entries.filter((entry): entry is ClosedEntry => entry.type === "closed" && log.reopened(entry.id) === undefined && (entry.turn === undefined || onPath.has(entry.turn) || (log.turn(entry.turn) === undefined && !log.left(entry.turn))));
+}
+
+/** The newest closing that stands at the session's leaf: none while it is open. */
+export function closingOf(file: SessionFile): ClosedEntry | undefined {
+  return standing(file.log, new Set(pathTurns(file.log, file.log.leaf).map((turn) => turn.entry.turn))).at(-1);
+}
+
+/** A session as it stands at its leaf: the newest closing that stands says who closed it. */
 function viewOf(file: SessionFile, now: number): SessionView {
   const { log, header, scope } = file;
   const turns = pathTurns(log, log.leaf);
-  const onPath = new Set(turns.map((turn) => turn.entry.turn));
-  const closing = log.entries.findLast((entry): entry is ClosedEntry => entry.type === "closed" && (entry.turn === undefined || onPath.has(entry.turn) || (log.turn(entry.turn) === undefined && !log.left(entry.turn))));
+  const closing = standing(log, new Set(turns.map((turn) => turn.entry.turn))).at(-1);
   return {
     id: scope.session,
     user: scope.user,
@@ -24,6 +39,7 @@ function viewOf(file: SessionFile, now: number): SessionView {
     state: closing === undefined ? "open" : "closed",
     opened: log.opened?.at ?? header?.at ?? now,
     ...(closing?.turn !== undefined ? { closedBy: closing.turn } : {}),
+    ...(closing?.by !== undefined ? { by: closing.by } : {}),
     ...(header?.from !== undefined ? { from: header.from } : {}),
     turns: turns.length,
     ...(log.asked !== undefined ? { compactAsked: true as const } : {}),
@@ -38,29 +54,48 @@ export interface SessionsDeps {
   now(): number;
   /** How many of a session's newest turns a summary never stands for, as the user's settings for its chat say. */
   keepTurns(scope: Scope): Promise<number>;
-  /** The host closed the session: what the harness keeps of it beside its file is let go. */
+  /** The session closed: what the harness and the model layer keep of it beside its file is let go. */
   closed(scope: Scope): void;
+  /** A change of the session, told to the host's trace and the chat's live view as a record of the host's word (S-1). */
+  told(scope: Scope, change: SessionChange): void;
 }
 
 export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
   const view = (file: SessionFile): SessionView => viewOf(file, d.now());
+  const turnOf = (scope: Scope): { turn?: string } => (scope.turn !== undefined ? { turn: scope.turn } : {});
   return {
     open: (scope, opening) =>
       book.with(scope, async (file) => {
         // Opened once: the summary it opened with stays the one it carries (§11).
-        if (file.log.opened === undefined) file.add({ type: "opened", parent: file.log.leaf, ...(opening?.summary !== undefined && opening.summary !== "" ? { summary: opening.summary } : {}) });
+        if (file.log.opened !== undefined) return view(file);
+        file.add({ type: "opened", parent: file.log.leaf, ...(opening?.summary !== undefined && opening.summary !== "" ? { summary: opening.summary } : {}) });
         await file.settled();
+        d.told(scope, { session: scope.session, change: "opened", ...turnOf(scope) });
         return view(file);
       }),
 
-    close: (scope) =>
+    close: (scope, how) =>
       book.with(scope, async (file) => {
         if (view(file).state === "closed") return view(file);
-        // The closing hangs at the end of the turn that did it, so it leaves the path with that turn.
+        // The closing hangs at the end of the turn that did it, or for the owner's, the chat's newest
+        // turn, so it leaves the path with that turn.
         const tip = scope.turn === undefined ? undefined : file.log.tip(scope.turn);
-        file.add({ type: "closed", parent: tip ?? file.log.leaf, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) });
+        const by = how?.by === "user" ? { by: "user" as const } : {};
+        file.add({ type: "closed", parent: tip ?? file.log.leaf, ...turnOf(scope), ...by });
         await file.settled();
         d.closed(scope);
+        d.told(scope, { session: scope.session, change: "closed", ...turnOf(scope), ...by });
+        return view(file);
+      }),
+
+    reopen: (scope) =>
+      book.with(scope, async (file) => {
+        // His undo takes back his own closings that stand; a turn's stands until its turn leaves the path.
+        const his = standing(file.log, new Set(pathTurns(file.log, file.log.leaf).map((turn) => turn.entry.turn))).filter((closing) => closing.by === "user");
+        if (his.length === 0) return view(file);
+        for (const closing of his) file.add({ type: "reopened", parent: closing.id, closing: closing.id });
+        await file.settled();
+        if (closingOf(file) === undefined) d.told(scope, { session: scope.session, change: "reopened", by: "user" });
         return view(file);
       }),
 
@@ -88,8 +123,14 @@ export function sessionsApi(book: SessionBook, d: SessionsDeps): SessionsApi {
           }
           // And each lead's newest opening block, so the branch goes on with the front its session had (§10.2).
           for (const opening of source.log.openings()) entries.push({ ...opening, parent: tip });
+          // And the owner's undo of each of his closings on the path, so a session he opened again is open in the branch.
+          for (const entry of path) {
+            const undo = entry.type === "closed" ? source.log.reopened(entry.id) : undefined;
+            if (undo !== undefined) entries.push(undo);
+          }
           target.copy(entries, { chat: from.chat, session: from.session, turn: from.turn });
           await target.settled();
+          d.told(to, { session: to.session, change: "forked", from: from.session, turn: from.turn });
           return view(target);
         });
       }),

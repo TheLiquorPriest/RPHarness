@@ -186,7 +186,7 @@ describe("the run's point before each request", () => {
     const outcome = await clock.settle(runner.start({ messages: [] }).done);
 
     // The point's call is the run's: traced between the lead's, and counted with them, so the lead's second call is held at the run's limit.
-    expect(recorder.of("call_started").map((record) => record.agent.id)).toEqual(["lead", "saver"]);
+    expect(recorder.of("call_started").map((record) => record.agent?.id)).toEqual(["lead", "saver"]);
     expect(outcome).toMatchObject({ status: "limit", limit: { limit: "calls", per: "turn", max: 2, value: 2 } });
     expect(scripted.requests).toHaveLength(1);
   });

@@ -67,7 +67,7 @@ describe("delegate", () => {
     expect(ledge).toBeGreaterThan(scene);
     expect(JSON.stringify(first.messages)).not.toContain(PLAYER);
     // Its effort, its session, and the call it hangs under.
-    const started = s.trace.of("agent_started").find((record) => record.agent.id === "gm-1");
+    const started = s.trace.of("agent_started").find((record) => record.agent?.id === "gm-1");
     expect(started?.event).toMatchObject({ definition: "gm", model: "gm-model", connection: "gm-model", effort: "high", given: ["file:persistent-workspace/scene.md", "lore:e-112"] });
     expect(started?.event.session).not.toBe("s1");
     expect(started?.agent).toEqual({ id: "gm-1", definition: "gm", parent: turn.lead.id });
@@ -148,7 +148,7 @@ describe("delegate", () => {
     expect(s.models["keeper-model"]!.requests).toHaveLength(0);
     expect(toolResults(s.models["gm-model"]!.requests[1]!.messages)).toEqual(["keeper was not started: it would stand 2 deep, and the player allows 1."]);
     expect(toolResults(s.models["lead-model"]!.requests[2]!.messages).at(-1)).toBe("keeper was not started: this turn has started 1 agents, and the player allows 1.");
-    expect(s.trace.of("limit").map((record) => [record.agent.id, record.event.hit])).toEqual([
+    expect(s.trace.of("limit").map((record) => [record.agent?.id, record.event.hit])).toEqual([
       ["gm-1", { limit: "depth", per: "turn", max: 1, value: 2 }],
       [expect.any(String), { limit: "agents", per: "turn", max: 1, value: 1 }],
     ]);
@@ -211,7 +211,7 @@ describe("delegate", () => {
     const harness = (open = await stage({ files, models: { ...lead, "gm-model": [{ pieces: [{ text: "Ruled." }] }] } }));
     const record = harness.trace.event.bind(harness.trace);
     harness.trace.event = (one) => {
-      if (one.agent.id === "gm-1" && (one.event.kind === "call_started" || one.event.kind === "call_ended")) throw new Error("Fixture: the trace takes no more.");
+      if (one.agent?.id === "gm-1" && (one.event.kind === "call_started" || one.event.kind === "call_ended")) throw new Error("Fixture: the trace takes no more.");
       record(one);
     };
     await (await harness.play(PLAYER)).done;
@@ -245,7 +245,7 @@ describe("delegate", () => {
 
     expect(textOf(s.models["gm-model"]!.requests[0]!.messages[1] ?? { content: "" })).toContain("### lore:w-31\n\nThe keeper's fall (Fixture world)\n\nKnown only to Wren Hale.\n\nThe old keeper was pushed.");
     expect(textOf(s.models["character-model"]!.requests[0]!.messages[1] ?? { content: "" })).not.toContain("pushed");
-    const told = s.told.flatMap((item) => (item.kind === "attachments" && item.agent.plays === "Mara" ? item.refs : []));
+    const told = s.told.flatMap((item) => (item.kind === "attachments" && item.agent?.plays === "Mara" ? item.refs : []));
     expect(told).toEqual([{ ref: "lore:w-31", from: "delegate", own: true }]);
   });
 });

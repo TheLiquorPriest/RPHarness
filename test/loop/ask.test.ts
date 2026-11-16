@@ -33,7 +33,7 @@ function team(trace: RunTrace, clock: FakeClock, scripts: Record<string, Answer[
   const models: Record<string, ScriptedModel> = {};
   const askAuthor = tool("ask_author", async (args) => ({ content: [], ask: { question: field(args, "question"), searched: field(args, "searched") } }));
   const work = async (handle: string, runner: AgentRunner, input: WorkInput, ctx: ToolCtx): Promise<LoopToolResult> => {
-    const started = runner.start(input, { parent: { agent: ctx.agent.id, run: ctx.run, call: ctx.callId } });
+    const started = runner.start(input, { parent: { agent: ctx.agent?.id, run: ctx.run, call: ctx.callId } });
     ctx.signal.addEventListener("abort", () => started.stop(), { once: true });
     return asResult(handle, await started.done);
   };
@@ -42,7 +42,7 @@ function team(trace: RunTrace, clock: FakeClock, scripts: Record<string, Answer[
     const handle = `${definition}#1`;
     const scripted = scriptedModel(scripts[definition] ?? [], { clock, id: `model-of-${handle}` });
     models[definition] = scripted;
-    const runner = new AgentRunner({ agent: { id: handle, definition, parent: ctx.agent.id }, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${handle}`, texts: { continueAfterRule: () => "" }, terms, tools: [askAuthor] });
+    const runner = new AgentRunner({ agent: { id: handle, definition, parent: ctx.agent?.id }, trace, model: scripted.model, streamFn: scripted.streamFn, connection: "connection-a", session: `session-of-${handle}`, texts: { continueAfterRule: () => "" }, terms, tools: [askAuthor] });
     agents.set(handle, runner);
     return work(handle, runner, { messages: [user(field(args, "brief"))] }, ctx);
   });
@@ -101,7 +101,7 @@ describe("sub-agents asking the lead", () => {
       // The answer is the ask's own result: the sub-agent goes on where it stopped.
       expect(requests[1]!.messages.at(-1)?.role).toBe("toolResult");
     }
-    const ended = recorder.of("agent_ended").map((record) => [record.agent.id, record.event.status]);
+    const ended = recorder.of("agent_ended").map((record) => [record.agent?.id, record.event.status]);
     expect(ended).toEqual([
       ["gm#1", "asked"],
       ["keeper#1", "asked"],
@@ -110,11 +110,11 @@ describe("sub-agents asking the lead", () => {
       ["author", "done"],
     ]);
     // At the same time: each asked while the other's first work was still going.
-    const at = (id: string, kind: string, nth = 0) => recorder.records.filter((record) => record.agent.id === id && record.event.kind === kind)[nth]!.at;
+    const at = (id: string, kind: string, nth = 0) => recorder.records.filter((record) => record.agent?.id === id && record.event.kind === kind)[nth]!.at;
     expect(at("gm#1", "agent_started")).toBeLessThan(at("keeper#1", "agent_ended"));
     expect(at("keeper#1", "agent_started")).toBeLessThan(at("gm#1", "agent_ended"));
     // Each stretch of a sub-agent's work hangs under the lead's call that started or continued it.
-    const parents = recorder.records.filter((record) => record.event.kind === "agent_started" && record.agent.id !== "author").map((record) => [record.agent.id, record.agent.parent, record.parent?.call]);
+    const parents = recorder.records.filter((record) => record.event.kind === "agent_started" && record.agent?.id !== "author").map((record) => [record.agent?.id, record.agent?.parent, record.parent?.call]);
     expect(parents).toEqual([
       ["gm#1", "author", "d-gm"],
       ["keeper#1", "author", "d-keeper"],

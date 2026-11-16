@@ -22,8 +22,8 @@ describe("eight agents at once", () => {
     const calls: { agent: string; run: string; note: JsonValue }[] = [];
     // One tool shared by all eight: only its context can tell it who called.
     const echo = tool("echo", async (args, ctx) => {
-      calls.push({ agent: ctx.agent.id, run: ctx.run, note: typeof args === "object" && args !== null && !Array.isArray(args) ? (args["note"] ?? null) : null });
-      return said(`echo for ${ctx.agent.id}`);
+      calls.push({ agent: ctx.agent?.id, run: ctx.run, note: typeof args === "object" && args !== null && !Array.isArray(args) ? (args["note"] ?? null) : null });
+      return said(`echo for ${ctx.agent?.id}`);
     });
     const rigs = RUNS.flatMap((run, r) => {
       const recorder = new TraceRecorder();
@@ -37,12 +37,12 @@ describe("eight agents at once", () => {
 
     const outcomes = await clock.settle(Promise.all(rigs.map((rig) => rig.runner.start({ messages: [user(`Go, ${rig.id}.`)] }).done)));
 
-    expect(outcomes.map((outcome) => [outcome.agent.id, outcome.status, outcome.text])).toEqual(rigs.map((rig) => [rig.id, "done", `[${rig.id}] done`]));
+    expect(outcomes.map((outcome) => [outcome.agent?.id, outcome.status, outcome.text])).toEqual(rigs.map((rig) => [rig.id, "done", `[${rig.id}] done`]));
     // The shared tool was told the right agent and run every time.
     expect(calls).toHaveLength(8);
     for (const call of calls) {
       expect(call.note).toBe(call.agent);
-      expect(call.agent.startsWith(call.run)).toBe(true);
+      expect(call.agent?.startsWith(call.run)).toBe(true);
     }
     for (const run of RUNS) {
       const recorder = rigs.find((rig) => rig.run === run)!.recorder;
@@ -51,7 +51,7 @@ describe("eight agents at once", () => {
       for (const record of recorder.records) {
         expect(record.run).toBe(run);
         expect(record.scope.turn).toBe(run);
-        const own = record.agent.id;
+        const own = record.agent!.id;
         expect(own.startsWith(run)).toBe(true);
         const text = JSON.stringify(record.event);
         // Every agent name a record mentions is its own.
@@ -62,7 +62,7 @@ describe("eight agents at once", () => {
         expect((delta.text ?? "").startsWith(`[${delta.agent}]`)).toBe(true);
       }
       // The four agents of the run were at work together: their records interleave.
-      const order = recorder.records.map((record) => record.agent.id);
+      const order = recorder.records.map((record) => record.agent?.id);
       const switches = order.filter((id, at) => at > 0 && id !== order[at - 1]).length;
       expect(switches).toBeGreaterThan(PER_RUN * 2);
     }
@@ -72,7 +72,7 @@ describe("eight agents at once", () => {
       expect(words.match(/run-(east|west)-agent-\d/g)?.every((name) => name === rig.id)).toBe(true);
     }
     // All eight were working at once: every agent started before any ended.
-    const all = rigs.flatMap((rig) => rig.recorder.records.filter((record) => record.agent.id === rig.id));
+    const all = rigs.flatMap((rig) => rig.recorder.records.filter((record) => record.agent?.id === rig.id));
     const lastStart = Math.max(...all.filter((record) => record.event.kind === "agent_started").map((record) => record.at));
     const firstEnd = Math.min(...all.filter((record) => record.event.kind === "agent_ended").map((record) => record.at));
     expect(lastStart).toBeLessThan(firstEnd);

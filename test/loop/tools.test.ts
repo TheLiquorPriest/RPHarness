@@ -108,7 +108,7 @@ describe("around a tool call", () => {
 
     expect(outcome.status).toBe("released");
     // Each request, by the agent whose call it was: a call's start is traced just before its request is made.
-    const by = s.trace.of("call_started").map((record, at) => [record.agent.definition, s.model.requests[at]!.tools.map((declared) => declared.name)] as const);
+    const by = s.trace.of("call_started").map((record, at) => [record.agent?.definition, s.model.requests[at]!.tools.map((declared) => declared.name)] as const);
     expect(by.map(([agent]) => agent)).toEqual(["author", "gm", "author", "narrator"]);
     for (const [, tools] of by) expect(tools).not.toContain("world_query");
     expect(by[0]![1]).toContain("delegate");

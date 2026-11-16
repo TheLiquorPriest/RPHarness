@@ -53,7 +53,7 @@ test("a lead delegates, its sub-agent asks, the lead answers, the sub-agent fini
   expect(requests[3]!.messages.slice(0, requests[1]!.messages.length)).toEqual(requests[1]!.messages);
   expect(lastResult(requests[3]!.messages)).toBe("Twenty feet.");
   expect(lastResult(requests[4]!.messages)).toContain("At twenty feet the jump fails.");
-  const stretches = s.trace.records.filter((record) => record.agent.id === "gm-1" && (record.event.kind === "agent_started" || record.event.kind === "agent_ended"));
+  const stretches = s.trace.records.filter((record) => record.agent?.id === "gm-1" && (record.event.kind === "agent_started" || record.event.kind === "agent_ended"));
   expect(stretches.map((record) => [record.event.kind, record.event.kind === "agent_ended" ? record.event.status : record.parent?.call])).toEqual([
     ["agent_started", "d-1"],
     ["agent_ended", "asked"],
@@ -75,7 +75,7 @@ test("the turn's settings hold its sub-agents: with no depth allowed, delegate s
   expect(outcome.status).toBe("released");
   expect(s.model.requests).toHaveLength(2);
   expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "depth", per: "turn", max: 0, value: 1 }]);
-  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["chief"]);
+  expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["chief"]);
   expect(lastResult(s.model.requests[1]!.messages)).not.toBe("");
 });
 
@@ -92,7 +92,7 @@ test("a stop ends the lead and the sub-agent at work under it, and no further ca
   const stop = new AbortController();
 
   const turn = s.turn(request("t1", { lead: "chief" }), undefined, stop.signal);
-  await s.trace.seen((record) => record.agent.id === "gm-1" && record.event.kind === "call_started");
+  await s.trace.seen((record) => record.agent?.id === "gm-1" && record.event.kind === "call_started");
   stop.abort();
   const { outcome, sink } = await turn;
   const records = s.trace.records.length;
@@ -100,7 +100,7 @@ test("a stop ends the lead and the sub-agent at work under it, and no further ca
   await s.clock.idle();
 
   expect(outcome).toMatchObject({ status: "stopped", released: false });
-  expect(s.trace.of("agent_ended").map((record) => [record.agent.definition, record.event.status]).sort()).toEqual([
+  expect(s.trace.of("agent_ended").map((record) => [record.agent?.definition, record.event.status]).sort()).toEqual([
     ["chief", "stopped"],
     ["gm", "stopped"],
   ]);
@@ -130,7 +130,7 @@ test("a sub-agent stopped at its time limit while a tool ran: when the lead's me
   never.open();
 
   expect(outcome.status).toBe("released");
-  expect(s.trace.of("agent_ended").filter((record) => record.agent.id === "gm-1").map((record) => record.event.status)).toEqual(["limit", "done"]);
+  expect(s.trace.of("agent_ended").filter((record) => record.agent?.id === "gm-1").map((record) => record.event.status)).toEqual(["limit", "done"]);
   // The sub-agent's second request: the call its limit cut short has an answer, and it is not the tool's late one.
   const unfinished = s.model.requests[3]!.messages.find((message) => message.role === "toolResult" && message.toolCallId === "q-1");
   expect(unfinished === undefined ? "" : textOf(unfinished)).not.toBe("");
@@ -162,7 +162,7 @@ test("the writer stands in the team as a sub-agent does: what it starts is held 
   // What the writer started would stand two deep, past the one the player allows.
   expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "depth", per: "turn", max: 1, value: 2 }]);
   expect(answerTo(s, "d-1")).toBe("gm was not started: it would stand 2 deep, and the player allows 1.");
-  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "narrator", "narrator"]);
+  expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["scribe", "narrator", "narrator"]);
   // Its question came back as write_reply's answer, marked, and the scribe's message went on with it.
   expect(answerTo(s, "w-1")).toContain("Does she make the far ledge?");
   expect(s.trace.of("tool_ended").find((record) => record.event.callId === "w-1")?.event.result.marks).toEqual(["question"]);
@@ -198,12 +198,12 @@ test("the caller's definition's writer: key decides who writes; a writer: header
   const first = await s.turn(request("t1", { lead: "scribe" }));
   expect(first.outcome).toMatchObject({ status: "released", form: "narrator-live", reply: "She clears the gap by a hand." });
   // The writer the scribe's definition names wrote, not the one the tool's file names.
-  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "bard"]);
+  expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["scribe", "bard"]);
 
   const second = await s.turn(request("t2", { lead: "herald" }));
   expect(second.outcome).toMatchObject({ status: "released", form: "tags", reply: "She waits for the tide." });
   // A caller whose definition names no writer has none, whatever the tool's file says.
-  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe", "bard", "herald"]);
+  expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["scribe", "bard", "herald"]);
   expect(s.trace.of("tool_ended").find((record) => record.event.callId === "w-2")?.event.result.error).toBe(true);
 });
 
@@ -222,7 +222,7 @@ test("a writer: naming a definition switched off: write_reply answers with the n
 
   expect(outcome).toMatchObject({ status: "released", form: "tags", reply: "She waits for the tide." });
   expect(answerTo(s, "w-1")).toBe("bard, the writer your definition names, is switched off; it cannot write the reply.");
-  expect(s.trace.of("agent_started").map((record) => record.agent.definition)).toEqual(["scribe"]);
+  expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["scribe"]);
   expect(s.logged.filter((line) => line.level === "error")).toEqual([]);
 });
 

@@ -42,8 +42,8 @@ const ANSWERS = [
 function instructionsBy(s: Stage): Record<string, string> {
   const out: Record<string, string> = {};
   for (const started of s.trace.of("agent_started")) {
-    const asked = s.model.requests.find((r) => textOf(r.messages[0]!).startsWith(`Fixture ${started.agent.definition}:`));
-    if (asked !== undefined) out[started.agent.definition] = textOf(asked.messages[0]!);
+    const asked = s.model.requests.find((r) => textOf(r.messages[0]!).startsWith(`Fixture ${started.agent?.definition}:`));
+    if (asked !== undefined) out[started.agent!.definition] = textOf(asked.messages[0]!);
   }
   return out;
 }

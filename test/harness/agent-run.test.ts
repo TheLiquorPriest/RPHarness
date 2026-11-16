@@ -56,7 +56,7 @@ test("a job's first request file is written and settled before the job's end is 
 
   expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
   await asked.opened;
-  await s.trace.seen(() => s.trace.records.some((record) => record.event.kind === "agent_ended" && record.agent.definition === "keeper"));
+  await s.trace.seen(() => s.trace.records.some((record) => record.event.kind === "agent_ended" && record.agent?.definition === "keeper"));
   // The keeper's work is over, but its request file is still being written: the job's end is not told yet.
   expect(s.trace.records.some((record) => record.event.kind === "job" && record.event.job.state === "done")).toBe(false);
   held.open();

@@ -62,12 +62,12 @@ test("a turn and its continue have two run ids under the turn's scope, each run'
   expect([startOf(first!), startOf(continued!)]).toMatchObject([{ run: "turn", turn: "new" }, { run: "turn", turn: "continue" }]);
 
   // The sub-agent the first run's lead started: every record of its work carries that run's id, and so does the call it hangs under.
-  const gm = records.filter((record) => record.agent.id === "gm-1");
+  const gm = records.filter((record) => record.agent?.id === "gm-1");
   expect(gm.length).toBeGreaterThan(0);
   expect(new Set(gm.map((record) => record.run))).toEqual(new Set([first]));
   expect(gm.find((record) => record.event.kind === "agent_started")?.parent).toMatchObject({ run: first, call: "d-1" });
   // The continue's records are its own: none of the first run's work is filed under its id.
-  expect(records.filter((record) => record.run === continued && record.agent.id === "gm-1")).toEqual([]);
+  expect(records.filter((record) => record.run === continued && record.agent?.id === "gm-1")).toEqual([]);
 });
 
 test("a turn's log lines name the turn and the run, each under its own name", async () => {

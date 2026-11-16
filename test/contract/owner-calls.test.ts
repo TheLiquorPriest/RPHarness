@@ -27,13 +27,16 @@ function code(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "$1");
 }
 
-/** The owner-only members a source calls, as `<harness member>.<name>`. */
+/** The owner-only members a source calls, as the list names them; a member listed with a form only in that form (`sessions.close by:user`). */
 function calls(source: string): string[] {
   const text = code(source);
   return OWNER_ONLY.filter((entry) => {
-    const [api = "", name = ""] = entry.split(".");
+    const [member = "", form] = entry.split(" ");
+    const [api = "", name = ""] = member.split(".");
     const receivers = HELD_AS[api] ?? [api];
-    return new RegExp(`\\b(?:${receivers.join("|")})[!?]*\\.${name}\\s*\\(`).test(text);
+    const [field, value] = form?.split(":") ?? [];
+    const args = field === undefined ? "" : `[^;]*\\b${field}\\s*:\\s*["'\`]${value}["'\`]`;
+    return new RegExp(`\\b(?:${receivers.join("|")})[!?]*\\.${name}\\s*\\(${args}`).test(text);
   });
 }
 
@@ -60,7 +63,7 @@ test("no RPH source but the folder host's command line calls a member of the own
   // "Apply now" is the owner's press too: no source of RPH calls it (the harness's `index.ts` only defines it).
   expect(OWNER_ONLY).toContain("definitions.apply");
   for (const entry of OWNER_ONLY) {
-    const [api = "", name = ""] = entry.split(".");
+    const [api = "", name = ""] = (entry.split(" ")[0] ?? "").split(".");
     expect({ entry, member: typeof harness[api]?.[name] }).toEqual({ entry, member: "function" });
   }
 

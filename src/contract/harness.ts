@@ -171,8 +171,10 @@ export interface SessionView {
   chat: string;
   state: "open" | "closed";
   opened: number;
-  /** The turn that closed it; closing belongs to that turn (§11). */
+  /** The turn that closed it; closing belongs to that turn (§11). For the owner's own close, the chat's newest turn when he closed it, after which the closing hangs. */
   closedBy?: string;
+  /** The closing that stands was the owner's own (S-3): his `reopen` takes it back. */
+  by?: "user";
   /** The session and turn it was forked from, for a branch (§10.10). */
   from?: { chat: string; session: string; turn: string };
   /** Turns played in it. */
@@ -187,8 +189,15 @@ export interface SessionsApi {
    * the previous scene's session closed with.
    */
   open(scope: Scope, opening?: { summary?: string }): Promise<SessionView>;
-  /** Closes it, as the work of `scope.turn` (§11: if that turn is swiped or deleted, the session is open again). */
-  close(scope: Scope): Promise<SessionView>;
+  /**
+   * Closes it, as the work of `scope.turn` (§11: if that turn is swiped or deleted, the session is
+   * open again). With `by: "user"`, the owner's own close (S-3): hung after `scope.turn`, the chat's
+   * newest turn on the path, so a swipe or delete of that turn takes it back; owner's presses only
+   * (C-24). Without a turn, the host's own close, which holds on every path.
+   */
+  close(scope: Scope, how?: { by: "user" }): Promise<SessionView>;
+  /** Takes back the owner's own closing that stands (S-4, his Undo, §10.10); a turn's closing stands until its turn leaves the path. Owner's presses only (C-24). */
+  reopen(scope: Scope): Promise<SessionView>;
   /** A branch (§10.10): `to` starts as `from` stood at `from.turn`. */
   fork(from: Scope & { turn: string }, to: Scope): Promise<SessionView>;
   /** Compacts it at the start of its next turn, on the user's word (§11). */

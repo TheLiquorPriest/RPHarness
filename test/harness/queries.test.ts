@@ -40,7 +40,7 @@ test("a lore_search, a chat_read and a host world_query each leave their result 
   expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
 
   const folder = join(s.dir, "files", "chats", CHARACTER, CHAT, "sessions", "s1", "turns", "t1", "queries");
-  const lead = s.trace.of("agent_started").find((record) => record.agent.definition === "lead")?.agent;
+  const lead = s.trace.of("agent_started").find((record) => record.agent?.definition === "lead")?.agent;
   if (lead === undefined) throw new Error("The lead did not start.");
   const saved = async (call: string, tool: string) => readFile(join(folder, `lead-${lead.id}.${call}.${tool}.md`.replace(/[^A-Za-z0-9._-]/g, "_")), "utf8");
   const answered = (call: string) => s.trace.of("tool_ended").find((record) => record.event.callId === call)?.event.result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])) ?? [];

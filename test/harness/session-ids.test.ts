@@ -84,8 +84,8 @@ test("a turn with a question rule, a compaction and a writer: the judge's, the s
   // Each is let go once its run has ended, and the lead's never is.
   expect(ended.map((entry) => entry.session).sort()).toEqual([...others].sort() as string[]);
   for (const { session, records } of ended) {
-    const agent = s.trace.of("agent_started").find((record) => record.event.session === session)?.agent.id;
-    const over = s.trace.records.findIndex((record) => record.agent.id === agent && record.event.kind === "agent_ended");
+    const agent = s.trace.of("agent_started").find((record) => record.event.session === session)?.agent?.id;
+    const over = s.trace.records.findIndex((record) => record.agent?.id === agent && record.event.kind === "agent_ended");
     expect(over).toBeGreaterThanOrEqual(0);
     expect(over).toBeLessThan(records);
   }

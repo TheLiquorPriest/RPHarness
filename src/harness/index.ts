@@ -13,7 +13,7 @@ import { loadGuidance } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { Jobs } from "../jobs";
-import { sessionsApi } from "../sessions/api";
+import { closingOf, type SessionChange, sessionsApi } from "../sessions/api";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { connectionOf, template } from "./means";
@@ -66,6 +66,16 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs };
   const turns = new Map<string, Turn>();
   const answering = new Set<Promise<unknown>>();
+  // A change of a session made on the host's word, outside any agent's work, is a run of its own,
+  // numbered 1, with no agent (S-1), told to the host's trace and the chat's live view as it happens.
+  const told = (scope: Scope, change: SessionChange): void => {
+    hub.tee(env.trace, scope).event({ seq: 1, run: ids(), scope, at: env.clock.now(), event: { kind: "session", ...change } });
+  };
+  // A session that closed: what the harness keeps of it beside its file is let go, and what pi keeps for the lead's session (its prompt cache), once until it opens again.
+  const sessionClosed = (scope: Scope): void => {
+    core.sessions.drop(scope);
+    core.models.ended?.(scope.user, scope.session);
+  };
 
   return {
     async answer(req, sink, signal) {
@@ -88,24 +98,34 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     async turnLeft(scope) {
       turns.get(turnKey(scope))?.stop();
       await jobs.turnLeft(scope);
-      // The session file keeps the turn's entries, and marks it off the path: a session it closed is open again (§11).
+      // The session file keeps the turn's entries, and marks it off the path: a session it closed is open again (§11), and that is told.
       const turn = scope.turn;
       if (turn === undefined) return;
       await book.with(scope, async (file) => {
         const tip = file.log.tip(turn);
-        if (tip !== undefined) file.add({ type: "left", parent: tip, turn });
+        if (tip === undefined) return;
+        const was = closingOf(file);
+        file.add({ type: "left", parent: tip, turn });
         await file.settled();
+        if (was !== undefined && closingOf(file) === undefined) told(scope, { session: scope.session, change: "reopened", turn });
       });
     },
 
     async turnShown(scope) {
-      // The session file marks the attempt shown again; what followed the attempts it replaces follows it (§6.3).
+      // The session file marks the attempt shown again; what followed the attempts it replaces follows it (§6.3). A session one of them closed is open again, one the attempt shown closed is closed again, and that is told.
       const turn = scope.turn;
       if (turn === undefined) return;
       await book.with(scope, async (file) => {
         const tip = file.log.tip(turn);
-        if (tip !== undefined) file.add({ type: "shown", parent: tip, turn });
+        if (tip === undefined) return;
+        const was = closingOf(file);
+        file.add({ type: "shown", parent: tip, turn });
         await file.settled();
+        const now = closingOf(file);
+        if ((now === undefined) === (was === undefined)) return;
+        if (now === undefined) return told(scope, { session: scope.session, change: "reopened", turn });
+        sessionClosed(scope);
+        told(scope, { session: scope.session, change: "closed", ...(now.turn !== undefined ? { turn: now.turn } : {}), ...(now.by !== undefined ? { by: now.by } : {}) });
       });
     },
 
@@ -113,7 +133,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       files: env.files,
       now: () => env.clock.now(),
       keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).compaction.keepTurns,
-      closed: (scope) => core.sessions.drop(scope),
+      closed: sessionClosed,
+      told,
     }),
 
     rules: {

@@ -4,8 +4,8 @@
 // the turn's folder (the lead, each sub-agent, the writer, a judging call, a compaction's summary
 // call); a job's agents under the turn that started the job, or in the job's own session folder
 // when the owner started it. Each line is JSON: `{"at":…,"type":"message"|"call"|"result",…}`.
-import type { FilesPort, JsonObject, Log, Scope, TraceEvent, TraceRecord } from "../contract";
-import type { RunTrace } from "../loop/trace";
+import type { AgentRef, FilesPort, JsonObject, Log, Scope, TraceEvent } from "../contract";
+import type { AgentRecord, RunTrace } from "../loop/trace";
 import { agentFileName, TRANSCRIPTS } from "./requests";
 
 export interface TranscriptsDeps {
@@ -19,7 +19,7 @@ export interface TranscriptsDeps {
 }
 
 /** Where an agent's transcript is: `transcripts/<definition>-<handle>.jsonl`, beside its requests. */
-export function transcriptPath(folder: string, agent: TraceRecord["agent"]): string {
+export function transcriptPath(folder: string, agent: AgentRef): string {
   return `${folder}${TRANSCRIPTS}${agentFileName(agent)}.jsonl`;
 }
 
@@ -52,7 +52,7 @@ export class Transcripts {
     trace.watch((record) => this.#take(record));
   }
 
-  #take(record: TraceRecord): void {
+  #take(record: AgentRecord): void {
     const line = lineOf(record.event);
     if (line === undefined) return;
     const d = this.#d;

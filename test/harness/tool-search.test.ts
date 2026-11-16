@@ -140,7 +140,7 @@ test("the reply tools are reached only through an agent's own list: a sub-agent 
 
   expect(outcome).toMatchObject({ status: "released", reply: "Gulls wheel over the landing.", form: "tags" });
   expect(sink.text).toBe("Gulls wheel over the landing.");
-  expect(s.trace.of("released").map((record) => record.agent.definition)).toEqual(["lead"]);
+  expect(s.trace.of("released").map((record) => record.agent?.definition)).toEqual(["lead"]);
   for (const name of ["reply_release", "write_reply"]) expect(answerTo(s, "search-1")).not.toContain(name);
   expect(answerTo(s, "use-1")).toBe("There is no tool named reply_release that you can use.");
   expect(answerTo(s, "use-2")).toBe("There is no tool named write_reply that you can use.");

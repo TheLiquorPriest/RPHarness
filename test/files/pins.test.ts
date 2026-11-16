@@ -54,7 +54,7 @@ test("a note pinned for the keeper in a chat's RPE.yml and one in RPE-global.yml
     const before = s.model.requests.length;
     const { outcome } = await s.turn(request(turn, { lead: "chief" }));
     expect(outcome.status).toBe("released");
-    const started = s.trace.of("agent_started").filter((record) => record.agent.definition === "keeper");
+    const started = s.trace.of("agent_started").filter((record) => record.agent?.definition === "keeper");
     return { given: started.at(-1)?.event.given, brief: textOf(s.model.requests[before + 1]!.messages.at(-1)!) };
   };
 
@@ -85,7 +85,7 @@ test("a note pinned for the keeper in a chat's RPE.yml and one in RPE-global.yml
   const gone = "The file pinned for keeper, @global/persistent-workspace/house.md, is not there, so keeper is handed nothing for it.";
   expect(await loadGuidance(s.env.files, request("t4").scope).problems()).toContainEqual({ path: "@global/config.yml", level: "global", line: 2, message: gone });
   expect(s.logged.filter((line) => line.fields?.problem === gone).map((line) => line.fields?.agent)).toEqual(["keeper"]);
-  expect(s.trace.of("agent_ended").filter((record) => record.agent.definition === "keeper").map((record) => record.event.status)).toEqual(["done", "done", "done", "done"]);
+  expect(s.trace.of("agent_ended").filter((record) => record.agent?.definition === "keeper").map((record) => record.event.status)).toEqual(["done", "done", "done", "done"]);
 });
 
 test("the lead's pins are read at each run's start: a pin added in the middle of a scene reaches its next run, one taken out is handed no more, and one gone is logged by the run that misses it", async () => {
@@ -101,7 +101,7 @@ test("the lead's pins are read at each run's start: a pin added in the middle of
     const before = s.model.requests.length;
     const { outcome } = await s.turn(request(turn, { lead: "chief", ...(parent !== undefined ? { parent } : {}) }));
     expect(outcome.status).toBe("released");
-    const started = s.trace.of("agent_started").filter((record) => record.agent.definition === "chief");
+    const started = s.trace.of("agent_started").filter((record) => record.agent?.definition === "chief");
     return { given: started.at(-1)?.event.given ?? [], sent: s.model.requests[before]!.messages.map(textOf).join("\n") };
   };
 

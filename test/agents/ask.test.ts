@@ -55,7 +55,7 @@ test("a question comes back through delegate, marked; the answer continues the s
   ]);
   expect(lastResult(lead[2]!.messages)).toBe("gm-1 answered:\n\nAt twenty feet, and with the rail rotten, the jump fails.");
   // One agent, two stretches of work: each under the call that set it going.
-  const stretches = s.trace.records.filter((record) => record.agent.id === "gm-1" && (record.event.kind === "agent_started" || record.event.kind === "agent_ended"));
+  const stretches = s.trace.records.filter((record) => record.agent?.id === "gm-1" && (record.event.kind === "agent_started" || record.event.kind === "agent_ended"));
   expect(stretches.map((record) => [record.event.kind, record.event.kind === "agent_ended" ? record.event.status : record.parent?.call])).toEqual([
     ["agent_started", "d-1"],
     ["agent_ended", "asked"],
@@ -117,6 +117,6 @@ test("only the agent that started a sub-agent answers or continues it: another a
   const gm = s.models["gm-model"]!.requests;
   expect(gm).toHaveLength(2);
   expect(lastResult(gm[1]!.messages)).toBe("Twenty feet.");
-  const stretches = s.trace.records.filter((record) => record.agent.id === "gm-1" && record.event.kind === "agent_started");
+  const stretches = s.trace.records.filter((record) => record.agent?.id === "gm-1" && record.event.kind === "agent_started");
   expect(stretches.map((record) => record.parent?.call)).toEqual(["d-1", "m-1"]);
 });

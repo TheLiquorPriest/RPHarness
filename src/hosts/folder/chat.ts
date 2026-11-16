@@ -48,6 +48,11 @@ export function folderChat(site: Site): ChatPort {
       });
     },
 
+    async position(scope, id) {
+      const at = (await load(scope)).messages.findIndex((m) => m.id === id);
+      return at === -1 ? undefined : at;
+    },
+
     async search(scope, query) {
       const { chat, messages } = await load(scope);
       const terms = termsOf(query.text);

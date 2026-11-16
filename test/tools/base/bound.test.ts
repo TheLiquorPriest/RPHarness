@@ -24,6 +24,7 @@ function chatPort(): { chat: ChatPort; reads: HistoryRange[]; searches: ChatQuer
   const searches: ChatQuery[] = [];
   const chat: ChatPort = {
     info: (scope) => inner.info(scope),
+    position: (scope, id) => inner.position(scope, id),
     read: (scope, range) => {
       reads.push(range);
       return inner.read(scope, range);
@@ -110,6 +111,7 @@ describe("one call's bound", () => {
     };
     const webAsked: WebQuery[] = [];
     const web: WebSearchPort = {
+      enabled: async () => true,
       search: async (_scope, query) => {
         webAsked.push(query);
         return hits("https://example.test/page");

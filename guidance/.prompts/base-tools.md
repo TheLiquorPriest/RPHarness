@@ -27,9 +27,13 @@ gap_no_topic: Name the topic to look for.
 no_skill: There is no skill named {{name}}.
 suggest_target: Say what the suggestion is for - a file, a lore entry, or new lore - and name only one.
 suggested: The suggestion is with the player, who may accept it, change it or dismiss it. Nothing has changed.
-archive_hit: {{ref}} {{title}}: {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
+archive_hit: {{ref}} {{title}} ({{store}}): {{snippet}}{{#meaning}} (found by meaning){{/meaning}}
 archive_item: {{title}} ({{store}}, {{ref}})
 archive_needs: Give the words to look for, or the ref of something found to read it in full.
 no_item: There is nothing to read at {{ref}}.
 no_store: There is no store named {{name}}.{{#stores}} The stores are {{.}}.{{/stores}}
 web_hit: {{title}} - {{ref}}: {{snippet}}
+web_off: Web search is off: no web search provider is set. Nothing was searched.
+sessions_store: sessions
+sessions_line: This chat's earlier sessions: what was written, intended and ruled in earlier scenes.
+session_hit: Session {{session}}{{#turn}}, turn {{turn}}{{/turn}}, {{entry}}

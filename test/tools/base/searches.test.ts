@@ -2,8 +2,7 @@
 // host's other stores searched and read in full by a hit's ref; the web searched under the
 // player's own setting for what acts outside. The stores and the web here are invented.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import type { ApprovalsPort, StoreItem, StoresPort } from "../../../src/contract";
-import type { WebSearchPort } from "../../../src/tools/base";
+import type { ApprovalsPort, StoreItem, StoresPort, WebSearchPort } from "../../../src/contract";
 import { type Bench, bench, type Extra, LEAD, textOf, turnGate } from "./support";
 
 let b: Bench;
@@ -30,22 +29,31 @@ const STORES: StoresPort = {
 };
 
 const WEB: WebSearchPort = {
+  enabled: async () => true,
   search: async (_scope, query) => [{ ref: "https://example.org/bronze-bells", title: `Bronze bells and the sea (${query.text})`, snippet: "Bronze keeps for centuries under salt water.", how: "words" }],
 };
 
 describe("which of the two an agent can hold", () => {
-  test("a host with no web searcher lists no web_search, and one with no other stores lists no archive_search", () => {
-    const names = b.tools().map((tool) => tool.name);
-
-    expect(names).not.toContain("web_search");
-    expect(names).not.toContain("archive_search");
+  test("both are held whatever the host offers", () => {
+    for (const tools of [b.tools(), b.tools({ env: { ...b.host, stores: STORES }, web: WEB })]) {
+      const names = tools.map((tool) => tool.name);
+      expect(names).toContain("web_search");
+      expect(names).toContain("archive_search");
+    }
   });
 
-  test("once the host offers them, both are listed", () => {
-    const names = b.tools({ env: { ...b.host, stores: STORES }, web: WEB }).map((tool) => tool.name);
-
-    expect(names).toContain("web_search");
-    expect(names).toContain("archive_search");
+  test("off: the line and no search; switched on: the next call searches", async () => {
+    let on = false;
+    const asked: string[] = [];
+    const web: WebSearchPort = { enabled: async () => on, search: async (scope, query) => (asked.push(query.text), WEB.search(scope, query)) };
+    const off = await b.call("web_search", { query: "bells" }, { extra: { web } });
+    const none = await b.call("web_search", { query: "bells" }, { extra: {} });
+    on = true;
+    const searched = textOf(await b.call("web_search", { query: "bells" }, { extra: { web } }));
+    expect([off.error, none.error]).toEqual([true, true]);
+    expect(textOf(off)).toContain("Web search is off");
+    expect(asked).toEqual(["bells"]);
+    expect(searched).toContain("https://example.org/bronze-bells");
   });
 });
 

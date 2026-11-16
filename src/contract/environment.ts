@@ -38,7 +38,7 @@ export interface Environment {
   tools: ToolsPort;
   /** What `gap_check` searches besides chat and lore; none is a fine answer. */
   searchers: Searcher[];
-  /** The web searcher `web_search` goes through, once the user has set one up; without it there is no `web_search`. */
+  /** The web searcher `web_search` goes through; `web_search` is held without it too, and answers that it is off until one is on. */
   web?: WebSearchPort;
   /** Named facts of the moment that rules may test and the briefing may show. */
   facts: FactsPort;

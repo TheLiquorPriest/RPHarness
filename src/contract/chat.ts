@@ -84,6 +84,8 @@ export interface ChatPort {
   info(scope: Scope): Promise<ChatInfo>;
   /** The messages of a stretch, oldest first. A stretch past either end is cut to the chat. */
   read(scope: Scope, range: HistoryRange): Promise<ChatMessage[]>;
+  /** A message's place on the active path, by its id, from 0; undefined when the active path has no message of that id. */
+  position(scope: Scope, id: string): Promise<number | undefined>;
   /**
    * Searches the active path. Hidden messages are left out unless the chat's setting lets agents
    * read them (§4.2).

@@ -96,17 +96,16 @@ test("the hits a gap check takes from each place when the agent names no limit a
   expect(kept?.check.searched.find((place) => place.where === "chat")?.hits).toHaveLength(1);
 });
 
-test("a host with no web searcher and no other stores offers neither search; one with both offers both, and a search of the web goes through the host's searcher", async () => {
-  const bare = (open = await stage({ answers: [{ pieces: [{ text: "<reply>Nothing to look up.</reply>" }] }] }));
+test("a host with no web searcher and no other stores still offers both searches, the web's answering it is off; one with both searches the web through the host's searcher", async () => {
+  const bare = (open = await stage({ answers: [{ pieces: [{ call: "web_search", args: { query: "tide" } }] }, { pieces: [{ text: "<reply>Nothing to look up.</reply>" }] }] }));
   await bare.turn(request("t1", { lead: "lead" }));
   const offered = bare.model.requests[0]!.tools.map((tool) => tool.name);
-  expect(offered).toEqual(expect.arrayContaining(["chat_read", "chat_search", "lore_read", "lore_search", "gap_check", "skill_load", "suggest"]));
-  expect(offered).not.toContain("web_search");
-  expect(offered).not.toContain("archive_search");
+  expect(offered).toEqual(expect.arrayContaining(["chat_read", "chat_search", "lore_read", "lore_search", "gap_check", "skill_load", "suggest", "web_search", "archive_search"]));
   await bare.close();
 
   const asked: WebQuery[] = [];
   const web: WebSearchPort = {
+    enabled: async () => true,
     search: async (_scope, query): Promise<SearchHit[]> => {
       asked.push(query);
       return [{ ref: "https://example.test/storms", title: "Fixture storm table", snippet: "Gales on the fourth night.", how: "words" }];

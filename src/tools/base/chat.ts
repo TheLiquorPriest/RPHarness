@@ -3,7 +3,7 @@
 // search over the whole chat. Hidden and summarized messages come marked. One call takes at most
 // the user's `tools.perCall`: a read stops there and says which stretch it gave. A long answer is
 // clipped by what runs around every call (the user's `results.clip`), as every tool's is.
-import type { ChatMessage, ChatPort, JsonValue, Scope } from "../../contract";
+import type { ChatMessage, JsonValue } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
 import { type BaseToolsDeps, heldLimit, linesAnswer, wordsOf } from "./deps";
 
@@ -29,24 +29,6 @@ async function askedOf(given: Readonly<Record<string, JsonValue>>, length: numbe
   if (to === undefined) return { unknown: toId ?? "" };
   const stop = Math.min(to, from + most - 1);
   return { from, to, stop, cut: stop < Math.min(to, length - 1) };
-}
-
-/**
- * Finds messages' places by their ids. The port reads by position, so the active path is read from
- * its newest end, `most` messages at a time, and no further back than the oldest id asked for: an
- * id an agent names is most often a recent one.
- */
-function finder(chat: ChatPort, scope: Scope, length: number, most: number): (id: string) => Promise<number | undefined> {
-  const known = new Map<string, number>();
-  let unread = length;
-  return async (id) => {
-    while (!known.has(id) && unread > 0) {
-      const from = Math.max(0, unread - most);
-      for (const message of await chat.read(scope, { from, to: unread })) known.set(message.id, message.index);
-      unread = from;
-    }
-    return known.get(id);
-  };
 }
 
 /** A message as the answers' file lays it out: its text, or the line for a hidden one whose text agents may not read. */
@@ -80,7 +62,8 @@ export function chatRead(deps: BaseToolsDeps): OwnTool {
       const [words, info] = await Promise.all([wordsOf(deps.guidance), chat.info(ctx.scope)]);
       const { length } = info;
       if (length === 0) return answer(words("chat_empty"));
-      const asked = await askedOf(fieldsOf(args), length, most, finder(chat, ctx.scope, length, most));
+      // A message named by its id: its place asked of the host once, then one stretch read.
+      const asked = await askedOf(fieldsOf(args), length, most, (id) => chat.position(ctx.scope, id));
       if ("unknown" in asked) return answer(words("no_message", { id: asked.unknown }), true);
       const messages = await chat.read(ctx.scope, { from: asked.from, to: asked.stop + 1 });
       const first = messages[0];

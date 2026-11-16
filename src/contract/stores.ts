@@ -31,7 +31,11 @@ export interface StoreItem {
   text: string;
 }
 
-/** The host's other stores. A host without any leaves `Environment.stores` out, and `archive_search` reaches only RPH's own earlier sessions. */
+/**
+ * The host's other stores. `archive_search` is held wherever a definition lists it: it searches the
+ * chat's earlier sessions, which RPH keeps itself, and these stores beside them, so a host without
+ * any leaves `Environment.stores` out and the tool still reaches RPH's own earlier sessions.
+ */
 export interface StoresPort {
   /** The stores this chat has. */
   list(scope: Scope): Promise<StoreInfo[]>;
@@ -73,8 +77,14 @@ export interface WebQuery {
   limit?: number;
 }
 
-/** A web searcher, as a host offers one (§6.8 `web_search`: off until the user sets a provider). */
+/**
+ * A web searcher, as a host offers one (§6.8 `web_search`: off until the user sets a provider).
+ * `web_search` is held wherever a definition lists it, and asks `enabled` at each call: while it
+ * answers false, the call is told the search is off and nothing leaves the machine.
+ */
 export interface WebSearchPort {
+  /** Whether the user has a web search provider set and on, for this scope, now. */
+  enabled(scope: Scope): Promise<boolean>;
   /** Searches the web by the words given. Each hit's `ref` is the page's address. */
   search(scope: Scope, query: WebQuery): Promise<SearchHit[]>;
 }

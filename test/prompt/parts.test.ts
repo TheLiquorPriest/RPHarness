@@ -142,6 +142,8 @@ test("a tool of the player's own that ran out of time, answered too much or not 
   expect(part.line("command_exit", { tool: "tides", code: 2, said: "no such file" })).toBe("tides failed: its command ended with code 2. It said: no such file");
   expect(part.line("http_status", { tool: "tides", status: 503 })).toBe("tides failed: its address answered 503.");
   expect(part.line("secret_unset", { tool: "tides", secret: "tides-key", header: "Authorization" })).toBe("tides was not run: the secret tides-key it sends as Authorization is not set. The player sets it on the Connections page.");
+  expect(part.line("server_failed", { tool: "tides_now", server: "tides" })).toBe("tides_now was not run: its server tides could not be started or reached.");
+  expect(part.line("server_stopped", { tool: "tides_now", server: "tides" })).toBe("tides_now did not finish: its server tides stopped during the call. It is started again at the next call.");
 });
 
 test("a call a spent limit kept from starting says it did not run, apart from one stopped part-way; the two notes beside a tool's own answer say what could not be done and that the answer stands", async () => {

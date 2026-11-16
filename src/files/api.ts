@@ -62,6 +62,7 @@
 
 import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
+import type { McpRead } from "./mcp";
 
 // ---------------------------------------------------------------- where things come from
 
@@ -563,6 +564,8 @@ export interface Guidance {
   manifests(): Promise<ToolManifest[]>;
   /** Each manifest file in force, broken ones too: what the list of what runs a command or calls out shows (C3). */
   manifestFiles(): Promise<ManifestRead[]>;
+  /** His MCP servers (`<tools>/mcp.json`, every level's, a nearer server replacing a farther one of its name), broken ones too. */
+  mcpServers(): Promise<McpRead[]>;
 
   /** Every rule file, examples and broken ones included, as the Rules page lists them; a rule's command with where it stands as `switches` say (none: off). */
   rules(switches?: SwitchesPort): Promise<RuleView[]>;

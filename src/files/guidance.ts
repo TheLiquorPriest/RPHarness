@@ -10,6 +10,7 @@ import { parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import { normalized, problemAt, WrittenItems } from "./header";
 import { parseManifest } from "./manifest";
+import { type McpRead, parseMcp } from "./mcp";
 import { parsePart } from "./parts";
 import type { ReadRule, Rule } from "./rules";
 import { parseRule } from "./rules";
@@ -20,6 +21,9 @@ import { itemKey, LEVEL_ORDER, stoppedWhy, Tree, writtenKey } from "./tree";
 
 /** The name a definition's `reads:` gives the always-on rules it is named in (§5.2 part 2): `reads: [ALL-AGENTS, rules, …]`. */
 const RULES = "rules";
+
+/** His MCP servers' file in the tools folders, `<tools>/mcp.json`: not a tool's manifest. */
+const MCP = "mcp";
 
 /**
  * The parts of a stack a definition's `reads:` names that come before the definition, in §5.2's
@@ -247,7 +251,7 @@ class TreeGuidance implements Guidance {
         else if (listing === "agents") loads.push(this.#definition(name));
         else if (listing === "skills") loads.push(this.#skill(name));
         else if (listing === "examples") loads.push(this.#rule("examples", name));
-        else if (listing === "manifests") loads.push(this.#manifest(name));
+        else if (listing === "manifests") loads.push(name === MCP ? this.#mcp() : this.#manifest(name));
         else loads.push(this.#part(listing, name));
       }
     }
@@ -574,12 +578,33 @@ class TreeGuidance implements Guidance {
   }
 
   async manifests(): Promise<ToolManifest[]> {
-    const names = [...(await this.#tree.found("manifests")).keys()].sort();
+    const names = [...(await this.#tree.found("manifests")).keys()].filter((name) => name !== MCP).sort();
     return (await Promise.all(names.map((name) => this.#manifest(name)))).flatMap((found) => (found === undefined || found.off || found.item === undefined ? [] : [found.item]));
   }
 
+  /** Every level's `mcp.json`, farther first: a nearer server replaces a farther one of its name; every file's problems join the Files page's. `off: [tools/mcp]` leaves them all out. */
+  #mcp(): Promise<McpRead[]> {
+    return this.#once("mcp", async () => {
+      const [found, config] = await Promise.all([this.#tree.found("manifests"), this.#tree.config()]);
+      if (config.off.has(itemKey("manifests", MCP))) return [];
+      const servers = new Map<string, McpRead>();
+      for (const ref of found.get(MCP) ?? []) {
+        const file = await this.#tree.read(ref.path);
+        if (file === undefined) continue;
+        const read = parseMcp(file);
+        this.#problems.push(...read.problems);
+        for (const server of read.servers) servers.set(server.name, server);
+      }
+      return [...servers.values()];
+    });
+  }
+
+  mcpServers(): Promise<McpRead[]> {
+    return this.#mcp();
+  }
+
   async manifestFiles(): Promise<ManifestRead[]> {
-    const names = [...(await this.#tree.found("manifests")).keys()].sort();
+    const names = [...(await this.#tree.found("manifests")).keys()].filter((name) => name !== MCP).sort();
     const out: ManifestRead[] = [];
     for (const found of await Promise.all(names.map((name) => this.#manifest(name)))) {
       if (found === undefined || found.off) continue;

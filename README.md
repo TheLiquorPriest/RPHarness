@@ -22,8 +22,13 @@ What it has:
 - **The prompt map:** any part of the assembled prompt read by name, from the first turn.
 - **Approvals at the gate,** switches for anything that runs a command or calls out, and every limit a setting.
 - **A scripted-model rig and a kit** any host must pass (`src/testing/`).
+- **The owner's own tools and commands,** each doing nothing until it is switched on from the host's server, and waiting again once what it runs changes; `Harness.external.list` names every one with where it stands:
+  - **Command tools:** `.tools/<name>.json` names a command line; a call sends the arguments as JSON on its stdin, and the JSON it prints is the result.
+  - **HTTP tools:** `.tools/<name>.json` names an address; a call posts the arguments as JSON there, with headers whose values are secrets kept apart from the files, and the JSON answered is the result.
+  - **MCP servers:** `.tools/mcp.json` names each server, started by a command or reached at an address; its tools are found by `tool_search` and called with a timeout.
+  - **Rule commands:** a rule's `command:` is asked yes or no at the moment its `at:` names.
 
-What it does not have yet: tools that run a command or call an address (command tools, HTTP tools, MCP servers) and hooks.
+What it does not have yet: hooks.
 
 ## Layout
 

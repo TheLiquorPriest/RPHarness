@@ -69,7 +69,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   // Each chat's index of its sessions, brought up to date whenever a session's file changes, so the Sessions page lists without reading them.
   const listing = new SessionListing(env.store, env.log);
   const book = new SessionBook({ files: env.files, log: env.log, ids, now: () => env.clock.now(), changed: (file) => listing.keep(file.scope, viewOf(file, env.clock.now()), file.log.leftTurns()) });
-  const external = new External({ files: env.files, switches: env.switches, secret: (user, name) => layer.toolSecret(user, name) });
+  const external = new External({ files: env.files, switches: env.switches, secret: (user, name) => layer.toolSecret(user, name), log: env.log });
   const jobs = new Jobs({ env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, book, external });
   const core: TurnCore = { env, ids, models: options.models ?? layer, connections: layer.api, hub, usage, sessions: new Sessions(), book, jobs, external };
   const turns = new Map<string, Turn>();
@@ -225,6 +225,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     async close() {
       for (const turn of turns.values()) turn.stop();
       await Promise.allSettled([...answering, jobs.close()]);
+      await external.close();
       await usage.settled();
       await book.settled();
       await env.trace.flush();

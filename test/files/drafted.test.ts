@@ -18,8 +18,8 @@ beforeAll(async () => {
 afterAll(() => b.close());
 
 describe("the drafted guidance", () => {
-  test("every file of every kind loads, and none is reported broken", async () => {
-    expect(await g.problems()).toEqual([]);
+  test("every file of every kind loads, and the one problem is the Author's `reads:` AGENTS, which no file has yet", async () => {
+    expect(await g.problems()).toEqual([expect.objectContaining({ path: "@shipped/.agents/author.md", line: 7, message: expect.stringContaining("`reads:` names AGENTS") })]);
   });
 
   test("every agent definition, with its header as written", async () => {

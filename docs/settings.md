@@ -16,16 +16,16 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
-| `limits.turn.calls` | whole ≥ 1 | 40 | all | **Calls in a turn.** Model calls all the agents of one turn may make between them. |
+| `limits.turn.calls` | whole ≥ 1 | no limit | all | **Calls in a turn.** Model calls all the agents of one turn may make between them. |
 | `limits.turn.tokensIn` | whole ≥ 1 | no limit | all | **Tokens sent in a turn.** Tokens sent to models across all the agents of one turn. |
 | `limits.turn.tokensOut` | whole ≥ 1 | no limit | all | **Tokens written in a turn.** Tokens models write across all the agents of one turn. |
 | `limits.turn.time` | whole ≥ 1 | no limit | all | **Time for a turn.** Seconds one turn may take, all its agents' work included. |
 | `limits.turn.toolRounds` | whole ≥ 1 | no limit | all | **Tool rounds in a turn.** Answers that call tools, across all the agents of one turn; past it the turn's work ends at this limit. |
 | `limits.turn.depth` | whole ≥ 0 | 2 | all | **Sub-agent depth.** How deep sub-agents may go: at 1 only the lead starts them, at 2 they may start their own, at 0 none is started. |
-| `limits.turn.agents` | whole ≥ 0 | 24 | all | **Sub-agents in a turn.** Sub-agents one turn may start in all. |
+| `limits.turn.agents` | whole ≥ 0 | no limit | all | **Sub-agents in a turn.** Sub-agents one turn may start in all. |
 | `limits.turn.agentsAtOnce` | whole ≥ 1 | 3 | all | **Sub-agents at once.** Sub-agents of one run at work at the same time; one more waits for a place, first come first served. |
 | `limits.toolsAtOnce` | whole ≥ 1 | 4 | all | **Tool calls at once.** An answer's tool calls that run at the same time, for an agent whose definition sets none of its own; one more waits for a place. |
-| `limits.repeats` | whole ≥ 2 | 3 | all | **Same call in a row.** The same tool call with the same arguments this many times in a row, with nothing written by any agent between, ends that agent's work at this limit. |
+| `limits.repeats` | whole ≥ 2 | 10 | all | **Same call in a row.** The same tool call with the same arguments this many times in a row, with nothing written by any agent between, ends that agent's work at this limit. |
 | `limits.cachedWeight` | number ≥ 0, ≤ 1 | 0.1 | all | **Weight of a cached token.** What a token read again from a provider's cache counts for against every limit on tokens sent, from 0 to 1: an agent's, a turn's, a job's and a day's. |
 | `limits.day.tokens` | whole ≥ 1 | no limit | all | **Tokens in a day.** Tokens, sent and written, that all your agents may spend over any 24 hours, turns and jobs alike; past it no call is made. |
 | `limits.answerFloor` | whole ≥ 1 | 256 | all | **Least room for an answer.** Tokens an answer must have left at least, across every limit on tokens written; with less, no call is made and the work ends at the limit. |
@@ -42,14 +42,14 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 |---|---|---|---|---|
 | `jobs.atOnce` | whole ≥ 1 | 2 | all | **Jobs at once.** Jobs that run at the same time, across all your chats; a job started past it waits for a place. |
 | `jobs.perDay` | whole ≥ 1 | no limit | all | **Jobs in a day.** Jobs that may be started in a day. |
-| `jobs.perRun` | whole ≥ 0 | 6 | all | **Jobs one run may start.** Jobs the agents of one run, a turn's or a job's, may start; 0 starts none. |
-| `jobs.tokensPerDay` | whole ≥ 1 | 12000000 | all | **Job tokens in a day.** Tokens, sent and written, that all your jobs may spend in a day; past it no job starts, and a running job stops at its next call. |
+| `jobs.perRun` | whole ≥ 0 | no limit | all | **Jobs one run may start.** Jobs the agents of one run, a turn's or a job's, may start; 0 starts none. |
+| `jobs.tokensPerDay` | whole ≥ 1 | no limit | all | **Job tokens in a day.** Tokens, sent and written, that all your jobs may spend in a day; past it no job starts, and a running job stops at its next call. |
 | `jobs.connections.<connection>.atOnce` | whole ≥ 1 | no limit of its own | all | **Jobs at once on a connection.** Jobs on this connection that run at the same time. |
 | `jobs.connections.<connection>.perDay` | whole ≥ 1 | no limit of its own | all | **Jobs in a day on a connection.** Jobs on this connection that may be started in a day. |
-| `jobs.run.calls` | whole ≥ 1 | 60 | all | **Calls in a job's run.** Model calls all the agents of one job's run may make between them. |
-| `jobs.run.tokensIn` | whole ≥ 1 | 600000 | all | **Tokens sent in a job's run.** Tokens sent to models across all the agents of one job's run. |
-| `jobs.run.tokensOut` | whole ≥ 1 | 60000 | all | **Tokens written in a job's run.** Tokens models write across all the agents of one job's run. |
-| `jobs.run.time` | whole ≥ 1 | 900 | all | **Time for a job's run.** Seconds one job's run may take. |
+| `jobs.run.calls` | whole ≥ 1 | no limit | all | **Calls in a job's run.** Model calls all the agents of one job's run may make between them. |
+| `jobs.run.tokensIn` | whole ≥ 1 | no limit | all | **Tokens sent in a job's run.** Tokens sent to models across all the agents of one job's run. |
+| `jobs.run.tokensOut` | whole ≥ 1 | no limit | all | **Tokens written in a job's run.** Tokens models write across all the agents of one job's run. |
+| `jobs.run.time` | whole ≥ 1 | no limit | all | **Time for a job's run.** Seconds one job's run may take. |
 | `jobs.run.agents` | whole ≥ 0 | no limit | all | **Sub-agents in a job's run.** Sub-agents the agents of one job's run may start in all; 0 starts none. |
 | `jobs.keepDays` | whole ≥ 1 | 90 | all | **Days a job is kept.** Days the record of a job is kept; the older ones are removed when the next job starts. |
 

@@ -63,7 +63,6 @@ given:
   - prompt:*
   - session:carry
   - briefing
-limits: { toolRounds: 24 }
 ---
 You are the lead of this roleplay ...
 ```

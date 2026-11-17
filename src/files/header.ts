@@ -96,6 +96,24 @@ export function fieldLine(lines: readonly string[], name: string, firstLine = 2)
 }
 
 /**
+ * The lines of a top-level field's block (the indented lines under `stack:`), set back to the margin
+ * by the indent of its first key, with the file line the first of them is on and the field's own
+ * line, so `fieldLine` and `WrittenItems` find the keys under it as they find a top-level one. A field
+ * whose value is written on its own line (`stack: { off: [WORLD] }`) has no lines under it. Undefined
+ * where no line starts with the field.
+ */
+export function blockOf(lines: readonly string[], name: string, firstLine = 2): { lines: string[]; firstLine: number; field: number } | undefined {
+  const starts = new RegExp(`^${literal(name)}[ \\t]*:`);
+  const row = lines.findIndex((line) => starts.test(line));
+  if (row === -1) return undefined;
+  let end = row + 1;
+  while (end < lines.length && !/^(?:[^\s#-]|-\S)/.test(lines[end] ?? "")) end++;
+  const inner = lines.slice(row + 1, end);
+  const indent = /^[ \t]*/.exec(inner.find((line) => line.trim() !== "" && !/^\s*#/.test(line)) ?? "")?.[0] ?? "";
+  return { lines: inner.map((line) => (line.startsWith(indent) ? line.slice(indent.length) : line)), firstLine: row + 1 + firstLine, field: row + firstLine };
+}
+
+/**
  * Where the items of a top-level field's value are written, found by their text in the order YAML
  * reads them: each search goes on from where the last one found its text, so a name written twice is
  * found at each place in turn, in a block (`- STYLE` lines, `gm:` lines below the field) or a flow

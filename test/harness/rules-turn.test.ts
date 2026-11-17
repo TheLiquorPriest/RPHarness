@@ -51,7 +51,7 @@ test("TURN.md switched off between two calls of the lead: history-leaving does n
     answers: [
       READ,
       async () => {
-        await writeFile(join(s!.dir, "files", CHAT_DIR, "config.yml"), "off: [TURN]\n");
+        await writeFile(join(s!.dir, "files", CHAT_DIR, "config.yml"), "stack: { off: [TURN] }\n");
         return REPLY;
       },
     ],
@@ -134,7 +134,7 @@ test("an edited instruction file reaches the next briefing in a real turn", asyn
 
 test("SWIPE.md is in a swipe's briefing and DELETE.md in the briefing after a delete", async () => {
   const s = (open = await stage({
-    config: "added:\n  swipe: [SWIPE]\n  delete: [DELETE]\n",
+    config: "stack:\n  added:\n    swipe: [SWIPE]\n    delete: [DELETE]\n",
     files: { ".agents/lead.md": LEAD, "SWIPE.md": "Fixture swipe: play the moment another way.\n", "DELETE.md": "Fixture delete: take the new message on its own terms.\n" },
     answers: [REPLY, REPLY, REPLY],
   }));

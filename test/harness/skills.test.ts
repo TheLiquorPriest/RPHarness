@@ -65,7 +65,7 @@ test("the skills in force are listed by name and description in the lead's openi
 });
 
 test("a skill switched off is listed for no agent", async () => {
-  const s = (open = await stage({ files: FILES, config: "off:\n  - skills/fixture-tides\n", answers: ANSWERS }));
+  const s = (open = await stage({ files: FILES, config: "stack:\n  off:\n    - skills/fixture-tides\n", answers: ANSWERS }));
 
   await s.turn(request("t1", { lead: "chief" }));
 
@@ -83,7 +83,7 @@ test("a skill switched off in the middle of a session: the next briefing says th
   expect(opening).toContain("fixture-tides");
   expect(textOf(s.model.requests[0]!.messages.at(-1)!)).not.toContain("no longer stands");
 
-  await Bun.write(`${s.dir}/files/config.yml`, "off:\n  - skills/fixture-tides\n");
+  await Bun.write(`${s.dir}/files/config.yml`, "stack:\n  off:\n    - skills/fixture-tides\n");
   await s.turn(request("t2", { lead: "chief", parent: "t1" }));
 
   // The opening block holds still for the session; the briefing carries the change.

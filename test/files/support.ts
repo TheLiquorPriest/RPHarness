@@ -84,7 +84,7 @@ export function draftedFile(path: string): Promise<string> {
 }
 
 /** The table of files added for a turn, as RPE ships it (§5.2 part 7). */
-export const ADDED = "added:\n  swipe: [SWIPE]\n  regenerate: [SWIPE]\n  delete: [DELETE]\n";
+export const ADDED = "stack:\n  added:\n    swipe: [SWIPE]\n    regenerate: [SWIPE]\n    delete: [DELETE]\n";
 
 /** The facts the plan names (§5.4), as an invented host declares them. */
 export const PLAN_FACTS: FactDef[] = [

@@ -31,18 +31,19 @@ in the turn's own folders (`queries/`, `scratch/`, `output/`, `cache/` under the
 
 ## Config (`config.yml`)
 
-YAML. Besides the settings ([settings.md](settings.md)), five keys:
+YAML. Besides the settings ([settings.md](settings.md)), five keys under `stack`, each read at every
+level (`stack.off: [WORLD]` is `stack:\n  off: [WORLD]`):
 
-- `off:` names switched off, at every level: `off: [rules/perceptions-owed, TURN, hooks/sourced-writes, tools/mcp]`.
+- `stack.off` names switched off, at every level: `stack: { off: [rules/perceptions-owed, TURN, hooks/sourced-writes, tools/mcp] }`.
   An instruction file by its name; anything else as `<kind>/<name>`.
-- `layered:` instruction files read at every level that has one, farther first, instead of the nearest
-  alone: `layered: [AGENTS]`.
-- `added:` the instruction files a kind of turn adds to the briefing: `added: { swipe: [SWIPE], delete: [DELETE] }`.
-- `instructions:` files added to the stack of every agent that reads instruction files
-  (`instructions: [STYLE, house/canon.md]`), or per agent (`instructions: { gm: [house/rules.md] }`).
+- `stack.layered` instruction files read at every level that has one, farther first, instead of the nearest
+  alone: `stack: { layered: [AGENTS] }`.
+- `stack.added` the instruction files a kind of turn adds to the briefing: `stack: { added: { swipe: [SWIPE], delete: [DELETE] } }`.
+- `stack.instructions` files added to the stack of every agent that reads instruction files
+  (`stack: { instructions: [STYLE, house/canon.md] }`), or per agent (`stack: { instructions: { gm: [house/rules.md] } }`).
   An entry is an instruction file's name, or a path or glob in the agents' view.
-- `pins:` files handed whole to an agent at the start of each of its runs:
-  `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`.
+- `stack.pins` files handed whole to an agent at the start of each of its runs:
+  `stack: { pins: [{ file: persistent-workspace/plan.md, agent: keeper }] }`.
 
 `turn.lead` (a setting) names the definition that leads the chat's turns.
 
@@ -190,7 +191,7 @@ before-tool:
   `session-close`, `before-compaction`, `job-start`, `job-end`.
 - Each hook has a `name`, a `command` exactly as you would type it, and a `timeout` in seconds
   (else `hooks.timeoutSeconds`). The hooks of a moment run one after another, the farthest level's first and
-  each file in its order; a nearer hook replaces a farther one of its name; `off: [hooks/<name>]`
+  each file in its order; a nearer hook replaces a farther one of its name; `hooks/<name>` in `stack.off`
   switches one off. A hook runs only once the host has switched it on.
 - The input always holds `hook` and `event`, and where the moment has them `scope` and `agent`;
   `before-tool` adds `tool`, `callId`, `args`, and `after-tool` the `result`.

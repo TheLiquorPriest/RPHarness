@@ -4,9 +4,9 @@
 
 import type { FileText, FilesPort, FindStopped, GuidanceKind, Layer, LayerLevel, Scope, UserScope } from "../contract/index";
 import type { Problem } from "./api";
-import { CONFIG_KEYS } from "./api";
+import { CONFIG_KEYS, CONFIG_SECTION } from "./api";
 import type { At } from "./header";
-import { fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, WrittenItems } from "./header";
+import { blockOf, fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, WrittenItems } from "./header";
 
 /** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`; `manifests`: the owner's tools' manifests, `<tools>/<name>.json`). */
 export type Listing = "instructions" | "agents" | "rules" | "examples" | "skills" | "prompts" | "tools" | "manifests";
@@ -18,7 +18,7 @@ export interface FileRef {
   level: LayerLevel;
 }
 
-/** One level's `instructions:` list, or one agent's list in a level's mapping, and where it is written. */
+/** One level's `stack.instructions` list, or one agent's list in a level's mapping, and where it is written. */
 export interface InstructionsList {
   /** The agent it is for; absent: every agent whose definition reads at least one instruction file. */
   agent?: string;
@@ -31,7 +31,7 @@ export interface InstructionsList {
   line?: number;
 }
 
-/** A file pinned for an agent (`pins:`, R-174), and where the pin is written. */
+/** A file pinned for an agent (`stack.pins`, R-174), and where the pin is written. */
 export interface Pin {
   /** Its path in the chat's view (`persistent-workspace/plan.md`, `@global/persistent-workspace/x.md`). */
   file: string;
@@ -50,7 +50,7 @@ export interface Config {
   layered: Set<string>;
   /** For each situation, the instruction files the nearest config that names it adds to the briefing. */
   added: Map<string, string[]>;
-  /** What each level's `instructions:` adds to stacks, the farthest level's first. */
+  /** What each level's `stack.instructions` adds to stacks, the farthest level's first. */
   instructions: InstructionsList[];
   /** Every level's pins, the farthest level's first, each in its list's order. */
   pins: Pin[];
@@ -67,7 +67,7 @@ const KINDS: readonly GuidanceKind[] = ["agents", "skills", "rules", "hooks", "p
 /** The levels' order, farthest first. */
 export const LEVEL_ORDER: readonly LayerLevel[] = ["shipped", "global", "character", "chat"];
 
-/** The name `off:` lists and stack entries know an item by: an instruction file's own name, anything else's kind and name (`rules/consent`); a tool's manifest goes by its tool's (`tools/<name>`). */
+/** The name `stack.off` lists and stack entries know an item by: an instruction file's own name, anything else's kind and name (`rules/consent`); a tool's manifest goes by its tool's (`tools/<name>`). */
 export function itemKey(kind: Listing, name: string): string {
   if (kind === "instructions") return name;
   return `${kind === "examples" ? "rules/examples" : kind === "manifests" ? "tools" : kind}/${name}`;
@@ -83,7 +83,7 @@ function kindOfFolder(name: string, layers: readonly Layer[]): GuidanceKind | un
   return undefined;
 }
 
-/** An item as `itemKey` names it, from an `off:` entry or a `needs:` name however the Files page or the user wrote it: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
+/** An item as `itemKey` names it, from a `stack.off` entry or a `needs:` name however the Files page or the user wrote it: with a mount, a level's own folder name, `.md` or `/SKILL.md`. */
 export function writtenKey(entry: string, layers: readonly Layer[]): string {
   let s = entry.trim().replace(/^(?:\.\/|\/)+/, "");
   const mounted = layers.find((l) => l.mount !== "" && s.startsWith(l.mount));
@@ -226,7 +226,7 @@ export class Tree {
     }
   }
 
-  /** What the levels' config files switch off, add, add to stacks and pin. */
+  /** What the levels' config files switch off, add, add to stacks and pin (`stack.*`). */
   config(): Promise<Config> {
     this.#config ??= this.#readConfig();
     return this.#config;
@@ -250,39 +250,49 @@ export class Tree {
         this.problems.push(problemAt(at, 1, "The config must be `name: value` lines, one setting to a line."));
         continue;
       }
-      const off = parsed.value[CONFIG_KEYS.off];
+      const stack = parsed.value[CONFIG_SECTION];
+      if (stack === undefined || stack === null) continue;
+      // The keys under `stack:` are found on their own lines where it is written as a block; where it is written on its own line, there.
+      const block = blockOf(lines, CONFIG_SECTION, 1);
+      const fieldAt = (key: string): number | undefined => (block === undefined ? undefined : (fieldLine(block.lines, key, block.firstLine) ?? block.field));
+      const itemsOf = (key: string): WrittenItems => (block !== undefined && fieldLine(block.lines, key, block.firstLine) !== undefined ? new WrittenItems(block.lines, key, block.firstLine) : new WrittenItems(lines, CONFIG_SECTION, 1));
+      if (!isMapping(stack)) {
+        this.problems.push(problemAt(at, block?.field, "`stack` holds `off`, `layered`, `added`, `instructions` and `pins` as a mapping of keys: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
+        continue;
+      }
+      const off = stack[CONFIG_KEYS.off];
       const offNames = nameList(off);
-      if (offNames === undefined) this.problems.push(problemAt(at, fieldLine(lines, CONFIG_KEYS.off, 1), "`off:` is a list of the files switched off: `off: [rules/perceptions-owed, WORLD]`."));
+      if (offNames === undefined) this.problems.push(problemAt(at, fieldAt(CONFIG_KEYS.off), "`stack.off` is a list of the files switched off: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
       else for (const name of offNames) config.off.add(writtenKey(name, layers));
 
-      const layered = nameList(parsed.value[CONFIG_KEYS.layered]);
-      if (layered === undefined) this.problems.push(problemAt(at, fieldLine(lines, CONFIG_KEYS.layered, 1), "`layered:` is a list of instruction files read at every level that has one, farther first: `layered: [AGENTS]`."));
+      const layered = nameList(stack[CONFIG_KEYS.layered]);
+      if (layered === undefined) this.problems.push(problemAt(at, fieldAt(CONFIG_KEYS.layered), "`stack.layered` is a list of instruction files read at every level that has one, farther first: `stack: { layered: [AGENTS] }`."));
       else for (const name of layered) config.layered.add(writtenKey(name, layers));
 
-      const instructions = parsed.value[CONFIG_KEYS.instructions];
+      const instructions = stack[CONFIG_KEYS.instructions];
       if (instructions !== undefined && instructions !== null) {
-        const written = new WrittenItems(lines, CONFIG_KEYS.instructions, 1);
+        const written = itemsOf(CONFIG_KEYS.instructions);
         const line = written.field;
         const listOf = (entries: string[], listLine: number | undefined, agent?: string): InstructionsList => ({ ...(agent !== undefined ? { agent } : {}), entries, lines: entries.map((entry) => written.find(entry)), at, ...(listLine !== undefined ? { line: listLine } : {}) });
         if (isMapping(instructions)) {
           for (const [agent, value] of Object.entries(instructions)) {
             const agentLine = written.find(agent, true) ?? line;
             const entries = nameList(value);
-            if (entries === undefined) this.problems.push(problemAt(at, agentLine, `\`instructions:\` gives \`${agent}\` something other than a list of files: \`${agent}: [STYLE, house/canon.md]\`.`));
+            if (entries === undefined) this.problems.push(problemAt(at, agentLine, `\`stack.instructions\` gives \`${agent}\` something other than a list of files: \`${agent}: [STYLE, house/canon.md]\`.`));
             else config.instructions.push(listOf(entries, agentLine, agent));
           }
         } else {
           const entries = nameList(instructions);
-          if (entries === undefined) this.problems.push(problemAt(at, line, "`instructions:` is a list of files added to the stack of every agent that reads instruction files, `instructions: [STYLE, house/canon.md]`, or such a list for each agent by name: `instructions: { gm: [house/rules.md] }`."));
+          if (entries === undefined) this.problems.push(problemAt(at, line, "`stack.instructions` is a list of files added to the stack of every agent that reads instruction files, `stack: { instructions: [STYLE, house/canon.md] }`, or such a list for each agent by name: `stack: { instructions: { gm: [house/rules.md] } }`."));
           else config.instructions.push(listOf(entries, line));
         }
       }
 
-      const pins = parsed.value[CONFIG_KEYS.pins];
+      const pins = stack[CONFIG_KEYS.pins];
       if (pins !== undefined && pins !== null) {
-        const written = new WrittenItems(lines, CONFIG_KEYS.pins, 1);
+        const written = itemsOf(CONFIG_KEYS.pins);
         const line = written.field;
-        if (!Array.isArray(pins)) this.problems.push(problemAt(at, line, "`pins:` is a list of files, each pinned for an agent: `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`."));
+        if (!Array.isArray(pins)) this.problems.push(problemAt(at, line, "`stack.pins` is a list of files, each pinned for an agent: `stack: { pins: [{ file: persistent-workspace/plan.md, agent: keeper }] }`."));
         else {
           for (const [i, pin] of pins.entries()) {
             // A pin is written where the first of its values is; the search goes on past them all.
@@ -294,22 +304,22 @@ export class Tree {
             pinLine ??= line;
             const file = isMapping(pin) && typeof pin.file === "string" ? pin.file.trim() : "";
             const agent = isMapping(pin) && typeof pin.agent === "string" ? pin.agent.trim() : "";
-            if (file === "" || agent === "") this.problems.push(problemAt(at, pinLine, `Pin ${i + 1} of \`pins:\` needs a \`file\` and an \`agent\`, as in \`{ file: persistent-workspace/plan.md, agent: keeper }\`, so it is left out.`));
+            if (file === "" || agent === "") this.problems.push(problemAt(at, pinLine, `Pin ${i + 1} of \`stack.pins\` needs a \`file\` and an \`agent\`, as in \`{ file: persistent-workspace/plan.md, agent: keeper }\`, so it is left out.`));
             else config.pins.push({ file, agent, at, ...(pinLine !== undefined ? { line: pinLine } : {}) });
           }
         }
       }
 
-      const added = parsed.value[CONFIG_KEYS.added];
+      const added = stack[CONFIG_KEYS.added];
       if (added === undefined || added === null) continue;
-      const line = fieldLine(lines, CONFIG_KEYS.added, 1);
+      const line = fieldAt(CONFIG_KEYS.added);
       if (!isMapping(added)) {
-        this.problems.push(problemAt(at, line, "`added:` names, for each kind of turn, the instruction files added to its briefing: `swipe: [SWIPE]`."));
+        this.problems.push(problemAt(at, line, "`stack.added` names, for each kind of turn, the instruction files added to its briefing: `swipe: [SWIPE]`."));
         continue;
       }
       for (const [situation, value] of Object.entries(added)) {
         const names = nameList(value);
-        if (names === undefined) this.problems.push(problemAt(at, line, `\`added:\` gives \`${situation}\` something other than the names of instruction files: \`${situation}: [SWIPE]\`.`));
+        if (names === undefined) this.problems.push(problemAt(at, line, `\`stack.added\` gives \`${situation}\` something other than the names of instruction files: \`${situation}: [SWIPE]\`.`));
         else config.added.set(situation, names.map((n) => n.replace(/\.md$/, "")));
       }
     }

@@ -18,7 +18,7 @@ export interface AttachmentRef {
   ref: string;
   /**
    * Where it was named: the agent's definition (`given:`); the lead's `delegate` call; a file the
-   * user pinned for the agent (`pins:`, his setting, not the definition's, R-174); its definition's
+   * user pinned for the agent (`stack.pins`, his setting, not the definition's, R-174); its definition's
    * `opening:`, an item resolved once when the session opens and kept in its opening block (§8.2,
    * R-163), asked again only when that block is made afresh; or `again`: a definition's item asked
    * again when `agent_message` continues the agent (C-T11), so the host gives its text as it now stands.

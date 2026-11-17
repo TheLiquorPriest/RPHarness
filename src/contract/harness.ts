@@ -369,7 +369,7 @@ export interface RulesApi {
   /** Every rule of the chat's stack, in force or not. */
   list(scope: Scope): Promise<RuleView[]>;
   /**
-   * Switches a rule on or off at the chat's or the global level (C-10, Appendix A): the `off:` list of
+   * Switches a rule on or off at the chat's or the global level (C-10, Appendix A): the `stack.off` list of
    * that level's config file, written through the file port on the owner's word (his own press: it
    * is on `OWNER_ONLY`). A rule switched off at a farther level stays off whatever a nearer one says.
    * The rule as it then stands; undefined when no rule has the name.
@@ -401,7 +401,7 @@ export interface PartRead {
   text: string;
   path: string;
   level: LayerLevel;
-  /** In force: not switched off (`off:`), and it reads whole. */
+  /** In force: not switched off (`stack.off`), and it reads whole. */
   inForce: boolean;
   /** Why not, where it is not. */
   why?: "off" | "broken";
@@ -629,7 +629,7 @@ export type StackPartKind = "definition" | "instruction" | "rule" | "contract" |
  */
 export interface StackPart {
   kind: StackPartKind;
-  /** Its name as `off:` lists name it: `agents/<name>`, an instruction file's name (`TURN`), `rules/<name>`, `prompts/reply-contract`, `tools/<family or tool>`, `prompts/skills`; for `given`, the item as `opening:` writes it. */
+  /** Its name as `stack.off` lists name it: `agents/<name>`, an instruction file's name (`TURN`), `rules/<name>`, `prompts/reply-contract`, `tools/<family or tool>`, `prompts/skills`; for `given`, the item as `opening:` writes it. */
   part: string;
   /** The file it came from; for a part left out as `missing`, where it would be; for `given`, the definition that names it. */
   path: string;

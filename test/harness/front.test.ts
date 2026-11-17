@@ -53,7 +53,7 @@ test("a reply contract edited mid-session: the next briefing gives its new text 
 
 test("a tool guide switched off is named off", async () => {
   const { first, second } = await twoTurns({ ".agents/lead.md": lead("you run the turn."), ".tools/files.md": "---\ndescription: Fixture guide to the file tools.\n---\nFixture files guide.\n" }, async (dir) => {
-    await writeFile(join(dir, CHAT_DIR, "config.yml"), "off: [tools/files]\n");
+    await writeFile(join(dir, CHAT_DIR, "config.yml"), "stack: { off: [tools/files] }\n");
   });
 
   expect(textOf(first.messages[0]!)).toContain("Fixture files guide.");

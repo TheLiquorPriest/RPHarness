@@ -92,9 +92,9 @@ describe("the stack", () => {
   test("the definition appears once, fifth", async () => {
     b = await bench({
       global: {
-        // Its parts named out of order, and its own file named again by `instructions:`.
+        // Its parts named out of order, and its own file named again by `stack.instructions`.
         ".agents/scribe.md": "---\ndescription: Fixture scribe.\nreads: [TURN, WORLD, AGENTS, rules, ALL-AGENTS]\n---\nFixture scribe: keep the log.\n",
-        "config.yml": "instructions: ['@global/.agents/scribe.md']\n",
+        "config.yml": "stack: { instructions: ['@global/.agents/scribe.md'] }\n",
         "ALL-AGENTS.md": "Everyone keeps to the log.\n",
         ".rules/places.md": "---\ndescription: Places.\nagents: all\n---\nSay where each scene takes place.\n",
         "AGENTS.md": "Wren never lies outright.\n",
@@ -134,9 +134,9 @@ describe("the stack", () => {
 });
 
 describe("a layered instruction file", () => {
-  test("is read at every level that has one, farther first, each its own part; `off:` takes all of them; a name not listed is nearest-wins", async () => {
+  test("is read at every level that has one, farther first, each its own part; `stack.off` takes all of them; a name not listed is nearest-wins", async () => {
     const tree = await bench({
-      global: { "config.yml": "layered: [AGENTS]\n", ".agents/lead.md": "---\ndescription: Leads.\nreads: [AGENTS, WORLD]\n---\nLead.\n" },
+      global: { "config.yml": "stack: { layered: [AGENTS] }\n", ".agents/lead.md": "---\ndescription: Leads.\nreads: [AGENTS, WORLD]\n---\nLead.\n" },
       character: { "AGENTS.md": "Wren never lies outright.\n", "WORLD.md": "# World\n\nThe character's world.\n" },
       chat: { "AGENTS.md": "In this chat, the lamp is failing.\n", "WORLD.md": "# World\n\nThe chat's world.\n" },
     });
@@ -155,7 +155,7 @@ describe("a layered instruction file", () => {
     await tree.put("chat", "AGENTS.md", "In this chat, the lamp is out.\n");
     expect(changes(opened, front(await loadGuidance(tree.host.files, scope).stack("lead")))).toEqual([{ part: "AGENTS", change: "changed", path: "AGENTS.md", level: "chat", text: "In this chat, the lamp is out.\n" }]);
 
-    await tree.put("chat", "config.yml", "off: [AGENTS.md]\n");
+    await tree.put("chat", "config.yml", "stack: { off: [AGENTS.md] }\n");
     expect(await read()).toEqual([
       ["AGENTS", "character", "off"],
       ["AGENTS", "chat", "off"],
@@ -167,9 +167,9 @@ describe("a layered instruction file", () => {
     await tree.drop("character", "AGENTS.md");
     expect((await read()).filter(([part]) => part === "AGENTS")).toEqual([["AGENTS", "chat", "In this chat, the lamp is out.\n"]]);
 
-    // With no `layered:` in any level's config, nothing is layered.
+    // With no `stack.layered` in any level's config, nothing is layered.
     await tree.put("character", "AGENTS.md", "Wren never lies outright.\n");
-    await tree.put("global", "config.yml", "off: []\n");
+    await tree.put("global", "config.yml", "stack: { off: [] }\n");
     expect((await read()).filter(([part]) => part === "AGENTS")).toEqual([["AGENTS", "chat", "In this chat, the lamp is out.\n"]]);
   });
 });
@@ -185,7 +185,7 @@ describe("a file changed in the middle of a session", () => {
 
     const turn = "# How a turn is run\n\nWeigh what the player wants, then answer in one call.\n";
     await b.put("chat", "TURN.md", turn);
-    await b.put("chat", "config.yml", "off: [WRITING, rules/consent]\n");
+    await b.put("chat", "config.yml", "stack: { off: [WRITING, rules/consent] }\n");
     await b.put("chat", "WORLD.md", "## Premise\n\nA storm is coming.\n");
     const found = changes(opened, front(await loadGuidance(b.host.files, scope).stack("author")));
     expect(found).toEqual([
@@ -212,7 +212,7 @@ describe("a file changed in the middle of a session", () => {
     b = await bench({ shipped: await drafted() });
     const opened = snapshot("author", front(await loadGuidance(b.host.files, scope).stack("author")));
     await b.put("chat", "PRESET.md", "Map nothing.\n");
-    await b.put("chat", "config.yml", "off: [SIMULATION]\n");
+    await b.put("chat", "config.yml", "stack: { off: [SIMULATION] }\n");
     await b.put("global", ".prompts/notices.md", "---\nformat: lines\n---\nprompt_unmapped: Not mapped yet.\n");
     const g = loadGuidance(b.host.files, scope);
     expect(changesText(changes(opened, front(await g.stack("author"))), await g.part("notices"))).toBe("Map nothing.");

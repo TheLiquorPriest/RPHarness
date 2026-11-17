@@ -24,18 +24,18 @@
 //   listed and never in force.
 // - Prompt parts, `<prompts>/<name>.md`, and tool descriptions, `<tools>/<name>.md`: an optional
 //   header (any fields; `description` and `format` are read) and a body that is a template.
-// - Config, the file each level names (`Layer.config`): `off:`, `layered:`, `added:`, `instructions:` and `pins:` are read (CONFIG_KEYS).
+// - Config, the file each level names (`Layer.config`): `stack.off`, `stack.layered`, `stack.added`, `stack.instructions` and `stack.pins` are read (CONFIG_SECTION, CONFIG_KEYS).
 //
 // Levels. Files are read through the host's `FilesPort`: shipped, then global, then character, then
 // chat. A file of the same name at a nearer level replaces the farther one, of every kind, but for an
-// instruction file named in any level's `layered:`, which is read at every level that has one,
-// farther first, each its own entry of the stack. A name listed in any level's `off:` is off at
+// instruction file named in any level's `stack.layered`, which is read at every level that has one,
+// farther first, each its own entry of the stack. A name listed in any level's `stack.off` is off at
 // every level. A file that does not parse is reported by path and line, is not used, and the farther
 // file of its name is not used in its place.
 //
 // Rules (§5.4). `description:`; `agents:`, `all` or a list of definitions (it must be there: code
 // holds no default about whom a rule is for); `needs:`, names the rule is in force only while each
-// is (a rule's, an instruction file's, or `<kind>/<name>`, written as `off:` entries are); `turns:`,
+// is (a rule's, an instruction file's, or `<kind>/<name>`, written as `stack.off` entries are); `turns:`,
 // on an always-on rule, the situations it is for, which hand it over for those turns' briefings
 // instead of the opening block. At most one trigger: `condition:`, a JavaScript regular expression,
 // with `scope:` (`text`, `thinking`, `reply`, `arguments` or `result`, the last two as
@@ -184,7 +184,7 @@ export interface AgentDefinition {
   tools: string[];
   /** Families of tools it does not reach by searching (`out_of_reach:`, §6.8); a tool of one that `tools` names it still holds. */
   outOfReach: string[];
-  /** The instruction files of its stack; `rules` stands for the always-on rules it is named in. They choose the stack's parts and §5.2 orders them; a file that is none of §5.2's numbered parts goes with the `instructions:` files, in the order written here. */
+  /** The instruction files of its stack; `rules` stands for the always-on rules it is named in. They choose the stack's parts and §5.2 orders them; a file that is none of §5.2's numbered parts goes with the `stack.instructions` files, in the order written here. */
   reads: string[];
   /** What it is handed at the start of a run, by name, as written (`chat:history[scene]`). */
   given: string[];
@@ -260,7 +260,7 @@ export type PromptPart = TemplatePart | LinesPart;
 // ---------------------------------------------------------------- the instruction stack
 
 /**
- * One part of an agent's stack (§5.2). `part` names it the way `off:` lists name it: the definition
+ * One part of an agent's stack (§5.2). `part` names it the way `stack.off` lists name it: the definition
  * as `agents/<name>`, an instruction file by its name (`TURN`), a rule as `rules/<name>`. A part left
  * out has `left`, and its `path` and `level` say which file is not given, or for `missing` where it
  * would be. Its `text` is its whole text as written (the definition's body unfilled).
@@ -268,7 +268,7 @@ export type PromptPart = TemplatePart | LinesPart;
 export interface StackEntry extends StackPart {
   kind: "definition" | "instruction" | "rule";
   replaces: Replaced[];
-  /** For an instruction file named in `layered:`: this is one level's file of several; its part is told apart from the others' by its level. */
+  /** For an instruction file named in `stack.layered`: this is one level's file of several; its part is told apart from the others' by its level. */
   layered?: true;
 }
 
@@ -276,14 +276,14 @@ export interface StackEntry extends StackPart {
  * An agent's stack, in §5.2's order whatever order its `reads` names the parts in: 1 `ALL-AGENTS`;
  * 2 the always-on rules it is named in (`rules`: the shipped level's first, then global, character,
  * chat, by name within a level); 3 `AGENTS`; 4 `WORLD`, `SIMULATION`, `WRITING`; then the files the
- * levels' `instructions:` add to it, and each instruction file its `reads` names that §5.2 does not
+ * levels' `stack.instructions` add to it, and each instruction file its `reads` names that §5.2 does not
  * number, in its order; 5 its definition; 6 `TURN`, `PRESET`. Of the numbered parts only those its
- * `reads` names are there; a `layered:` instruction file is one entry per level that has it, farther
+ * `reads` names are there; a `stack.layered` instruction file is one entry per level that has it, farther
  * first; a file is given once however often it is named, and the definition only as part 5. Then
  * what the briefing is handed, when its definition is given `briefing`: the files the config's
- * `added:` table names for the situations at hand, and the always-on rules whose `turns:` name one
+ * `stack.added` table names for the situations at hand, and the always-on rules whose `turns:` name one
  * of them. Every entry its definition or a config names is here, given or left out. `problems`: those
- * of its entries' files, of the `instructions:` entries that reach it, and of the pins for its agent.
+ * of its entries' files, of the `stack.instructions` entries that reach it, and of the pins for its agent.
  */
 export interface Stack {
   agent: string;
@@ -493,13 +493,16 @@ export interface RuleRun {
 
 // ---------------------------------------------------------------- config
 
-/** The keys of a level's config file read here. Everything else in it is other code's. */
+/** The section of a level's config file read here, its keys under it (`stack.off`, `stack.layered`, …). Everything else in the file is other code's. */
+export const CONFIG_SECTION = "stack";
+
+/** The keys under `stack` (`CONFIG_SECTION`) of a level's config file. */
 export const CONFIG_KEYS = {
   /** Names switched off: `rules/perceptions-owed`, `TURN` (with or without `.md`, with a level's own folder name or a mount in front, as the Files page writes them). */
   off: "off",
-  /** Instruction files read at every level that has one, farther first, instead of the nearest alone: `layered: [AGENTS]`. None when no level's config names any. */
+  /** Instruction files read at every level that has one, farther first, instead of the nearest alone: `stack: { layered: [AGENTS] }`. None when no level's config names any. */
   layered: "layered",
-  /** Which situation adds which instruction files to the briefing: `swipe: [SWIPE]`. A nearer level's entry for a situation replaces a farther one's. */
+  /** Which situation adds which instruction files to the briefing: `stack: { added: { swipe: [SWIPE] } }`. A nearer level's entry for a situation replaces a farther one's. */
   added: "added",
   /**
    * Files added to stacks (§5.2, as OpenCode's config adds them): a list, added to the stack of every
@@ -534,7 +537,7 @@ export interface Guidance {
   /** The definition in force of that name; undefined when there is none, it is off, or it is broken (see `problems`). */
   definition(name: string): Promise<AgentDefinition | undefined>;
   /**
-   * The files pinned for an agent (`pins:`, both levels', the farther's first), as a run's start
+   * The files pinned for an agent (`stack.pins`, both levels', the farther's first), as a run's start
    * hands them: each with what keeps it from being handed now, if anything does (not there, refused,
    * unreadable), found where the run looks for it, the turn's folder included.
    */
@@ -545,7 +548,7 @@ export interface Guidance {
   /**
    * An agent's stack. With `situations` (the turn's kind and what happened since the last one:
    * `swipe`, `delete`), the briefing entries are those added for them; without, every entry the
-   * `added:` table could add, each with its situations, for the Files page.
+   * `stack.added` table could add, each with its situations, for the Files page.
    */
   stack(agent: string, options?: { situations?: readonly string[] }): Promise<Stack>;
 
@@ -557,13 +560,13 @@ export interface Guidance {
   part(name: string): Promise<PromptPart | undefined>;
   /** A tool's description in force, from the tools folders (`<tools>/<tool's name>.md`). */
   tool(name: string): Promise<PromptPart | undefined>;
-  /** The owner's own tools' manifests in force (`<tools>/<name>.json`, the nearest of each name, those `off:` names left out), by name. */
+  /** The owner's own tools' manifests in force (`<tools>/<name>.json`, the nearest of each name, those `stack.off` names left out), by name. */
   manifests(): Promise<ToolManifest[]>;
   /** Each manifest file in force, broken ones too: what the list of what runs a command or calls out shows (C3). */
   manifestFiles(): Promise<ManifestRead[]>;
   /** His MCP servers (`<tools>/mcp.json`, every level's, a nearer server replacing a farther one of its name), broken ones too. */
   mcpServers(): Promise<McpRead[]>;
-  /** His hooks in force (every level's `<hooks>/hooks.yml`, the farthest level's first, each file's in its order; a nearer hook replacing a farther one of its name, those `off:` names as `hooks/<name>` left out); what cannot be read is among `problems`. */
+  /** His hooks in force (every level's `<hooks>/hooks.yml`, the farthest level's first, each file's in its order; a nearer hook replacing a farther one of its name, those `stack.off` names as `hooks/<name>` left out); what cannot be read is among `problems`. */
   hooks(): Promise<HookEntry[]>;
   /** A prompt part's, a tool description's or a skill's file as the levels give it (`Harness.parts.read`, C17): its text, where it is, whether it is switched off, and whether it reads whole. */
   layered(kind: PartKind | "skills", name: string): Promise<{ text: string; path: string; level: LayerLevel; off: boolean; broken: boolean } | undefined>;

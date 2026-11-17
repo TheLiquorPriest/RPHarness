@@ -65,7 +65,7 @@ function withLeft(found: Found<string>): Instruction {
   return { ...found, ...(left !== undefined ? { left } : {}) };
 }
 
-/** What an `instructions:` entry adds to the stacks it reaches, and what is wrong with it. */
+/** What a `stack.instructions` entry adds to the stacks it reaches, and what is wrong with it. */
 interface Added {
   entries: StackEntry[];
   problems: Problem[];
@@ -191,7 +191,7 @@ class TreeGuidance implements Guidance {
   }
 
   /**
-   * The instruction files in force by a name: the nearest; or, for a name in `layered:`, the file of
+   * The instruction files in force by a name: the nearest; or, for a name in `stack.layered`, the file of
    * every level that has one, farther first, none replacing another. Each says why it is left out,
    * if it is. None when no level has the name.
    */
@@ -230,7 +230,7 @@ class TreeGuidance implements Guidance {
       const names = [...(await this.#tree.found("rules")).keys()].sort();
       const found = new Map<string, Found<ReadRule>>();
       for (const [name, f] of await Promise.all(names.map(async (n) => [n, await this.#rule("rules", n)] as const))) if (f !== undefined) found.set(name, f);
-      // A `needs:` name is read the way an `off:` entry is: `perceptions`, `rules/perceptions`, `TURN`, `TURN.md`.
+      // A `needs:` name is read the way a `stack.off` entry is: `perceptions`, `rules/perceptions`, `TURN`, `TURN.md`.
       const layers = await this.layers();
       const ruleNamed = (need: string): string | undefined => {
         const key = writtenKey(need, layers);
@@ -329,7 +329,7 @@ class TreeGuidance implements Guidance {
       };
       const checked = await Promise.all(
         config.pins.map(async (pin): Promise<string | undefined> => {
-          if (!agents.has(pin.agent)) return `\`pins:\` pins ${pin.file} for ${pin.agent}, and no agent definition has that name, so nobody is handed it.`;
+          if (!agents.has(pin.agent)) return `\`stack.pins\` pins ${pin.file} for ${pin.agent}, and no agent definition has that name, so nobody is handed it.`;
           try {
             const read = await there(pin.file);
             if (read.status === "read") return undefined;
@@ -406,7 +406,7 @@ class TreeGuidance implements Guidance {
   }
 
   /**
-   * What one entry of an `instructions:` list adds (`at`, its place in the list), read once for the
+   * What one entry of a `stack.instructions` list adds (`at`, its place in the list), read once for the
    * line it is written on: an instruction file by name, found as `reads:` finds one (`STYLE`,
    * `STYLE.md`); or the owner's files a path or a glob in the agents' view finds, in path order. An
    * entry that finds no file, or only agents' notes or generated files (they are not instructions,
@@ -421,13 +421,13 @@ class TreeGuidance implements Guidance {
         this.#problems.push(problem);
         return { entries, problems: [problem] };
       };
-      const notInstructions = `\`instructions:\` names ${entry}, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.`;
+      const notInstructions = `\`stack.instructions\` names ${entry}, which finds only agents' notes or generated files. Those are not instructions, so it adds nothing.`;
       if (!/[/*?[{]/.test(entry)) {
         const name = entry.replace(/\.md$/, "");
         const entries = await this.#instructionEntries(name, "opening");
         if ((await this.#instructions(name)).length > 0) return { entries, problems: [] };
         if ((await this.#tree.notYours("instructions")).has(name)) return said(notInstructions);
-        return said(`\`instructions:\` names ${entry}, and no instruction file has that name, so it adds nothing.`, entries);
+        return said(`\`stack.instructions\` names ${entry}, and no instruction file has that name, so it adds nothing.`, entries);
       }
       const path = entry.replace(/^(?:\.\/|\/)+/, "");
       const wild = path.search(/[*?[{]/);
@@ -437,7 +437,7 @@ class TreeGuidance implements Guidance {
         const entries = [await this.#fileEntry(path, file, "missing")];
         // A file the host refused or failed to read is a problem of the read's own.
         if (file !== undefined || this.#tree.problems.some((problem) => problem.path === path)) return { entries, problems: [] };
-        return said(`\`instructions:\` names ${entry}, and no file is there, so it adds nothing.`, entries);
+        return said(`\`stack.instructions\` names ${entry}, and no file is there, so it adds nothing.`, entries);
       }
       // A glob looks below the folders it names before its first wildcard: under a mount, in that level alone (`FilesPort.find`).
       const slash = path.lastIndexOf("/", wild);
@@ -447,20 +447,20 @@ class TreeGuidance implements Guidance {
         // Every file it matches: the owner's own list, not an agent's search, so no find limit cuts it.
         found = await this.#tree.files.find(this.scope, { by: "glob", ...where, limit: Number.POSITIVE_INFINITY });
       } catch (error) {
-        return said(`\`instructions:\` names ${entry}, which could not be looked for (${error instanceof Error ? error.message : String(error)}), so it adds nothing.`);
+        return said(`\`stack.instructions\` names ${entry}, which could not be looked for (${error instanceof Error ? error.message : String(error)}), so it adds nothing.`);
       }
-      if (found.status === "refused") return said(`The host refused to look for ${entry} (${found.reason}), so \`instructions:\` adds nothing for it.`);
+      if (found.status === "refused") return said(`The host refused to look for ${entry} (${found.reason}), so \`stack.instructions\` adds nothing for it.`);
       const files = found.hits.filter((hit) => hit.type === "file");
       const yours = files.filter((hit) => hit.kind === "yours");
       // A search the host cut is said (R-183), with what it found before it stopped.
-      const cut = found.stopped === undefined ? undefined : `The host stopped looking for ${entry} ${stoppedWhy(found.stopped)}, so \`instructions:\` adds only the files it found before then.`;
-      if (yours.length === 0) return said(cut ?? (files.length === 0 ? `\`instructions:\` names ${entry}, and no file matches it, so it adds nothing.` : notInstructions));
+      const cut = found.stopped === undefined ? undefined : `The host stopped looking for ${entry} ${stoppedWhy(found.stopped)}, so \`stack.instructions\` adds only the files it found before then.`;
+      if (yours.length === 0) return said(cut ?? (files.length === 0 ? `\`stack.instructions\` names ${entry}, and no file matches it, so it adds nothing.` : notInstructions));
       const entries = await Promise.all(yours.map(async (hit) => this.#fileEntry(hit.path, await this.#tree.read(hit.path), "broken")));
       return cut === undefined ? { entries, problems: [] } : said(cut, entries);
     });
   }
 
-  /** An owner's file `instructions:` names by path, as a part of a stack; `unread` says why it is left out when it could not be read. */
+  /** An owner's file `stack.instructions` names by path, as a part of a stack; `unread` says why it is left out when it could not be read. */
   async #fileEntry(path: string, file: FileText | undefined, unread: "missing" | "broken"): Promise<StackEntry> {
     const layers = await this.layers();
     if (file === undefined) return { part: path, kind: "instruction", where: "opening", path, level: layers.find((l) => l.mount !== "" && path.startsWith(l.mount))?.level ?? "chat", replaces: [], left: unread };
@@ -469,19 +469,19 @@ class TreeGuidance implements Guidance {
     return { part: file.path, kind: "instruction", where: "opening", path: file.path, level: file.level, hash: file.hash, replaces: [], ...(f.left !== undefined ? { left: f.left } : { text: file.text }) };
   }
 
-  /** What the levels' `instructions:` add to `agent`'s stack, the farther level's lists first, each in its order: the lists for every agent when its definition reads an instruction file, and those for it by name. */
+  /** What the levels' `stack.instructions` add to `agent`'s stack, the farther level's lists first, each in its order: the lists for every agent when its definition reads an instruction file, and those for it by name. */
   async #addedFor(agent: string, readsInstructions: boolean): Promise<Added> {
     const lists = (await this.#tree.config()).instructions.filter((list) => (list.agent === undefined ? readsInstructions : list.agent === agent));
     const added = await Promise.all(lists.flatMap((list) => list.entries.map((_, at) => this.#listed(list, at))));
     return { entries: added.flatMap((a) => a.entries), problems: added.flatMap((a) => a.problems) };
   }
 
-  /** Each agent an `instructions:` mapping gives a list to that no definition has: that list reaches no stack. Checked once. */
+  /** Each agent a `stack.instructions` mapping gives a list to that no definition has: that list reaches no stack. Checked once. */
   #mappedToNobody(): Promise<void> {
     return this.#once("instructions for nobody", async () => {
       const [agents, config] = await Promise.all([this.#tree.found("agents"), this.#tree.config()]);
       for (const list of config.instructions) {
-        if (list.agent !== undefined && !agents.has(list.agent)) this.#problems.push(problemAt(list.at, list.line, `\`instructions:\` gives a list to ${list.agent}, and no agent definition has that name, so the list reaches no stack.`));
+        if (list.agent !== undefined && !agents.has(list.agent)) this.#problems.push(problemAt(list.at, list.line, `\`stack.instructions\` gives a list to ${list.agent}, and no agent definition has that name, so the list reaches no stack.`));
       }
     });
   }
@@ -538,7 +538,7 @@ class TreeGuidance implements Guidance {
 
   async stack(agent: string, options: { situations?: readonly string[] } = {}): Promise<Stack> {
     const entries: StackEntry[] = [];
-    // The problems of the `instructions:` entries that reach this stack: a run's start logs them. A pin's are its own (`pins`).
+    // The problems of the `stack.instructions` entries that reach this stack: a run's start logs them. A pin's are its own (`pins`).
     const reached: Problem[] = [];
     const found = await this.#definition(agent);
     await this.#readsNothing(agent);
@@ -560,9 +560,9 @@ class TreeGuidance implements Guidance {
       };
       const part = (name: string): Promise<StackEntry[]> => (name === RULES ? this.#ruleEntries(agent, "opening") : this.#instructionEntries(name, "opening"));
       for (const name of BEFORE_DEFINITION) if (reads.includes(name)) add(await part(name));
-      // The files the levels' `instructions:` add, then each instruction file `reads:` names that §5.2
+      // The files the levels' `stack.instructions` add, then each instruction file `reads:` names that §5.2
       // does not number, in `reads:`'s order: after part 4, before the definition. A file the config's
-      // `added:` table adds for a turn (§5.2 part 7: `SWIPE`, `DELETE`) is the briefing's alone, given
+      // `stack.added` table adds for a turn (§5.2 part 7: `SWIPE`, `DELETE`) is the briefing's alone, given
       // on the turns it is for, never in the opening block.
       const config = await this.#tree.config();
       const forTurns = new Set([...config.added.values()].flat());
@@ -616,7 +616,7 @@ class TreeGuidance implements Guidance {
     return (await Promise.all(names.map((name) => this.#manifest(name)))).flatMap((found) => (found === undefined || found.off || found.item === undefined ? [] : [found.item]));
   }
 
-  /** Every level's `mcp.json`, farther first: a nearer server replaces a farther one of its name; every file's problems join the Files page's. `off: [tools/mcp]` leaves them all out. */
+  /** Every level's `mcp.json`, farther first: a nearer server replaces a farther one of its name; every file's problems join the Files page's. `stack.off: [tools/mcp]` leaves them all out. */
   #mcp(): Promise<McpRead[]> {
     return this.#once("mcp", async () => {
       const [found, config] = await Promise.all([this.#tree.found("manifests"), this.#tree.config()]);
@@ -637,7 +637,7 @@ class TreeGuidance implements Guidance {
     return this.#mcp();
   }
 
-  /** Every level's `hooks.yml`, farther first, each in its written order: a nearer hook replaces a farther one of its name; those `off:` names (`hooks/<name>`) are left out; every file's problems join the Files page's. */
+  /** Every level's `hooks.yml`, farther first, each in its written order: a nearer hook replaces a farther one of its name; those `stack.off` names (`hooks/<name>`) are left out; every file's problems join the Files page's. */
   hooks(): Promise<HookEntry[]> {
     return this.#once("hooks", async () => {
       const [layers, config] = await Promise.all([this.#tree.layers(), this.#tree.config()]);

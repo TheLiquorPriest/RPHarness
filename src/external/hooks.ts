@@ -16,7 +16,7 @@ import { runCommand } from "./run";
 /**
  * A hook as `hooks.yml` names it (§5.4 "Hooks"): the moment it runs at, its name, the command line
  * exactly as written, its timeout in seconds where it names one, and the file and line it is written
- * at. Switched off by `off:` as `hooks/<name>`, as any of his files is.
+ * at. Switched off by `stack.off` as `hooks/<name>`, as any of his files is.
  */
 export interface HookEntry {
   name: string;

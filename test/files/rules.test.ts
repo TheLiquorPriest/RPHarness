@@ -304,7 +304,7 @@ describe("`needs:`", () => {
     await b.facts({ "stage.unperceived": STAGE, "turns.since.engine.change": { count: 9 } });
     // The run begins with every rule in force; the files go off before its first moment.
     const r = await run();
-    await b.put("chat", "config.yml", "off: [rules/perceptions, TURN]\n");
+    await b.put("chat", "config.yml", "stack: { off: [rules/perceptions, TURN] }\n");
     expect((await r.runEnd.due({ agent: author, call: 1 })).map((f) => f.firing.rule)).toEqual(["reply-missing"]);
     expect(await r.turnStart(author)).toEqual([]);
     const rules = Object.fromEntries((await loadGuidance(b.host.files, scope).rules()).map((r) => [r.name, r]));
@@ -312,7 +312,7 @@ describe("`needs:`", () => {
     expect(rules.perceptions).toMatchObject({ inForce: false, why: "off" });
 
     // Back on: the same run's next moment fires it.
-    await b.put("chat", "config.yml", "off: []\n");
+    await b.put("chat", "config.yml", "stack: { off: [] }\n");
     expect((await r.runEnd.due({ agent: author, call: 2 })).map((f) => f.firing.rule)).toContain("perceptions-owed");
   });
 

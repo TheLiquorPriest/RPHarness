@@ -1,5 +1,5 @@
 // The Rules page's switch and its tester (§5.4 l.555, §14 Rules; Appendix A; C-10). `switchRule`
-// writes a rule into or out of the `off:` list of the chat's or the global config, on the owner's
+// writes a rule into or out of the `stack.off` list of the chat's or the global config, on the owner's
 // word, through the file port as his own press: the next moment a rule would fire reads the files
 // again (decision 16), so it stops, or goes on, from there. `testRule` runs one rule, as its file
 // reads now, against a past turn's record and writes nothing: the agents' transcripts in the turn's
@@ -10,6 +10,7 @@
 import type { AgentRef, Environment, FactValue, JsonObject, JsonValue, Layer, ModelsApi, RuleAction, RuleFiring, RuleMoment, RuleTest, RuleView, Scope, ToolResult } from "../contract";
 import { checkRule, createFacts, loadGuidance, type Looked } from "../files";
 import { createRuleRun } from "../files/engine";
+import { CONFIG_KEYS, CONFIG_SECTION } from "../files/api";
 import { isMapping, nameList, normalized, parseYaml } from "../files/header";
 import type { Rule } from "../files/rules";
 import { itemKey, writtenKey } from "../files/tree";
@@ -25,15 +26,17 @@ import { agentFileName, TRANSCRIPTS } from "./requests";
 import { readSettings } from "./settings";
 import { RELEASED_FILE } from "./turn";
 
-/** An entry of an `off:` list as the YAML flow list writes it: bare where it can be, else quoted. */
+/** An entry of a `stack.off` list as the YAML flow list writes it: bare where it can be, else quoted. */
 function listed(entry: string): string {
   return /^[A-Za-z0-9_@./-]+$/.test(entry) ? entry : JSON.stringify(entry);
 }
 
 /**
- * A config file's text with `key` taken out of its `off:` list (`on`) or put in it: every entry that
- * names it, however written, goes; switched off, the first is kept as it was written, else the key
- * is added. The field is written back as one flow list in its place; the rest of the file is as it was.
+ * A config file's text with `key` taken out of its `stack.off` list (`on`) or put in it: every entry
+ * that names it, however written, goes; switched off, the first is kept as it was written, else the
+ * key is added. The list is written back as one flow list in its place under `stack:`; a `stack`
+ * written on its own line (`stack: { … }`) is written back as a block. The rest of the file is as it
+ * was, and a switch that changes nothing leaves the text as it is.
  */
 function withOff(text: string, key: string, on: boolean, layers: readonly Layer[], at: { path: string }): string {
   const lines = normalized(text).split("\n");
@@ -41,25 +44,42 @@ function withOff(text: string, key: string, on: boolean, layers: readonly Layer[
   if ("problem" in parsed) throw new Error(`${at.path} cannot be read (${parsed.problem.message}), so the rule was not switched: mend the file first.`);
   const value = parsed.value;
   if (value !== null && value !== undefined && !isMapping(value)) throw new Error(`${at.path} is not \`name: value\` lines, so the rule was not switched: mend the file first.`);
-  const entries = nameList(isMapping(value) ? value.off : undefined);
-  if (entries === undefined) throw new Error(`\`off:\` in ${at.path} is not a list, so the rule was not switched: mend the file first.`);
+  const stack = isMapping(value) ? value[CONFIG_SECTION] : undefined;
+  if (stack !== null && stack !== undefined && !isMapping(stack)) throw new Error(`\`stack\` in ${at.path} is not a mapping of keys, so the rule was not switched: mend the file first.`);
+  const entries = nameList(isMapping(stack) ? stack[CONFIG_KEYS.off] : undefined);
+  if (entries === undefined) throw new Error(`\`stack.off\` in ${at.path} is not a list, so the rule was not switched: mend the file first.`);
   const named = entries.filter((entry) => writtenKey(entry, layers) === key);
+  if (on && named.length === 0) return text;
   const kept = entries.filter((entry) => writtenKey(entry, layers) !== key);
   if (!on) kept.push(named[0] ?? key);
-  const field = `off: [${kept.map(listed).join(", ")}]`;
-  const start = lines.findIndex((line) => /^off\s*:/.test(line));
+  const list = `[${kept.map(listed).join(", ")}]`;
+  const start = lines.findIndex((line) => new RegExp(`^${CONFIG_SECTION}[ \\t]*:`).test(line));
   if (start === -1) {
-    if (on) return text;
     const body = lines.join("\n");
-    return `${body}${body === "" || body.endsWith("\n") ? "" : "\n"}${field}\n`;
+    return `${body}${body === "" || body.endsWith("\n") ? "" : "\n"}${CONFIG_SECTION}:\n  ${CONFIG_KEYS.off}: ${list}\n`;
   }
-  // The field's own lines: its first, and the indented or listed lines under it.
+  // The section's own lines: its first, and the indented, listed, blank or comment lines under it, but those it ends on.
   let end = start + 1;
-  while (end < lines.length && (lines[end] ?? "").trim() !== "" && /^[\s-]/.test(lines[end] ?? "")) end += 1;
-  return [...lines.slice(0, start), field, ...lines.slice(end)].join("\n");
+  while (end < lines.length && !/^(?:[^\s#-]|-\S)/.test(lines[end] ?? "")) end += 1;
+  while (end > start + 1 && /^\s*(?:#.*)?$/.test(lines[end - 1] ?? "")) end -= 1;
+  const first = lines.slice(start + 1, end).find((line) => line.trim() !== "" && !/^\s*#/.test(line));
+  if (first === undefined) {
+    // Written on its own line, or empty: its keys as blocks, each other value as one flow value.
+    const others = Object.entries(isMapping(stack) ? stack : {}).filter(([name]) => name !== CONFIG_KEYS.off);
+    const block = [`${CONFIG_SECTION}:`, `  ${CONFIG_KEYS.off}: ${list}`, ...others.map(([name, held]) => `  ${name}: ${JSON.stringify(held)}`)];
+    return [...lines.slice(0, start), ...block, ...lines.slice(end)].join("\n");
+  }
+  const indent = /^[ \t]*/.exec(first)![0];
+  const field = `${indent}${CONFIG_KEYS.off}: ${list}`;
+  const row = lines.findIndex((line, i) => i > start && i < end && new RegExp(`^${indent}${CONFIG_KEYS.off}[ \\t]*:`).test(line));
+  if (row === -1) return [...lines.slice(0, start + 1), field, ...lines.slice(start + 1)].join("\n");
+  // The field's own lines: its first, and the more indented or listed lines under it.
+  let last = row + 1;
+  while (last < end && (lines[last] ?? "").trim() !== "" && [" ", "\t", "-"].some((after) => (lines[last] ?? "").startsWith(`${indent}${after}`))) last += 1;
+  return [...lines.slice(0, row), field, ...lines.slice(last)].join("\n");
 }
 
-/** Switches a rule on or off in the `off:` list of the chat's or the global config, written as the owner's own press. */
+/** Switches a rule on or off in the `stack.off` list of the chat's or the global config, written as the owner's own press. */
 export async function switchRule(env: Environment, scope: Scope, name: string, on: boolean, level: "chat" | "global"): Promise<RuleView | undefined> {
   const guidance = loadGuidance(env.files, scope);
   const layers = await guidance.layers();

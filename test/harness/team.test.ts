@@ -213,7 +213,7 @@ test("a writer: naming a definition switched off: write_reply answers with the n
   // The line worded true for each case, as the file's own words will be.
   const notices = shipped.replace(/^no_writer: .*$/m, "no_writer: {{#off}}{{writer}}, the writer your definition names, is switched off; it cannot write the reply.{{/off}}{{^off}}There is no agent definition named {{writer}} to write the reply.{{/off}}");
   const s = (open = await stage({
-    config: "off: [agents/bard]\n",
+    config: "stack: { off: [agents/bard] }\n",
     files: { ".agents/scribe.md": SCRIBE.replace("writer: narrator", "writer: bard"), ".agents/bard.md": BARD, ".prompts/tool-notices.md": notices },
     answers: [{ pieces: [{ call: "write_reply", args: { brief: "Tell the leap." }, id: "w-1" }] }, { pieces: [{ text: "<reply>She waits for the tide.</reply>" }] }],
   }));

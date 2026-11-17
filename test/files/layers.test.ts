@@ -95,8 +95,8 @@ describe("levels", () => {
   test("a name switched off in a config stays off at every level, read after read, until the config says otherwise", async () => {
     b = await bench({
       shipped: { ".agents/scribe.md": definition("scribe", "Scribe.", "Body."), ".rules/tidy.md": rule("Tidy.", "Keep it tidy."), ".skills/mapping/SKILL.md": "---\nname: mapping\ndescription: Maps.\n---\nSteps.\n" },
-      global: { "config.yml": "off: [.rules/tidy.md, '@shipped/.skills/mapping/SKILL.md']\n" },
-      chat: { "rules/tidy.md": rule("The chat's own tidy.", "Tidier."), "config.yml": "off:\n  - agents/scribe\n" },
+      global: { "config.yml": "stack: { off: [.rules/tidy.md, '@shipped/.skills/mapping/SKILL.md'] }\n" },
+      chat: { "rules/tidy.md": rule("The chat's own tidy.", "Tidier."), "config.yml": "stack:\n  off:\n    - agents/scribe\n" },
     });
     for (let i = 0; i < 2; i++) {
       const g = loadGuidance(b.host.files, scope);
@@ -107,7 +107,7 @@ describe("levels", () => {
       expect(await g.skill("mapping")).toBeUndefined();
       expect((await g.stack("scribe")).entries[0]).toMatchObject({ part: "agents/scribe", left: "off", where: "opening" });
     }
-    await b.put("global", "config.yml", "off: []\n");
+    await b.put("global", "config.yml", "stack: { off: [] }\n");
     await b.put("chat", "config.yml", "# nothing off\n");
     const g = loadGuidance(b.host.files, scope);
     expect((await g.definition("scribe"))?.name).toBe("scribe");

@@ -49,7 +49,7 @@ const TREE = {
   ".agents/keeper.md": KEEPER,
   "ALL-AGENTS.md": `${ALL}\n`,
   "SWIPE.md": `${SWIPE}\n`,
-  "config.yml": "added:\n  swipe: [SWIPE]\n  regenerate: [SWIPE]\n",
+  "config.yml": "stack:\n  added:\n    swipe: [SWIPE]\n    regenerate: [SWIPE]\n",
   ".tools/files.md": `---\ndescription: Fixture guide to the file tools.\n---\n${FILES_GUIDE}\n`,
   ".tools/agents.md": `---\ndescription: Fixture guide to the team.\n---\n${AGENTS_GUIDE}\n`,
   ".skills/fixture-tides/SKILL.md": SKILL,
@@ -134,7 +134,7 @@ test("a given item marked for the opening is in the Author's opening block once;
 
 test("a pinned file is told to the host with from pin, and the definition view's given holds no pin; deleted in the middle of a session, the lead's next run logs it as a file pinned for the lead and is handed nothing for it", async () => {
   const s = (open = await stage({
-    files: { ...TREE, [`${CHAT}config.yml`]: "pins:\n  - { file: persistent-workspace/plan.md, agent: chief }\n", [`${CHAT}persistent-workspace/plan.md`]: `${PLAN}\n` },
+    files: { ...TREE, [`${CHAT}config.yml`]: "stack:\n  pins:\n    - { file: persistent-workspace/plan.md, agent: chief }\n", [`${CHAT}persistent-workspace/plan.md`]: `${PLAN}\n` },
     answers: [RELEASE, RELEASE],
   }));
   expect((await s.turn(request("t1", { lead: "chief" }))).outcome.status).toBe("released");
@@ -158,7 +158,7 @@ test("the writer write_reply starts is handed whole a file pinned for it and a f
       ...TREE,
       ".agents/chief.md": "---\nname: chief\ndescription: Fixture lead.\nmodel: default\ntools: [write_reply, reply_release]\ngiven: [prompt:*, briefing]\nwriter: narrator\n---\nFixture chief: you run the turn.\n",
       ".agents/narrator.md": narrator,
-      [`${CHAT}config.yml`]: "pins:\n  - { file: persistent-workspace/plan.md, agent: narrator }\n",
+      [`${CHAT}config.yml`]: "stack:\n  pins:\n    - { file: persistent-workspace/plan.md, agent: narrator }\n",
       [`${CHAT}persistent-workspace/plan.md`]: `${PLAN}\n`,
       [`${CHAT}persistent-workspace/style.md`]: `${STYLE}\n`,
     },

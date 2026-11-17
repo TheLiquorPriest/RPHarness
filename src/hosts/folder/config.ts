@@ -1,9 +1,10 @@
 // The folder host's own limits (Appendix D's rule: every limit a setting), from `host/config.json`
-// as it stands each time one is used, today's numbers where it sets none:
+// as it stands each time one is used, today's numbers where it sets none; its keys follow the one
+// convention for setting keys (a size ends with its unit, a ceiling is `max<Thing>`):
 //
-//   { "files": { "findLimit": 200, "grepBytes": 1048576, "grepLine": 1000, "listDepth": 1 },
-//     "search": { "hits": 20, "snippet": 80 },
-//     "tools": { "commandTimeout": 30, "answerMax": 1048576 } }
+//   { "files": { "findHits": 200, "grepBytes": 1048576, "grepLineChars": 1000, "listDepth": 1 },
+//     "search": { "hits": 20, "snippetChars": 80 },
+//     "tools": { "commandTimeoutSeconds": 30, "maxAnswerBytes": 1048576 } }
 //
 // A value that is not a whole number above 0 is passed over for the default. A file that does not
 // read is the defaults whole.
@@ -47,13 +48,13 @@ export async function hostLimits(site: Site): Promise<HostLimits> {
   const search = group("search");
   const tools = group("tools");
   return {
-    findLimit: whole(files.findLimit, HOST_LIMITS.findLimit),
+    findLimit: whole(files.findHits, HOST_LIMITS.findLimit),
     grepBytes: whole(files.grepBytes, HOST_LIMITS.grepBytes),
-    grepLine: whole(files.grepLine, HOST_LIMITS.grepLine),
+    grepLine: whole(files.grepLineChars, HOST_LIMITS.grepLine),
     listDepth: whole(files.listDepth, HOST_LIMITS.listDepth),
     searchHits: whole(search.hits, HOST_LIMITS.searchHits),
-    snippet: whole(search.snippet, HOST_LIMITS.snippet),
-    commandTimeout: whole(tools.commandTimeout, HOST_LIMITS.commandTimeout),
-    answerMax: whole(tools.answerMax, HOST_LIMITS.answerMax),
+    snippet: whole(search.snippetChars, HOST_LIMITS.snippet),
+    commandTimeout: whole(tools.commandTimeoutSeconds, HOST_LIMITS.commandTimeout),
+    answerMax: whole(tools.maxAnswerBytes, HOST_LIMITS.answerMax),
   };
 }

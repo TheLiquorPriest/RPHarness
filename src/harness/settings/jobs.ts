@@ -18,17 +18,17 @@ const NONE_OF_ITS_OWN = "no limit of its own";
 export const JOBS = worded(
   {
     atOnce: { key: "jobs.atOnce", takes: { type: "whole", least: 1 }, default: 2, perConnection: false, at: "jobs.atOnce" },
-    perDay: { key: "jobs.perDay", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.perDay" },
+    perDay: { key: "jobs.perDay", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.perDay" },
     // `perRun: 0` starts no job at all.
     perRun: { key: "jobs.perRun", takes: { type: "whole", least: 0 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.perRun" },
-    tokensPerDay: { key: "jobs.tokensPerDay", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.tokensPerDay" },
+    tokensPerDay: { key: "jobs.tokensPerDay", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.tokensPerDay" },
     // Every connection `jobs.connections` names with a mapping counts its jobs, a limit set or not.
     connectionAtOnce: { key: "jobs.connections.<connection>.atOnce", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NONE_OF_ITS_OWN, perConnection: true, at: "jobs.connections.<connection>.atOnce" },
-    connectionPerDay: { key: "jobs.connections.<connection>.perDay", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NONE_OF_ITS_OWN, perConnection: true, at: "jobs.connections.<connection>.perDay" },
-    runCalls: { key: "jobs.run.calls", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.calls" },
-    runTokensIn: { key: "jobs.run.tokensIn", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensIn" },
-    runTokensOut: { key: "jobs.run.tokensOut", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensOut" },
-    runTime: { key: "jobs.run.time", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.time", ms: true },
+    connectionPerDay: { key: "jobs.connections.<connection>.perDay", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NONE_OF_ITS_OWN, perConnection: true, at: "jobs.connections.<connection>.perDay" },
+    runCalls: { key: "jobs.run.calls", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.calls" },
+    runTokensIn: { key: "jobs.run.tokensIn", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensIn" },
+    runTokensOut: { key: "jobs.run.tokensOut", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.tokensOut" },
+    runTime: { key: "jobs.run.time", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.time", ms: true },
     // `agents: 0` starts no sub-agent at all.
     runAgents: { key: "jobs.run.agents", takes: { type: "whole", least: 0 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "jobs.run.agents" },
     // How long a job's record is kept: the Jobs page lists them a page at a time, and the oldest go as a job starts.

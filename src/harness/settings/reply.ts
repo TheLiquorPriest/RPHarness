@@ -18,15 +18,15 @@ export const REPLY = worded(
     // Appendix D.1: a reply is held back by one sentence while a rule that interrupts covers it, and an
     // agent that goes on after a rule stopped it is shown its last three sentences again.
     heldSentences: { key: "reply.heldSentences", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, at: "heldSentences" },
-    tailSentences: { key: "reply.tailSentences", takes: { type: "whole", least: 1 }, default: 3, perConnection: false, at: "tailSentences" },
+    tailSentences: { key: "reply.tailSentences", takes: { type: "whole", least: 0 }, default: 3, perConnection: false, at: "tailSentences" },
     // Appendix D.1: the lead's sampling is its own.
     leadSampling: { key: "reply.leadSampling", takes: { type: "oneOf", values: ["own", "preset"] }, default: "own", perConnection: false, at: "leadSampling" },
     // Appendix D.1: progress lines in the thinking block.
     show: { key: "progress.show", takes: { type: "oneOf", values: ["all", "least"] }, default: "all", perConnection: false, at: "progress" },
     // Appendix D.1: a line when nothing has been shown for a minute. §10.7: a generation that sends no
-    // text for ten minutes is ended, so a line must come inside them; nine minutes at most leaves the
-    // last line a minute to arrive.
-    silence: { key: "progress.silence", takes: { type: "whole", least: 1, most: 540 }, default: 60, perConnection: false, at: "silenceMs", ms: true },
+    // text for ten minutes is ended, so a line should come inside them; past nine minutes the page
+    // says so, and the value is taken (§2.1 point 5: no hard cap).
+    silence: { key: "progress.silence", takes: { type: "whole", least: 1 }, advise: { above: 540 }, default: 60, perConnection: false, at: "silenceMs", ms: true },
   },
   REPLY_WORDS,
 );

@@ -18,14 +18,14 @@ export const CALLS = worded(
   {
     // Today's answer floor (LumiAH settings.ts:124-125,386): a call with less room left than this is not made.
     answerFloor: { key: "limits.answerFloor", takes: { type: "whole", least: 1 }, default: 256, perConnection: false, at: "answerFloor" },
-    // Today's `loop.charsPerToken`.
-    charsPerToken: { key: "tokens.charsPerToken", takes: { type: "number", least: 0.5 }, default: 3.2, perConnection: false, at: "tokens.charsPerToken" },
-    // Each unset by default: the provider's own. `~` lifts in a chat what the global file sets.
-    temperature: { key: `${SAMPLED}.temperature`, takes: { type: "number", least: 0, most: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.temperature` },
+    // Today's `loop.charsPerToken`. Zero or below has no meaning (a prompt of endless tokens); a hundredth stands for that bound.
+    charsPerToken: { key: "tokens.charsPerToken", takes: { type: "number", least: 0.01 }, advise: { below: 1 }, default: 3.2, perConnection: false, at: "tokens.charsPerToken" },
+    // Each unset by default: the provider's own. `~` lifts in a chat what the global file sets. A bound a provider keeps is advice: another provider may take more.
+    temperature: { key: `${SAMPLED}.temperature`, takes: { type: "number", least: 0 }, advise: { above: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.temperature` },
     topP: { key: `${SAMPLED}.top_p`, takes: { type: "number", least: 0, most: 1 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.top_p` },
     topK: { key: `${SAMPLED}.top_k`, takes: { type: "whole", least: 0 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.top_k` },
-    frequencyPenalty: { key: `${SAMPLED}.frequency_penalty`, takes: { type: "number", least: -2, most: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.frequency_penalty` },
-    presencePenalty: { key: `${SAMPLED}.presence_penalty`, takes: { type: "number", least: -2, most: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.presence_penalty` },
+    frequencyPenalty: { key: `${SAMPLED}.frequency_penalty`, takes: { type: "number" }, advise: { below: -2, above: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.frequency_penalty` },
+    presencePenalty: { key: `${SAMPLED}.presence_penalty`, takes: { type: "number" }, advise: { below: -2, above: 2 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.presence_penalty` },
     repetitionPenalty: { key: `${SAMPLED}.repetition_penalty`, takes: { type: "number", least: 0 }, default: null, orNone: true, none: PROVIDERS_OWN, perConnection: false, at: `${SAMPLED}.repetition_penalty` },
   },
   CALLS_WORDS,

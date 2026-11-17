@@ -8,7 +8,7 @@ import { USAGE_WORDS } from "./usage-words";
 
 export const USAGE = worded(
   {
-    dayTokens: { key: "limits.day.tokens", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "no limit", perConnection: false, at: "day.tokens" },
+    dayTokens: { key: "limits.day.tokens", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: "no limit", perConnection: false, at: "day.tokens" },
     // The user's runs, read where no chat is in view: the levels every chat shares.
     keptRuns: { key: "usage.keptRuns", takes: { type: "whole", least: 1 }, default: 1_000, perConnection: false, levels: ["shipped", "global"], at: "usage.keptRuns" },
   },

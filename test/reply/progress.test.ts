@@ -52,30 +52,6 @@ describe("keeping a long turn alive", () => {
     expect(() => keepAlive(0)).toThrow();
   });
 
-  test("a silence of 541 s is refused and 60 s stands", async () => {
-    const held = gate();
-    const s = await stage({ config: "progress:\n  silence: 541\n", answers: [{ pieces: [{ hold: held }, { text: "<reply>The lamp holds.</reply>" }] }] });
-    onTestFinished(() => s.close());
-    const sink = new WatchedSink(s.clock);
-    const turn = s.turn(request("t1", { lead: "lead" }), sink);
-    try {
-      await s.trace.seen((record) => record.event.kind === "call_started");
-      const start = s.clock.now();
-      s.clock.advance(MINUTE);
-      // The default holds: a line after a minute of silence.
-      expect(sink.lines.filter((line) => line.line.startsWith("Still")).map((line) => [line.line, line.at - start])).toEqual([["Still working (1:00).", MINUTE]]);
-      // One line naming the key and the file.
-      expect(s.logged.filter((line) => line.fields?.["setting"] === "progress.silence")).toEqual([expect.objectContaining({ level: "warn", fields: expect.objectContaining({ setting: "progress.silence", value: 541, file: "@global/config.yml" }) })]);
-    } finally {
-      held.open();
-      await turn;
-    }
-    // The reply's progress itself takes no silence past the list's bound.
-    const most = REPLY.silence.takes.most * 1000;
-    expect(() => keepAlive(most + 1)).toThrow();
-    expect(() => keepAlive(most)).not.toThrow();
-  });
-
   test("no number 540 or 600 appears in src/reply: the bound is read from the settings list", async () => {
     const folder = join(import.meta.dir, "..", "..", "src", "reply");
     const found: string[] = [];
@@ -98,7 +74,7 @@ describe("keeping a long turn alive", () => {
     try {
       await s.trace.seen((record) => record.event.kind === "call_started");
       s.clock.advance(MINUTE);
-      expect(s.trace.of("progress_missing").map((record) => record.event)).toEqual([{ kind: "progress_missing", time: REPLY.silence.takes.most * 1000 }]);
+      expect(s.trace.of("progress_missing").map((record) => record.event)).toEqual([{ kind: "progress_missing", time: REPLY.silence.advise.above * 1000 }]);
       // The turn's own time runs out at the held limit, before the ten minutes.
       s.clock.advance(8 * MINUTE);
       const { outcome } = await turn;

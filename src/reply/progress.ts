@@ -8,8 +8,8 @@ import type { ReplySink } from "../contract";
 import { REPLY } from "../harness/settings/reply";
 import type { LoopClock } from "../loop/types";
 
-/** The most the silence before a progress line may be, in milliseconds: `progress.silence`'s bound in the list of settings, which the turn's own time is held at when no line can keep it alive. */
-export const SILENCE_MOST_MS = REPLY.silence.takes.most * 1000;
+/** Where `progress.silence`'s advice stands, in milliseconds: past it, the chat application's own cut (ten minutes with nothing shown) may come before a progress line does. The turn's own time is held at it when no line can keep the turn alive. */
+export const SILENCE_MOST_MS = REPLY.silence.advise.above * 1000;
 
 export interface KeepAliveOptions {
   /** Where the reply and its progress lines go. */
@@ -33,7 +33,7 @@ export class KeepAlive {
   #missed = false;
 
   constructor(options: KeepAliveOptions) {
-    if (!(options.silenceMs > 0) || options.silenceMs > SILENCE_MOST_MS) throw new Error(`The silence before a progress line (${REPLY.silence.key}) must be more than 0 ms and at most ${SILENCE_MOST_MS} ms; it is ${options.silenceMs}.`);
+    if (!(options.silenceMs > 0)) throw new Error(`The silence before a progress line (${REPLY.silence.key}) must be more than 0 ms; it is ${options.silenceMs}.`);
     this.#o = options;
     const outer = options.sink;
     this.sink = {

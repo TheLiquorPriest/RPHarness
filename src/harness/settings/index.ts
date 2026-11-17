@@ -48,7 +48,7 @@ const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE, ...TRACE_GONE }
 
 /** The settings of some groups as a host sees them: every entry with its words, and not where the harness keeps its value. */
 export function listOf(groups: readonly Group[]): readonly ListedSetting[] {
-  return frozen(groups.flatMap((group) => Object.values(group).map(({ at: _at, ms: _ms, noneKept: _kept, ...listed }) => listed)));
+  return frozen(groups.flatMap((group) => Object.values(group).map(({ at: _at, ms: _ms, noneKept: _kept, advise: _advise, ...listed }) => listed)));
 }
 
 /** Every setting RPH reads, as a config file writes it, each with its name and what it is for. */

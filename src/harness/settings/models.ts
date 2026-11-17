@@ -36,7 +36,7 @@ export const MODELS = worded(
     testRoom: { key: "calls.testRoom", takes: { type: "whole", least: 1 }, default: 64, perConnection: false, levels: SHARED, at: "calls.testRoom" },
     // Lists of hundreds of models run to a few megabytes; an answer without end would otherwise grow until the process is restarted.
     listMost: { key: "calls.listMost", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, levels: SHARED, at: "calls.listMost" },
-    quoted: { key: "calls.quoted", takes: { type: "whole", least: 1 }, default: 80, perConnection: false, levels: SHARED, at: "calls.quoted" },
+    quoted: { key: "calls.quoted", takes: { type: "whole", least: 0 }, default: 80, perConnection: false, levels: SHARED, at: "calls.quoted" },
     // Long enough for a page that asks every few seconds, or one the user comes back to, to say why.
     signInWordsKept: { key: "calls.signInWordsKept", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, levels: SHARED, at: "calls.signInWordsKept", ms: true },
     // A server's error body can be any length, and a page or a log line has no use for more.
@@ -48,9 +48,9 @@ export const MODELS = worded(
     retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "calls.retries" },
     cacheRetention: { key: "calls.cacheRetention", takes: { type: "oneOf", values: ["none", "short", "long"] }, default: "short", perConnection: false, levels: SHARED, at: "calls.cacheRetention" },
     // §13.2 "moved as it is": Build 1's 60 minutes, then native tools are tried again.
-    toolRefusalMinutes: { key: "calls.toolRefusalMinutes", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "calls.toolRefusalMinutes" },
+    toolRefusalMinutes: { key: "calls.toolRefusalMinutes", takes: { type: "whole", least: 0 }, default: 60, perConnection: false, levels: SHARED, at: "calls.toolRefusalMinutes" },
     // As native tools are: a thinking level a connection's model refused is passed over for this long, then tried again.
-    effortRefusalMinutes: { key: "calls.effortRefusalMinutes", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "calls.effortRefusalMinutes" },
+    effortRefusalMinutes: { key: "calls.effortRefusalMinutes", takes: { type: "whole", least: 0 }, default: 60, perConnection: false, levels: SHARED, at: "calls.effortRefusalMinutes" },
     // Today's `connections.throttles` and `connections.atOnce` (LumiAH provider.ts:606-660, 718-735), each none: a connection is held to nothing until he sets it.
     // By the connection's name or id, under `connections` as `jobs.connections` is, so `throttles.atOnce` is never taken for a connection's name.
     requestsPerMinute: { key: "throttles.connections.<connection>.requestsPerMinute", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: true, levels: SHARED, at: "calls.throttles.connections.<connection>.requestsPerMinute" },

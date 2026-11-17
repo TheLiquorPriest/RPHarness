@@ -12,22 +12,28 @@ page, and the per-connection ones on its Connections page.
 
 Levels: every level where none is named; `shipped, global` means a chat's own file cannot set it.
 
+No setting is capped (§2.1): "Takes" holds only a bound past which a value has no meaning at all. Where
+a value past a point still has a meaning, but one to know of, the setting's words end with what happens
+past it ("Above 540: …"); `SETTINGS` gives it as `advice`, and the value is taken. Where "Default" says
+"as its definition says", a level that sets none leaves the agent's header in force, and `~` is what the
+words say after "`~`:".
+
 ## `limits`
 
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
-| `limits.turn.calls` | whole ≥ 1 | no limit | all | **Calls in a turn.** Model calls all the agents of one turn may make between them. |
-| `limits.turn.tokensIn` | whole ≥ 1 | no limit | all | **Tokens sent in a turn.** Tokens sent to models across all the agents of one turn. |
-| `limits.turn.tokensOut` | whole ≥ 1 | no limit | all | **Tokens written in a turn.** Tokens models write across all the agents of one turn. |
-| `limits.turn.time` | whole ≥ 1 | no limit | all | **Time for a turn.** Seconds one turn may take, all its agents' work included. |
-| `limits.turn.toolRounds` | whole ≥ 1 | no limit | all | **Tool rounds in a turn.** Answers that call tools, across all the agents of one turn; past it the turn's work ends at this limit. |
+| `limits.turn.calls` | whole ≥ 0 | no limit | all | **Calls in a turn.** Model calls all the agents of one turn may make between them. Below 1: At 0 no call is made, and the turn ends with no reply. |
+| `limits.turn.tokensIn` | whole ≥ 0 | no limit | all | **Tokens sent in a turn.** Tokens sent to models across all the agents of one turn. Below 1: At 0 no call can be sent, and the turn ends with no reply. |
+| `limits.turn.tokensOut` | whole ≥ 0 | no limit | all | **Tokens written in a turn.** Tokens models write across all the agents of one turn. Below 1: At 0 no answer can be written, and the turn ends with no reply. |
+| `limits.turn.time` | whole ≥ 0 | no limit | all | **Time for a turn.** Seconds one turn may take, all its agents' work included. Below 1: At 0 the turn ends as it starts, with no reply. |
+| `limits.turn.toolRounds` | whole ≥ 0 | no limit | all | **Tool rounds in a turn.** Answers that call tools, across all the agents of one turn; past it the turn's work ends at this limit. Below 1: At 0 the turn's work ends at its first answer that calls a tool. |
 | `limits.turn.depth` | whole ≥ 0 | 2 | all | **Sub-agent depth.** How deep sub-agents may go: at 1 only the lead starts them, at 2 they may start their own, at 0 none is started. |
 | `limits.turn.agents` | whole ≥ 0 | no limit | all | **Sub-agents in a turn.** Sub-agents one turn may start in all. |
 | `limits.turn.agentsAtOnce` | whole ≥ 1 | 3 | all | **Sub-agents at once.** Sub-agents of one run at work at the same time; one more waits for a place, first come first served. |
 | `limits.toolsAtOnce` | whole ≥ 1 | 4 | all | **Tool calls at once.** An answer's tool calls that run at the same time, for an agent whose definition sets none of its own; one more waits for a place. |
-| `limits.repeats` | whole ≥ 2 | 10 | all | **Same call in a row.** The same tool call with the same arguments this many times in a row, with nothing written by any agent between, ends that agent's work at this limit. |
-| `limits.cachedWeight` | number ≥ 0, ≤ 1 | 0.1 | all | **Weight of a cached token.** What a token read again from a provider's cache counts for against every limit on tokens sent, from 0 to 1: an agent's, a turn's, a job's and a day's. |
-| `limits.day.tokens` | whole ≥ 1 | no limit | all | **Tokens in a day.** Tokens, sent and written, that all your agents may spend over any 24 hours, turns and jobs alike; past it no call is made. |
+| `limits.repeats` | whole ≥ 1 | 10 | all | **Same call in a row.** The same tool call with the same arguments this many times in a row, with nothing written by any agent between, ends that agent's work at this limit. Below 2: At 1 an agent's work ends at its first tool call. |
+| `limits.cachedWeight` | number ≥ 0 | 0.1 | all | **Weight of a cached token.** What a token read again from a provider's cache counts for against every limit on tokens sent: an agent's, a turn's, a job's and a day's; 1 counts it in full. Above 1: Above 1 a token read again from the cache counts for more than one sent anew. |
+| `limits.day.tokens` | whole ≥ 0 | no limit | all | **Tokens in a day.** Tokens, sent and written, that all your agents may spend over any 24 hours, turns and jobs alike; past it no call is made. Below 1: At 0 no call is made at all. |
 | `limits.answerFloor` | whole ≥ 1 | 256 | all | **Least room for an answer.** Tokens an answer must have left at least, across every limit on tokens written; with less, no call is made and the work ends at the limit. |
 
 ## `agents`
@@ -35,15 +41,15 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
 | `agents.<definition>.effort` | off \\| minimal \\| low \\| medium \\| high \\| xhigh \\| max | as its definition says | all | **Effort.** How hard this agent's model reasons, in place of its definition's effort: off to max; a level its model does not have is the nearest it has. `~`: its connection's. |
-| `agents.<definition>.limits.calls` | whole ≥ 1 | as its definition says | all | **Calls.** Model calls this agent may make in one stretch of its work; past it its work ends at this limit. `~`: no limit. |
-| `agents.<definition>.limits.tokensIn` | whole ≥ 1 | as its definition says | all | **Tokens sent.** Tokens this agent's calls may send in one stretch of its work. `~`: no limit. |
-| `agents.<definition>.limits.tokensOut` | whole ≥ 1 | as its definition says | all | **Tokens written.** Tokens this agent's model may write in one stretch of its work. `~`: no limit. |
-| `agents.<definition>.limits.time` | whole ≥ 1 | as its definition says | all | **Time.** Seconds one stretch of this agent's work may take. `~`: no limit. |
-| `agents.<definition>.limits.callTokensIn` | whole ≥ 1 | as its definition says | all | **Tokens sent in a call.** Tokens one call of this agent may send, as estimated before it is sent. `~`: no limit. |
-| `agents.<definition>.limits.callTokensOut` | whole ≥ 1 | as its definition says | all | **Tokens written in a call.** Tokens the answer to one call of this agent may take. `~`: no limit. |
-| `agents.<definition>.limits.callTime` | whole ≥ 1 | as its definition says | all | **Time for a call.** Seconds one call of this agent may take, apart from the wait on a silent answer. `~`: no limit. |
-| `agents.<definition>.limits.toolRounds` | whole ≥ 1 | as its definition says | all | **Tool rounds.** Answers of this agent that call tools, in one stretch of its work. `~`: no limit. |
-| `agents.<definition>.limits.toolsPerAnswer` | whole ≥ 1 | as its definition says | all | **Tool calls in an answer.** Tool calls one answer of this agent may make; the calls past it are answered and not run. `~`: no limit. |
+| `agents.<definition>.limits.calls` | whole ≥ 0 | as its definition says | all | **Calls.** Model calls this agent may make in one stretch of its work; past it its work ends at this limit. `~`: no limit. Below 1: At 0 this agent makes no call: its work ends as it starts. |
+| `agents.<definition>.limits.tokensIn` | whole ≥ 0 | as its definition says | all | **Tokens sent.** Tokens this agent's calls may send in one stretch of its work. `~`: no limit. Below 1: At 0 no call of this agent can be sent. |
+| `agents.<definition>.limits.tokensOut` | whole ≥ 0 | as its definition says | all | **Tokens written.** Tokens this agent's model may write in one stretch of its work. `~`: no limit. Below 1: At 0 this agent's model can write nothing. |
+| `agents.<definition>.limits.time` | whole ≥ 0 | as its definition says | all | **Time.** Seconds one stretch of this agent's work may take. `~`: no limit. Below 1: At 0 this agent's work ends as it starts. |
+| `agents.<definition>.limits.callTokensIn` | whole ≥ 0 | as its definition says | all | **Tokens sent in a call.** Tokens one call of this agent may send, as estimated before it is sent. `~`: no limit. Below 1: At 0 no call of this agent can be sent. |
+| `agents.<definition>.limits.callTokensOut` | whole ≥ 0 | as its definition says | all | **Tokens written in a call.** Tokens the answer to one call of this agent may take. `~`: no limit. Below 1: At 0 no answer of this agent can be written. |
+| `agents.<definition>.limits.callTime` | whole ≥ 0 | as its definition says | all | **Time for a call.** Seconds one call of this agent may take, apart from the wait on a silent answer. `~`: no limit. Below 1: At 0 every call of this agent ends as it starts. |
+| `agents.<definition>.limits.toolRounds` | whole ≥ 0 | as its definition says | all | **Tool rounds.** Answers of this agent that call tools, in one stretch of its work. `~`: no limit. Below 1: At 0 this agent's work ends at its first answer that calls a tool. |
+| `agents.<definition>.limits.toolsPerAnswer` | whole ≥ 0 | as its definition says | all | **Tool calls in an answer.** Tool calls one answer of this agent may make; the calls past it are answered and not run. `~`: no limit. Below 1: At 0 no tool call of this agent is run. |
 | `agents.<definition>.limits.toolsAtOnce` | whole ≥ 1 | as its definition says | all | **Tool calls at once.** This agent's tool calls of one answer that run at the same time; one more waits for a place. `~`: as limits.toolsAtOnce says. |
 | `agents.<definition>.limits.messages` | whole ≥ 0 | as its definition says | all | **Messages after its first answer.** Messages this agent may be sent after its first answer, as a sub-agent; one past it is answered and the agent is not run. `~`: no limit. |
 
@@ -58,15 +64,15 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
 | `jobs.atOnce` | whole ≥ 1 | 2 | all | **Jobs at once.** Jobs that run at the same time, across all your chats; a job started past it waits for a place. |
-| `jobs.perDay` | whole ≥ 1 | no limit | all | **Jobs in a day.** Jobs that may be started in a day. |
+| `jobs.perDay` | whole ≥ 0 | no limit | all | **Jobs in a day.** Jobs that may be started in a day. Below 1: At 0 no job starts. |
 | `jobs.perRun` | whole ≥ 0 | no limit | all | **Jobs one run may start.** Jobs the agents of one run, a turn's or a job's, may start; 0 starts none. |
-| `jobs.tokensPerDay` | whole ≥ 1 | no limit | all | **Job tokens in a day.** Tokens, sent and written, that all your jobs may spend in a day; past it no job starts, and a running job stops at its next call. |
+| `jobs.tokensPerDay` | whole ≥ 0 | no limit | all | **Job tokens in a day.** Tokens, sent and written, that all your jobs may spend in a day; past it no job starts, and a running job stops at its next call. Below 1: At 0 no job starts. |
 | `jobs.connections.<connection>.atOnce` | whole ≥ 1 | no limit of its own | all | **Jobs at once on a connection.** Jobs on this connection that run at the same time. |
-| `jobs.connections.<connection>.perDay` | whole ≥ 1 | no limit of its own | all | **Jobs in a day on a connection.** Jobs on this connection that may be started in a day. |
-| `jobs.run.calls` | whole ≥ 1 | no limit | all | **Calls in a job's run.** Model calls all the agents of one job's run may make between them. |
-| `jobs.run.tokensIn` | whole ≥ 1 | no limit | all | **Tokens sent in a job's run.** Tokens sent to models across all the agents of one job's run. |
-| `jobs.run.tokensOut` | whole ≥ 1 | no limit | all | **Tokens written in a job's run.** Tokens models write across all the agents of one job's run. |
-| `jobs.run.time` | whole ≥ 1 | no limit | all | **Time for a job's run.** Seconds one job's run may take. |
+| `jobs.connections.<connection>.perDay` | whole ≥ 0 | no limit of its own | all | **Jobs in a day on a connection.** Jobs on this connection that may be started in a day. Below 1: At 0 no job starts on this connection. |
+| `jobs.run.calls` | whole ≥ 0 | no limit | all | **Calls in a job's run.** Model calls all the agents of one job's run may make between them. Below 1: At 0 a job's run makes no call and ends as it starts. |
+| `jobs.run.tokensIn` | whole ≥ 0 | no limit | all | **Tokens sent in a job's run.** Tokens sent to models across all the agents of one job's run. Below 1: At 0 a job's run can send no call and ends as it starts. |
+| `jobs.run.tokensOut` | whole ≥ 0 | no limit | all | **Tokens written in a job's run.** Tokens models write across all the agents of one job's run. Below 1: At 0 a job's run can write nothing and ends as it starts. |
+| `jobs.run.time` | whole ≥ 0 | no limit | all | **Time for a job's run.** Seconds one job's run may take. Below 1: At 0 a job's run ends as it starts. |
 | `jobs.run.agents` | whole ≥ 0 | no limit | all | **Sub-agents in a job's run.** Sub-agents the agents of one job's run may start in all; 0 starts none. |
 | `jobs.keepDays` | whole ≥ 1 | 90 | all | **Days a job is kept.** Days the record of a job is kept; the older ones are removed when the next job starts. |
 
@@ -85,15 +91,15 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `calls.signInOpen` | whole ≥ 1 | 600 | shipped, global | **Sign-in stays open.** Seconds a sign-in to a provider stays open for you to finish it. |
 | `calls.testRoom` | whole ≥ 1 | 64 | shipped, global | **Test call's room.** Tokens a connection's test call lets its answer take. |
 | `calls.listMost` | whole ≥ 1 | 8 | shipped, global | **Most of a model list read.** Megabytes of a server's list of its models that are read; a longer list is refused. |
-| `calls.quoted` | whole ≥ 1 | 80 | shipped, global | **Address quoted in a refusal.** Characters of a media address that the words of a refused request quote. |
+| `calls.quoted` | whole ≥ 0 | 80 | shipped, global | **Address quoted in a refusal.** Characters of a media address that the words of a refused request quote. |
 | `calls.signInWordsKept` | whole ≥ 0 | 600 | shipped, global | **Failed sign-in's words kept.** Seconds the words of why a sign-in did not finish are kept to be shown. |
 | `calls.wordsMost` | whole ≥ 1 | 2000 | shipped, global | **Length of failure words.** Characters of a provider's or a call's failure words that are kept; the rest is cut. |
 | `calls.secretFloor` | whole ≥ 1 | 8 | shipped, global | **Length a secret is looked for at.** Characters from which a key or a header's value is taken out of a provider's words wherever it stands; a shorter one is taken out where it stands as a word of its own. A key shorter than this is refused. |
 | `calls.retryWait` | whole ≥ 0 | 1 | shipped, global | **Wait before a retry.** Seconds before a failed call is made again the first time; each wait after is twice the one before. |
 | `calls.retries` | whole ≥ 0 | 2 | shipped, global | **Retries of a failed call.** Times a call that failed before any answer came is made again, where its connection sets no number of its own. |
 | `calls.cacheRetention` | none \\| short \\| long | short | shipped, global | **Prompt cache retention.** How long a provider is asked to keep a prompt in its cache: none, short or long. |
-| `calls.toolRefusalMinutes` | whole ≥ 1 | 60 | shipped, global | **Native tools tried again after.** Minutes a connection's model that refused native tools is offered them as text; then native tools are tried again. |
-| `calls.effortRefusalMinutes` | whole ≥ 1 | 60 | shipped, global | **Refused thinking level tried again after.** Minutes a connection's model that refused a thinking level is sent the next level down it has at once; then the refused level is tried again. |
+| `calls.toolRefusalMinutes` | whole ≥ 0 | 60 | shipped, global | **Native tools tried again after.** Minutes a connection's model that refused native tools is offered them as text; then native tools are tried again. |
+| `calls.effortRefusalMinutes` | whole ≥ 0 | 60 | shipped, global | **Refused thinking level tried again after.** Minutes a connection's model that refused a thinking level is sent the next level down it has at once; then the refused level is tried again. |
 
 ## `throttles`
 
@@ -116,17 +122,17 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
-| `tokens.charsPerToken` | number ≥ 0.5 | 3.2 | all | **Characters per token.** Characters counted as one token when a prompt is measured before its provider counts it: whether a call fits, when to compact, and the trace's figures. |
+| `tokens.charsPerToken` | number ≥ 0.01 | 3.2 | all | **Characters per token.** Characters counted as one token when a prompt is measured before its provider counts it: whether a call fits, when to compact, and the trace's figures. Below 1: Below 1 a prompt is measured larger than any provider counts it, so agents compact early and calls look too big to fit. |
 
 ## `sampling`
 
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
-| `sampling.<definition>.temperature` | number ≥ 0, ≤ 2 | the provider's own | all | **Temperature.** The temperature every call of this agent is made with; unset, its provider's own. |
+| `sampling.<definition>.temperature` | number ≥ 0 | the provider's own | all | **Temperature.** The temperature every call of this agent is made with; unset, its provider's own. Above 2: Most providers take a temperature of at most 2; one that takes less refuses the call. |
 | `sampling.<definition>.top_p` | number ≥ 0, ≤ 1 | the provider's own | all | **Top P.** The top P every call of this agent is made with, where its provider takes one; unset, its provider's own. |
 | `sampling.<definition>.top_k` | whole ≥ 0 | the provider's own | all | **Top K.** The top K every call of this agent is made with, where its provider takes one; unset, its provider's own. |
-| `sampling.<definition>.frequency_penalty` | number ≥ -2, ≤ 2 | the provider's own | all | **Frequency penalty.** The frequency penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. |
-| `sampling.<definition>.presence_penalty` | number ≥ -2, ≤ 2 | the provider's own | all | **Presence penalty.** The presence penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. |
+| `sampling.<definition>.frequency_penalty` | number ≥ undefined | the provider's own | all | **Frequency penalty.** The frequency penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. Below -2: Most providers take a frequency penalty from -2 to 2; one that takes less refuses the call. Above 2: Most providers take a frequency penalty from -2 to 2; one that takes less refuses the call. |
+| `sampling.<definition>.presence_penalty` | number ≥ undefined | the provider's own | all | **Presence penalty.** The presence penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. Below -2: Most providers take a presence penalty from -2 to 2; one that takes less refuses the call. Above 2: Most providers take a presence penalty from -2 to 2; one that takes less refuses the call. |
 | `sampling.<definition>.repetition_penalty` | number ≥ 0 | the provider's own | all | **Repetition penalty.** The repetition penalty every call of this agent is made with, where its provider takes one; unset, its provider's own. |
 
 ## `reply`
@@ -139,7 +145,7 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `reply.check.kept` | whole ≥ 1 | 28 | all | **Turns that must keep the tags.** Turns of a tag check that must come back with the reply and the intent record in their tags for the connection to be given the tag form; fewer give it the two-step form. |
 | `reply.streamAnyway` | names | none | all | **Two-step connections that stream.** Two-step connections whose replies are shown as they are written, not when their message ends. |
 | `reply.heldSentences` | whole ≥ 0 | 1 | all | **Sentences held back.** Sentences the reply is held back by while a rule that interrupts covers it. |
-| `reply.tailSentences` | whole ≥ 1 | 3 | all | **Sentences shown again.** Sentences of what was already shown that go with the line an agent goes on under after a rule stopped it. |
+| `reply.tailSentences` | whole ≥ 0 | 3 | all | **Sentences shown again.** Sentences of what was already shown that go with the line an agent goes on under after a rule stopped it. |
 | `reply.leadSampling` | own \\| preset | own | all | **The lead's sampling.** Whether the lead samples as its own model does, or as the chat's preset says. |
 
 ## `progress`
@@ -147,7 +153,7 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
 | `progress.show` | all \\| least | all | all | **Progress lines.** All the progress lines in the chat's thinking block, or the least: only the line that keeps a silent turn alive. |
-| `progress.silence` | whole ≥ 1, ≤ 540 | 60 | all | **Silence before a progress line.** Seconds of nothing shown before a progress line goes to the chat's thinking block; at most nine minutes, since a generation that shows nothing for ten is ended. |
+| `progress.silence` | whole ≥ 1 | 60 | all | **Silence before a progress line.** Seconds of nothing shown before a progress line goes to the chat's thinking block. Above 540: Lumiverse ends a generation that has shown nothing for ten minutes: past nine, a silent turn may be cut off before its progress line comes. |
 
 ## `results`
 
@@ -163,7 +169,7 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `tools.gapCheck` | whole ≥ 1 | 20 | all | **Hits a gap check takes.** Hits gap_check takes from each place it searches when the agent asks for no number. |
 | `tools.perCall` | whole ≥ 1 | 100 | all | **The most one tool call takes.** Messages chat_read gives, entries lore_read reads, hits a search asks each place for, and messages a stretch of the chat an agent is given holds. |
 | `tools.schemaShown` | whole ≥ 0 | 600 | all | **Schema shown with a call that does not fit.** Characters of a tool's schema shown whole in the answer to a call that does not fit it; a longer schema is left out of that answer. |
-| `tools.fixedTokens` | whole ≥ 1 | 8000 | all | **Size of an agent's tool list.** Tokens an agent's fixed list of tools, as its requests carry it, should stay under; a list over it is marked in the live view and on the Turn page, and still runs. |
+| `tools.fixedTokens` | whole ≥ 0 | 8000 | all | **Size of an agent's tool list.** Tokens an agent's fixed list of tools, as its requests carry it, should stay under; a list over it is marked in the live view and on the Turn page, and still runs. |
 | `tools.commandTimeout` | whole ≥ 1 | 30 | all | **Time a command tool may take.** Seconds one of your command tools may run when its manifest names no timeout; past them it is stopped and the agent is told. |
 | `tools.httpTimeout` | whole ≥ 1 | 30 | all | **Time an HTTP tool may take.** Seconds one of your HTTP tools may wait for its address's answer when its manifest names no timeout; past them the call is given up and the agent is told. |
 | `tools.answerMax` | whole ≥ 1 | 1048576 | all | **The most read of a tool's answer.** Bytes read of what a command tool, an HTTP tool or an MCP server answers; past them the answer is cut and the agent is told. |
@@ -182,7 +188,7 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `hooks.timeout` | whole ≥ 1 | 30 | all | **Time a hook may take.** Seconds one of your hooks may take where hooks.yml names no timeout of its own; past them it is stopped, blocks nothing, and is shown as timed out. |
 | `hooks.blockExit` | whole ≥ 1 | 2 | all | **Exit code that blocks.** The exit code with which a hook blocks, its error output as the reason; any other failing code blocks nothing and is shown as failed. |
 | `hooks.answerMax` | whole ≥ 1 | 1048576 | all | **Most of a hook's answer read.** Bytes read of what a hook answers; an answer past them is cut, blocks nothing, and is shown as failed. |
-| `hooks.reasonChars` | whole ≥ 1 | 2000 | all | **Most of a hook's reason kept.** Characters of a hook's error output kept as its reason or as why it failed; the last of them are kept. |
+| `hooks.reasonChars` | whole ≥ 0 | 2000 | all | **Most of a hook's reason kept.** Characters of a hook's error output kept as its reason or as why it failed; the last of them are kept. |
 
 ## `rules`
 

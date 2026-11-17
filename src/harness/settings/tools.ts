@@ -22,7 +22,7 @@ export const TOOLS = worded(
     // to write, is answered with what did not fit alone.
     schemaShown: { key: "tools.schemaShown", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, at: "schemaShown" },
     // Appendix D.1: the fixed list's tools under 8,000 tokens. A list over it is marked, never refused.
-    fixedTokens: { key: "tools.fixedTokens", takes: { type: "whole", least: 1 }, default: 8_000, perConnection: false, at: "fixedTokens" },
+    fixedTokens: { key: "tools.fixedTokens", takes: { type: "whole", least: 0 }, default: 8_000, perConnection: false, at: "fixedTokens" },
     // §16: a command he writes answers in seconds or has hung; half a minute leaves room for a slow one.
     commandTimeout: { key: "tools.commandTimeout", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "commandTimeout", ms: true },
     // The same half minute for an address's answer.

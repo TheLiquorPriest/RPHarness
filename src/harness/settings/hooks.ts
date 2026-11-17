@@ -12,7 +12,7 @@ export const HOOKS = worded(
     // 1 MiB: a command tool's ceiling, far past any context a hook adds.
     answerMax: { key: "hooks.answerMax", takes: { type: "whole", least: 1 }, default: 1_048_576, perConnection: false, at: "hookAnswerMax" },
     // A few lines of stderr: enough to say why, short enough for the live view.
-    reasonChars: { key: "hooks.reasonChars", takes: { type: "whole", least: 1 }, default: 2_000, perConnection: false, at: "hookReasonChars" },
+    reasonChars: { key: "hooks.reasonChars", takes: { type: "whole", least: 0 }, default: 2_000, perConnection: false, at: "hookReasonChars" },
   },
   HOOKS_WORDS,
 );

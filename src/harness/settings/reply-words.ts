@@ -8,5 +8,5 @@ export const REPLY_WORDS = {
   "reply.tailSentences": { name: "Sentences shown again", about: "Sentences of what was already shown that go with the line an agent goes on under after a rule stopped it." },
   "reply.leadSampling": { name: "The lead's sampling", about: "Whether the lead samples as its own model does, or as the chat's preset says." },
   "progress.show": { name: "Progress lines", about: "All the progress lines in the chat's thinking block, or the least: only the line that keeps a silent turn alive." },
-  "progress.silence": { name: "Silence before a progress line", about: "Seconds of nothing shown before a progress line goes to the chat's thinking block; at most nine minutes, since a generation that shows nothing for ten is ended." },
+  "progress.silence": { name: "Silence before a progress line", about: "Seconds of nothing shown before a progress line goes to the chat's thinking block.", above: "Lumiverse ends a generation that has shown nothing for ten minutes: past nine, a silent turn may be cut off before its progress line comes." },
 };

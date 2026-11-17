@@ -6,12 +6,16 @@
 import type { LayerLevel } from "./files";
 import type { JsonObject, JsonValue } from "./json";
 
-/** What a level may set a setting to. */
+/**
+ * What a level may set a setting to. A bound here is one no value past has any meaning (a count below
+ * zero, a share of one above it, a place none can take); every other is `SettingDef.advice`, a line
+ * the page shows while the value is past it, and the value is taken (§2.1 point 5: no hard cap).
+ */
 export type SettingTakes =
   /** A whole number, at least `least`, and at most `most` where it has one. */
   | { readonly type: "whole"; readonly least: number; readonly most?: number }
-  /** A number, at least `least`, and at most `most` where it has one. */
-  | { readonly type: "number"; readonly least: number; readonly most?: number }
+  /** A number, at least `least` where it has one, and at most `most` where it has one. */
+  | { readonly type: "number"; readonly least?: number; readonly most?: number }
   /** One of `values`. */
   | { readonly type: "oneOf"; readonly values: readonly string[] }
   /** True or false. */
@@ -21,11 +25,21 @@ export type SettingTakes =
   /** A list of names; as read, an item that is not a name (not text, or blank) is passed over, and written, refused. */
   | { readonly type: "texts" };
 
+/** A line the Settings page shows beside a setting's control while its value is below `below` or above `above` (one of them); the value is taken either way. */
+export interface SettingAdvice {
+  readonly below?: number;
+  readonly above?: number;
+  /** Words for the owner, never sent to a model. */
+  readonly says: string;
+}
+
 /** A setting as the code that reads it declares it: what a page needs to show it, to check a value before writing it, and to say what it is for. */
 export interface SettingDef {
   /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection, `<definition>` where a setting set per agent definition names the definition (`sampling.<definition>.temperature`). */
   readonly key: string;
   readonly takes: SettingTakes;
+  /** Lines the page shows while the value is past a point beyond which it still has a meaning, but one to know of: the value is taken. */
+  readonly advice?: readonly SettingAdvice[];
   /** What holds where no level sets it, as a config file writes it: null for nothing, whose meaning `unset` gives where it has one, else `none`. */
   readonly default: JsonValue;
   /** What no value means, in a page's words, where the default is null or `~` may be set: "no limit". */

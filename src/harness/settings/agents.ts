@@ -19,15 +19,15 @@ const AS_ITS_DEFINITION = "as its definition says";
 export const AGENTS = worded(
   {
     effort: { key: `${OWN}.effort`, takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, orNone: true, none: "its connection's", unset: AS_ITS_DEFINITION, perConnection: false, at: `${OWN}.effort`, noneKept: true },
-    calls: { key: `${LIMIT}.calls`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.calls`, noneKept: true },
-    tokensIn: { key: `${LIMIT}.tokensIn`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensIn`, noneKept: true },
-    tokensOut: { key: `${LIMIT}.tokensOut`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensOut`, noneKept: true },
-    time: { key: `${LIMIT}.time`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.time`, ms: true, noneKept: true },
-    callTokensIn: { key: `${LIMIT}.callTokensIn`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTokensIn`, noneKept: true },
-    callTokensOut: { key: `${LIMIT}.callTokensOut`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTokensOut`, noneKept: true },
-    callTime: { key: `${LIMIT}.callTime`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTime`, ms: true, noneKept: true },
-    toolRounds: { key: `${LIMIT}.toolRounds`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.toolRounds`, noneKept: true },
-    toolsPerAnswer: { key: `${LIMIT}.toolsPerAnswer`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.toolsPerAnswer`, noneKept: true },
+    calls: { key: `${LIMIT}.calls`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.calls`, noneKept: true },
+    tokensIn: { key: `${LIMIT}.tokensIn`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensIn`, noneKept: true },
+    tokensOut: { key: `${LIMIT}.tokensOut`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensOut`, noneKept: true },
+    time: { key: `${LIMIT}.time`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.time`, ms: true, noneKept: true },
+    callTokensIn: { key: `${LIMIT}.callTokensIn`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTokensIn`, noneKept: true },
+    callTokensOut: { key: `${LIMIT}.callTokensOut`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTokensOut`, noneKept: true },
+    callTime: { key: `${LIMIT}.callTime`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.callTime`, ms: true, noneKept: true },
+    toolRounds: { key: `${LIMIT}.toolRounds`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.toolRounds`, noneKept: true },
+    toolsPerAnswer: { key: `${LIMIT}.toolsPerAnswer`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.toolsPerAnswer`, noneKept: true },
     // None here is `limits.toolsAtOnce`, every agent's; 0 would run no tool at all.
     toolsAtOnce: { key: `${LIMIT}.toolsAtOnce`, takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "as limits.toolsAtOnce says", unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.toolsAtOnce`, noneKept: true },
     // 0: a sub-agent is sent no message after its first answer.

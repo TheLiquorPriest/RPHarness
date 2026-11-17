@@ -137,7 +137,7 @@ function takenValues(def: SettingDef): [JsonValue, JsonValue] {
     t.type === "whole"
       ? [t.least, t.least + 1, t.least + 2]
       : t.type === "number"
-        ? [t.least, t.most ?? t.least + 1, (t.least + (t.most ?? t.least + 1)) / 2]
+        ? [t.least ?? 0, t.most ?? (t.least ?? 0) + 1, ((t.least ?? 0) + (t.most ?? (t.least ?? 0) + 1)) / 2]
         : t.type === "oneOf"
           ? [...t.values]
           : t.type === "yesNo"
@@ -156,7 +156,7 @@ function untakenValues(def: SettingDef): JsonValue[] {
     t.type === "whole"
       ? [t.least - 1, t.least + 0.5, ...(t.most !== undefined ? [t.most + 1] : [])]
       : t.type === "number"
-        ? [t.least - 1, ...(t.most !== undefined ? [t.most + 1] : [])]
+        ? [...(t.least !== undefined ? [t.least - 1] : []), ...(t.most !== undefined ? [t.most + 1] : []), Number.NaN]
         : t.type === "oneOf"
           ? ["none-such"]
           : t.type === "yesNo"

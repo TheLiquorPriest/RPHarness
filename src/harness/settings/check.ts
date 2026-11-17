@@ -22,9 +22,13 @@ function takesWords(def: SettingDef): string {
         ? `a whole number, at least ${t.least}`
         : `a whole number from ${t.least} to ${t.most}`
       : t.type === "number"
-        ? t.most === undefined
-          ? `a number, at least ${t.least}`
-          : `a number from ${t.least} to ${t.most}`
+        ? t.least === undefined
+          ? t.most === undefined
+            ? "a number"
+            : `a number, at most ${t.most}`
+          : t.most === undefined
+            ? `a number, at least ${t.least}`
+            : `a number from ${t.least} to ${t.most}`
         : t.type === "oneOf"
           ? `one of ${t.values.join(", ")}`
           : t.type === "yesNo"
@@ -51,7 +55,7 @@ export function checkSettingValue(def: SettingDef, value: JsonValue, connection?
     case "whole":
       return typeof value === "number" && Number.isInteger(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : refused;
     case "number":
-      return typeof value === "number" && Number.isFinite(value) && value >= t.least && (t.most === undefined || value <= t.most) ? { ok: true, value } : refused;
+      return typeof value === "number" && Number.isFinite(value) && (t.least === undefined || value >= t.least) && (t.most === undefined || value <= t.most) ? { ok: true, value } : refused;
     case "oneOf":
       return typeof value === "string" && t.values.includes(value) ? { ok: true, value } : refused;
     case "yesNo":

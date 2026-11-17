@@ -48,6 +48,14 @@ export interface RoomAsk {
   floor: number;
   /** The other bounds on the answer, each absent where there is none: the model's longest reply (or the connection's entry), the call's own, the agent's answer per call. */
   bounds: readonly (number | undefined)[];
+  /**
+   * The call's prompt, as estimated: its tokens, and of them those its provider will likely read
+   * again from its cache (what it held of the last request). A limit on tokens sent and written
+   * together counts it before the answer's room, the cached part at the weight that limit counts a
+   * cached token at, so the room is what the answer can take and the call is never refused where
+   * that weighting allows it. Absent: counted as nothing.
+   */
+  prompt?: { tokens: number; cached: number };
 }
 
 /**
@@ -115,22 +123,23 @@ export class Budget {
   /**
    * The room of the next call's answer (§10.11; AuHarness-R43): the least of `ask.bounds` and of the
    * tokens left under every limit on what is written, here and in every budget above (`tokensOut`,
-   * and `tokens`, sent and written together, as it counts now). Under the floor, the tightest such
-   * limit.
+   * and `tokens`, sent and written together, as it counts now with the call's own prompt counted in
+   * at its weight). Under the floor, the tightest such limit.
    */
   room(agent: AgentRef, ask: RoomAsk): Room {
     let tightest: { left: number; hit: LimitHit } | undefined;
     for (let budget: Budget | undefined = this; budget !== undefined; budget = budget.#over) {
       const used = budget.#counted();
-      const written: [Counted, number][] = [
-        ["tokensOut", used.output],
-        ["tokens", budget.#tokens(used)],
+      const prompt = ask.prompt === undefined ? 0 : budget.#sent({ ...emptyUsage(), input: ask.prompt.tokens, cacheRead: Math.min(ask.prompt.cached, ask.prompt.tokens) });
+      const written: [Counted, number, number][] = [
+        ["tokensOut", used.output, 0],
+        ["tokens", budget.#tokens(used), prompt],
       ];
-      for (const [limit, value] of written) {
+      for (const [limit, value, coming] of written) {
         const max = budget.#max[limit];
         if (max === undefined) continue;
-        const left = max - value;
-        if (tightest === undefined || left < tightest.left) tightest = { left, hit: budget.#hit(limit, max, value, agent) };
+        const left = max - value - coming;
+        if (tightest === undefined || left < tightest.left) tightest = { left, hit: budget.#hit(limit, max, value + coming, agent) };
       }
     }
     if (tightest !== undefined && tightest.left < ask.floor) return { hit: tightest.hit };

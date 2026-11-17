@@ -270,6 +270,8 @@ export class AgentRunner {
   #settings: CallSettings = {};
   /** The provider's count of the last request it counted: an estimate of a later request starts from it. */
   #counted: ProviderCount | undefined;
+  /** What the provider held in its cache of the last request it counted (read again, or written for later): the next request, which begins with it, likely reads that much again. */
+  #cachedLast = 0;
   #calls = 0;
   #stint: Stint | undefined;
   /** The call its last work ended on with a question, until a message answers it. */
@@ -641,7 +643,8 @@ export class AgentRunner {
     const limits = this.#o.limits ?? {};
     const prompt = requestTokens(messages, this.#o.terms.charsPerToken, this.#counted);
     if (limits.callTokensIn !== undefined && prompt > limits.callTokensIn) return { hit: { limit: "callTokensIn", per: "agent", max: limits.callTokensIn, value: prompt, agent: this.agent } };
-    return this.#budget.room(this.agent, { floor: this.#o.terms.answerFloor, bounds: [model.maxTokens > 0 ? model.maxTokens : undefined, this.#settings.maxTokens, limits.callTokensOut] });
+    // A limit on tokens sent and written together counts the call's own prompt before its answer's room, the part its provider will likely read again from its cache at that limit's weight.
+    return this.#budget.room(this.agent, { floor: this.#o.terms.answerFloor, bounds: [model.maxTokens > 0 ? model.maxTokens : undefined, this.#settings.maxTokens, limits.callTokensOut], prompt: { tokens: prompt, cached: this.#cachedLast } });
   }
 
   /** The model call pi's loop makes, wrapped: limits first, then the settings decided for its request, then a stream that ends the moment the work stops. */
@@ -736,7 +739,10 @@ export class AgentRunner {
         // An answer that calls tools is a tool round, the agent's and every budget's above it.
         if (stint.halt === undefined && stint.cut === undefined && message.stopReason !== "error" && message.stopReason !== "aborted" && message.content.some((part) => part.type === "toolCall")) this.#budget.round();
         // A provider's count of the request: the next estimate starts from it. An answer with none leaves the last count standing.
-        if (message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite > 0) this.#counted = { messages: stint.callSent, tokens: used.input };
+        if (message.usage.input + message.usage.output + message.usage.cacheRead + message.usage.cacheWrite > 0) {
+          this.#counted = { messages: stint.callSent, tokens: used.input };
+          this.#cachedLast = message.usage.cacheRead + message.usage.cacheWrite;
+        }
         if (stint.halt !== undefined) return;
         if (stint.cut === undefined) {
           stint.last = message;

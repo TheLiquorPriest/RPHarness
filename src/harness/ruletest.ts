@@ -215,7 +215,7 @@ export async function testRule(d: RuleTestDeps, scope: Scope, name: string, turn
       settings,
       budget: new Budget("turn", {}),
       // The Author's connection: the past turn's lead's, else the asking agent's own.
-      author: async (agent) => connectionOf(d.connections, at, (await guidance.definition(leadRef.definition)) ?? (await guidance.definition(agent.definition)) ?? {}, env.log),
+      author: async (agent) => connectionOf(d.connections, at, (await guidance.definition(leadRef.definition)) ?? (await guidance.definition(agent.definition)) ?? {}, env.log, settings),
       track: () => () => undefined,
       late: () => undefined,
     });

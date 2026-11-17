@@ -19,9 +19,10 @@
 // What has no chat in view (a connection's test, a sign-in, a request passed through) reads its
 // settings at the levels every chat shares, through a read that names only the user (`UserScope`).
 
-import type { FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
-import type { Guidance } from "../../files/api";
+import type { Effort, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
+import type { AgentDefinition, DefinitionLimits, Guidance } from "../../files/api";
 import type { CallTerms } from "../../loop/types";
+import { AGENTS } from "./agents";
 import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
 import { COMPACTION } from "./compaction";
@@ -40,14 +41,14 @@ import { TRACE, TRACE_GONE } from "./trace";
 import { USAGE } from "./usage";
 
 /** The groups of settings RPH reads, in the order the list gives them. A new group is one line here. */
-export const GROUPS = [LIMITS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, MCP, HOOKS, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
+export const GROUPS = [LIMITS, AGENTS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, MCP, HOOKS, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
 const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE, ...TRACE_GONE };
 
 /** The settings of some groups as a host sees them: every entry with its words, and not where the harness keeps its value. */
 export function listOf(groups: readonly Group[]): readonly ListedSetting[] {
-  return frozen(groups.flatMap((group) => Object.values(group).map(({ at: _at, ms: _ms, ...listed }) => listed)));
+  return frozen(groups.flatMap((group) => Object.values(group).map(({ at: _at, ms: _ms, noneKept: _kept, ...listed }) => listed)));
 }
 
 /** Every setting RPH reads, as a config file writes it, each with its name and what it is for. */
@@ -64,16 +65,18 @@ type Taken<D extends SettingEntry> = TakenBy<D["takes"]> | (D extends { readonly
 /** A setting's value: one a level sets, or its default, which is one it takes or none (null). */
 type ValueOf<D extends SettingEntry> = Taken<D> | (null extends D["default"] ? null : never);
 
-/** Where a value lands at the path `P` of `Settings`: none leaves the field out, so a field that may be none is optional; connections and definitions are keyed by name, as the files write them. */
-type Land<P extends string, V> = P extends `${typeof CONNECTION | typeof DEFINITION}.${infer Rest}`
-  ? Readonly<Record<string, Land<Rest, V>>>
+/** Where a value lands at the path `P` of `Settings`: none leaves the field out, so a field that may be none is optional, where it is not kept (`K`, the entry's `noneKept`) as null; connections and definitions are keyed by name, as the files write them. */
+type Land<P extends string, V, K extends boolean = false> = P extends `${typeof CONNECTION | typeof DEFINITION}.${infer Rest}`
+  ? Readonly<Record<string, Land<Rest, V, K>>>
   : P extends typeof CONNECTION | typeof DEFINITION
     ? Readonly<Record<string, Exclude<V, null>>>
     : P extends `${infer Head}.${infer Rest}`
-      ? { readonly [K in Head]: Land<Rest, V> }
+      ? { readonly [F in Head]: Land<Rest, V, K> }
       : null extends V
-        ? { readonly [K in P]?: Exclude<V, null> }
-        : { readonly [K in P]: V };
+        ? K extends true
+          ? { readonly [F in P]?: V }
+          : { readonly [F in P]?: Exclude<V, null> }
+        : { readonly [F in P]: V };
 
 /** Every entry of some groups, as one union. */
 type EntryOf<G extends readonly Group[]> = G[number] extends infer R ? (R extends Group ? R[keyof R] : never) : never;
@@ -82,7 +85,7 @@ type EntryOf<G extends readonly Group[]> = G[number] extends infer R ? (R extend
 type Joined<U> = (U extends unknown ? (part: U) => void : never) extends (part: infer I) => void ? I : never;
 
 /** What the settings of some groups read as: each entry's value where its entry says it lands. */
-export type SettingsOf<G extends readonly Group[]> = Joined<EntryOf<G> extends infer E ? (E extends SettingEntry ? Land<E["at"], ValueOf<E>> : never) : never>;
+export type SettingsOf<G extends readonly Group[]> = Joined<EntryOf<G> extends infer E ? (E extends SettingEntry ? Land<E["at"], ValueOf<E>, E extends { readonly noneKept: true } ? true : false> : never) : never>;
 
 /** The user's settings a turn is run under. */
 export type Settings = SettingsOf<typeof GROUPS>;
@@ -384,7 +387,7 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
   for (const group of groups) {
     for (const entry of Object.values(group)) {
       const path = entry.at.split(".");
-      const land = (to: readonly string[], value: unknown): void => own(holder(to.slice(0, -1)), to.at(-1)!, entry.ms === true ? (value as number) * 1000 : value);
+      const land = (to: readonly string[], value: unknown): void => own(holder(to.slice(0, -1)), to.at(-1)!, entry.ms === true && value !== null ? (value as number) * 1000 : value);
       const named = path.findIndex(isNamed);
       if (named === -1) {
         holder(path.slice(0, -1));
@@ -402,7 +405,8 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
         const to = [...path.slice(0, named), connection, ...path.slice(named + 1)];
         holder(to.slice(0, -1));
         const value = read.taken(entry, connection);
-        if (value !== undefined && value !== null) land(to, value);
+        // None set at a level is left out, but where it stands over another source (`noneKept`): there it lands as null.
+        if (value !== undefined && (value !== null || entry.noneKept === true)) land(to, value);
       }
     }
   }
@@ -466,6 +470,32 @@ export function callTerms(settings: Settings, definition?: string): CallTerms {
     ...(settings.repeats !== undefined ? { repeats: settings.repeats } : {}),
     ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}),
   };
+}
+
+/**
+ * The limits an agent of a definition is held to (§2.1 point 5): each its header's `limits:` sets,
+ * with each one a level sets for it (`agents.<definition>.limits.<limit>`) standing over the
+ * header's, `~` lifting it. `time` and `callTime` in milliseconds. Undefined where none holds.
+ */
+export function agentLimits(settings: Pick<Settings, "agents">, definition: Pick<AgentDefinition, "name" | "limits">): DefinitionLimits | undefined {
+  const out: Record<string, number> = { ...definition.limits };
+  const own = Object.hasOwn(settings.agents, definition.name) ? settings.agents[definition.name]?.limits : undefined;
+  for (const [limit, value] of Object.entries(own ?? {})) {
+    if (value === null) delete out[limit];
+    else if (value !== undefined) out[limit] = value;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/**
+ * The effort an agent of a definition thinks at, as far as the settings and its header say
+ * (§2.1 point 5): a level's `agents.<definition>.effort` stands over the header's `effort:`, and `~`
+ * there leaves it to its connection. Undefined: its connection's own.
+ */
+export function agentEffort(settings: Pick<Settings, "agents">, definition: Pick<AgentDefinition, "effort"> & { name?: string }): Effort | undefined {
+  const own = definition.name !== undefined && Object.hasOwn(settings.agents, definition.name) ? settings.agents[definition.name] : undefined;
+  if (own !== undefined && Object.hasOwn(own, "effort")) return own.effort ?? undefined;
+  return definition.effort;
 }
 
 /** The user's counts for the jobs on one connection, under the setting's key that names it (its name or its id). */

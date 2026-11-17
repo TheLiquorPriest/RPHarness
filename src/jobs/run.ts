@@ -13,7 +13,7 @@ import { AgentRuns } from "../harness/agent-run";
 import { Judges } from "../harness/judge";
 import type { LiveHub } from "../harness/live";
 import { connectionOf, lines, runnerTexts, template, toolTextOf } from "../harness/means";
-import { callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
+import { agentLimits, callTerms, interruptFor, readSettings, type Settings } from "../harness/settings";
 import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
 import { agentJson, hookSettings, Hooks, scopeJson } from "../external/hooks";
@@ -137,7 +137,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     stops: async (agent) => {
       const definition = await guidance.definition(agent.definition);
       if (definition === undefined) return interruptFor(settings, { id: null, name: null }) === "stop";
-      const connection = await connectionOf(core.connections, scope, definition, env.log);
+      const connection = await connectionOf(core.connections, scope, definition, env.log, settings);
       return interruptFor(settings, connection) === "stop";
     },
     // A rule's command is asked under the user's `rules.commandTimeout`; one that failed shows in the trace and the log, never as a "no".
@@ -213,7 +213,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     settings,
     budget,
     // The Author's connection judges where neither the rule nor `rules.judge` names one: the definition the chat's config names its lead (`lead:`), else the asking agent's own.
-    author: async (agent) => connectionOf(core.connections, scope, (await guidance.definition(settings.lead ?? agent.definition)) ?? {}, env.log),
+    author: async (agent) => connectionOf(core.connections, scope, (await guidance.definition(settings.lead ?? agent.definition)) ?? {}, env.log, settings),
     track: (entry) => {
       working.add(entry);
       return () => working.delete(entry);
@@ -231,7 +231,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     guidance,
     ids: () => core.ids(),
     models: core.models,
-    connection: (definition) => connectionOf(core.connections, scope, definition, env.log),
+    connection: (definition) => connectionOf(core.connections, scope, definition, env.log, settings),
     hold: (names) => registry?.hold(names) ?? { tools: [], missing: [...names] },
     unregistered: (name, tools) => env.log.warn("Tools an agent's definition lists are registered by nobody; it holds the rest.", { agent: name, tools: [...tools] }),
     gate: (agent, parent) => runs.gate(agent, parent),
@@ -245,6 +245,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     },
     perCall: () => settings.perCall,
     terms: (definition) => callTerms(settings, definition),
+    limits: (definition) => agentLimits(settings, definition),
     track: (entry) => {
       working.add(entry);
       return () => working.delete(entry);
@@ -314,7 +315,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   if (!("runner" in made)) return made;
   if (made.missing.length > 0) env.log.warn("A job's agent was not given what nobody could find.", { job: ask.id, agent: made.ref.id, missing: made.missing });
   const definition = await guidance.definition(ask.call.agent);
-  const connection = definition === undefined ? { id: null, name: null } : await connectionOf(core.connections, scope, definition, env.log);
+  const connection = definition === undefined ? { id: null, name: null } : await connectionOf(core.connections, scope, definition, env.log, settings);
   const { runner, ref } = made;
 
   return {

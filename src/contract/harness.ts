@@ -509,6 +509,24 @@ export interface UsageApi {
 
 // ---------------------------------------------------------------- definitions
 
+/**
+ * An agent's limits as a definition's header and the settings write them (§5.4; §2.1 point 5):
+ * `time` and `callTime` in seconds. Each absent is no limit of its own.
+ */
+export interface DefinitionLimitsView {
+  calls?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  time?: number;
+  callTokensIn?: number;
+  callTokensOut?: number;
+  callTime?: number;
+  toolRounds?: number;
+  toolsPerAnswer?: number;
+  toolsAtOnce?: number;
+  messages?: number;
+}
+
 /** An agent definition as the Files page shows it (§5.4), and where it came from. */
 export interface DefinitionView {
   name: string;
@@ -521,6 +539,8 @@ export interface DefinitionView {
   /** Its connection profile's name and effort, as its header says. */
   model?: string;
   effort?: Effort;
+  /** Its limits, as its header's `limits:` sets them; absent where it sets none. */
+  limits?: DefinitionLimitsView;
   /** How its tools are offered, as its header says (`tools_as:`); absent: auto. */
   toolsAs?: ToolsAs;
   /** Its fixed tools, the instruction files it reads, and what it is given at the start of a run. */
@@ -533,15 +553,18 @@ export interface DefinitionView {
 
 /**
  * What a definition runs on, resolved among the user's connections for the scope it is listed for
- * (C28), as the Agents page shows it. A fact: thinking effort is set in definitions alone.
+ * (C28), as the Agents page shows it, with what the settings at that scope set for it
+ * (`agents.<definition>`, `effort.connections`) standing over its header.
  */
 export interface DefinitionRun {
   /** The connection its header names, by name or id; `default`, or none named, his default. Null where none is there. */
   connection: { id: string; name: string } | null;
   /** That connection's model; null where no connection resolves, or it names none. */
   model: string | null;
-  /** The effort it thinks at: its definition's; where it names none, its connection's own; null for its provider's own default. */
+  /** The effort it thinks at: the settings' for it, else its definition's, else its connection's own; null for its provider's own default. */
   effort: Effort | null;
+  /** The limits it is held to: its header's, each one the settings set for it standing over it (`~` lifting it); absent where none holds. */
+  limits?: DefinitionLimitsView;
 }
 
 /** A definition in force for a scope, as `definitions.list` gives it: with what it runs on. */

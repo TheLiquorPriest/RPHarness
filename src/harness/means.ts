@@ -8,6 +8,7 @@ import type { RunnerTexts } from "../loop";
 import { connectionNamed } from "../model/runs-on";
 import type { UserChoice } from "../model/source";
 import { invalidFields, type ToolText, type Words } from "../tools";
+import { agentEffort, type Settings } from "./settings";
 
 export function template(part: PromptPart | undefined): TemplatePart | undefined {
   return part?.format === "template" ? part : undefined;
@@ -59,8 +60,15 @@ export interface Connection {
   label: string;
 }
 
-/** The connection a definition (or a rule's `judge:`) names among the scope's user's connections (`connectionNamed`): `default` (or none) is his default connection; any other name is a connection's name or id. The choice carries the run's scope, so its calls read the model layer's settings at its chat's levels. The effort is the definition's alone (READINGS N-7): where it names none, the connection's own. */
-export async function connectionOf(connections: ModelsApi, scope: RunScope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs">, log: Log): Promise<Connection> {
+/**
+ * The connection a definition (or a rule's `judge:`) names among the scope's user's connections
+ * (`connectionNamed`): `default` (or none) is his default connection; any other name is a
+ * connection's name or id. The choice carries the run's scope, so its calls read the model layer's
+ * settings at its chat's levels. The effort is the one the settings and its header give an agent of
+ * the definition (`agentEffort`); where they give none, the connection's own. A judging call is no
+ * agent's (`settings` undefined): the definition's effort alone.
+ */
+export async function connectionOf(connections: ModelsApi, scope: RunScope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs"> & { name?: string }, log: Log, settings: Pick<Settings, "agents"> | undefined): Promise<Connection> {
   const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
   const list = await connections.list(scope.user).catch((error: unknown) => {
     log.warn("The connections could not be listed.", { error: error instanceof Error ? error.message : String(error) });
@@ -69,8 +77,9 @@ export async function connectionOf(connections: ModelsApi, scope: RunScope, defi
   const view = list === undefined ? undefined : connectionNamed(list, definition.model);
   const id = view?.id ?? named;
   const name = view?.name ?? named;
+  const effort = settings === undefined ? definition.effort : agentEffort(settings, definition);
   return {
-    choice: { user: scope.user, scope, connectionId: named === null ? null : id, model: null, ...(definition.effort !== undefined ? { effort: definition.effort } : {}), ...(definition.toolsAs !== undefined ? { toolsAs: definition.toolsAs } : {}) },
+    choice: { user: scope.user, scope, connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}), ...(definition.toolsAs !== undefined ? { toolsAs: definition.toolsAs } : {}) },
     id: id ?? null,
     name,
     label: name ?? "default",

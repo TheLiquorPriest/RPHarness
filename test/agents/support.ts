@@ -19,7 +19,7 @@ import type { AgentDefinition, PromptPart } from "../../src/files/api";
 import { TurnGate } from "../../src/harness/gate";
 import { LiveHub } from "../../src/harness/live";
 import { userMessage } from "../../src/harness/prompt";
-import { callTerms, readSettings } from "../../src/harness/settings";
+import { agentLimits, callTerms, readSettings } from "../../src/harness/settings";
 import { UsageBook } from "../../src/harness/usage";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/helpers";
@@ -282,6 +282,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
       settings: () => settings.subAgents,
       perCall: () => settings.perCall,
       terms: (definition) => callTerms(settings, definition),
+      limits: (definition) => agentLimits(settings, definition),
       track: (entry) => {
         working.add(entry);
         return () => working.delete(entry);

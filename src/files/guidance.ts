@@ -6,7 +6,7 @@
 
 import type { DefinitionView, FileRead, FileText, FilesPort, Found as FoundFiles, LayerLevel, Refused, RuleView, Scope, StackLeft, SwitchesPort, UserScope } from "../contract/index";
 import type { AgentDefinition, Fields, Guidance, GuidanceOptions, LoadGuidance, ManifestRead, PartKind, Problem, PromptPart, Replaced, RuleRun, RuleRunOptions, Skill, SkillEntry, Stack, StackEntry, ToolManifest } from "./api";
-import { parseDefinition } from "./definitions";
+import { limitsWritten, parseDefinition } from "./definitions";
 import { createRuleRun } from "./engine";
 import type { HookEntry } from "../external/hooks";
 import { normalized, problemAt, WrittenItems } from "./header";
@@ -364,6 +364,7 @@ class TreeGuidance implements Guidance {
         off: found.off,
         ...(d.model !== undefined ? { model: d.model } : {}),
         ...(d.effort !== undefined ? { effort: d.effort } : {}),
+        ...(d.limits !== undefined && Object.keys(d.limits).length > 0 ? { limits: limitsWritten(d.limits) } : {}),
         ...(d.toolsAs !== undefined ? { toolsAs: d.toolsAs } : {}),
         tools: [...d.tools],
         reads: [...d.reads],

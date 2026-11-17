@@ -25,6 +25,8 @@ export interface Landing {
   readonly at: string;
   /** A number of seconds, kept as milliseconds. */
   readonly ms?: true;
+  /** A value a level sets to none (`~`) lands as null rather than being left out: it stands over what another source gives (an agent's header), where no value at all leaves that source's. */
+  readonly noneKept?: true;
 }
 
 /** Where the key of a setting set per connection names its connection. */

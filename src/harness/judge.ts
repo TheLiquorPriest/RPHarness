@@ -121,7 +121,7 @@ export class Judges implements QuestionRules {
     }
     const text = joined([part.render({ question: question.question, text: question.text, about: { [question.watched]: true }, rule: question.rule }).text]);
     const named = question.judge ?? d.settings.judge;
-    const connection = named !== undefined ? await connectionOf(d.connections, d.trace.scope, { model: named }, d.env.log) : await d.author(question.agent);
+    const connection = named !== undefined ? await connectionOf(d.connections, d.trace.scope, { model: named }, d.env.log, undefined) : await d.author(question.agent);
     let model: AgentModel;
     try {
       model = await d.models.agentModel(connection.choice);

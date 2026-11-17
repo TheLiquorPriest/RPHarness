@@ -19,7 +19,7 @@
 // the lines of `.prompts/delegation.md`, and a message past its count in `.prompts/tool-notices.md`.
 import type { AgentRef, BodyFields, ConsentGrant, Environment, JsonValue, LimitHit, Log, ModelLimits, ToolCtx } from "../contract";
 import { loadGuidance } from "../files";
-import type { AgentDefinition, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
+import type { AgentDefinition, DefinitionLimits, Fields, Guidance, LinesPart, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { userMessage } from "../harness/prompt";
 import { placed } from "../harness/requests";
 import type { AgentSettings } from "../harness/settings";
@@ -80,6 +80,8 @@ export interface TeamDeps {
   perCall(): number;
   /** What every model call of an agent of that definition is made on: the estimate's ratio, the answer's floor, its own sampling. */
   terms(definition: string): CallTerms;
+  /** The limits an agent of that definition is held to: its header's, with what the settings set for it standing over them (`agents.<definition>.limits`). */
+  limits(definition: AgentDefinition): DefinitionLimits | undefined;
   /** A sub-agent's work began: the turn stops it with the rest, and its time reaches it. The answer forgets the work once it ends. */
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A sub-agent's model's room, for its window gauge. */
@@ -309,6 +311,7 @@ export class Team implements TeamWork {
     const ref: AgentRef = { id: `${definition.name}-${number}`, definition: definition.name, ...(origin.agent !== undefined ? { parent: origin.agent } : {}), ...(d.job !== undefined ? { job: d.job } : {}), ...(call.plays !== undefined ? { plays: call.plays } : {}) };
     const fields = fieldsOf(ref);
     const held = d.hold(definition.tools);
+    const limits = d.limits(definition);
     if (held.missing.length > 0) d.unregistered(definition.name, held.missing);
     // Its opening block, made as every agent's is (§5.2), by the one builder.
     const block = await openingOf({ guidance: d.guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => d.hold([name]).tools.length > 0, fields, log: d.env.log });
@@ -339,7 +342,7 @@ export class Team implements TeamWork {
       context: [placed(userMessage(joined([brief]), d.trace.clock.now()), "brief")],
       tools: held.tools,
       texts: d.texts(),
-      limits: definition.limits,
+      limits,
       turn: d.budget(),
       stream: rules.stream(ref),
       runEnd: rules.runEnd,
@@ -402,7 +405,7 @@ export class Team implements TeamWork {
     // Its definition's items as given now: a message that continues it gives again only those that changed.
     const again = new Map<string, string | undefined>(definition.given.map((name) => [name, given.blocks.find((block) => block.name === name)?.text]));
     // Its start record names only what it was handed.
-    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, again, session, model: model.model, ...(definition.limits?.messages !== undefined ? { most: definition.limits.messages } : {}) };
+    return { ref, runner, given: given.blocks.map((block) => block.name), missing: given.missing, limits: model.limits, again, session, model: model.model, ...(limits?.messages !== undefined ? { most: limits.messages } : {}) };
   }
 
   async ask(call: AskCall, ctx: ToolCtx): Promise<LoopToolResult> {

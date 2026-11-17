@@ -71,14 +71,14 @@ You are the lead of this roleplay ...
 |---|---|
 | `name`, `description` | Its name (the file's) and what it is for. |
 | `model` | The connection it runs on, by name or id; `default` (or left out) is the user's default connection. |
-| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. |
+| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. The setting `agents.<definition>.effort` stands over it ([settings](settings.md)). |
 | `tools_as` | How its tools are offered: `auto` (natively until the connection refuses them, then as text), `native`, `text`. |
 | `tools` | The tools it holds from its first call. Any other tool it reaches through `tool_search` and `tool_use`. |
 | `out_of_reach` | Families of tools it does not reach by searching. |
 | `reads` | The instruction files of its stack, and `rules` for the always-on rules it is named in. Their order in the stack is fixed: `ALL-AGENTS`, the rules, `AGENTS`, `WORLD`, `SIMULATION`, `WRITING`, then other files, the definition, then `TURN`, `PRESET`. |
 | `given` | What it is handed at the start of a run, by name (below). |
 | `opening` | What it is handed once, when its session opens, by the same names. |
-| `limits` | Its own limits: `calls`, `tokensIn`, `tokensOut`, `time` (s), `callTokensIn`, `callTokensOut`, `callTime` (s), `toolRounds`, `toolsPerAnswer`, `toolsAtOnce`, `messages`. |
+| `limits` | Its own limits: `calls`, `tokensIn`, `tokensOut`, `time` (s), `callTokensIn`, `callTokensOut`, `callTime` (s), `toolRounds`, `toolsPerAnswer`, `toolsAtOnce`, `messages`. Each setting `agents.<definition>.limits.<limit>` stands over the header's, `~` lifting it ([settings](settings.md)). |
 | `writer` | The definition `write_reply` hands the prose to. |
 
 The body is a template ([Templates](#templates)); a sub-agent's may name `{{agent}}`, `{{definition}}`

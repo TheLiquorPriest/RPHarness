@@ -26,10 +26,16 @@ export interface SettingDef {
   /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection, `<definition>` where a setting set per agent definition names the definition (`sampling.<definition>.temperature`). */
   readonly key: string;
   readonly takes: SettingTakes;
-  /** What holds where no level sets it, as a config file writes it: null for nothing, whose meaning `none` gives. */
+  /** What holds where no level sets it, as a config file writes it: null for nothing, whose meaning `unset` gives where it has one, else `none`. */
   readonly default: JsonValue;
   /** What no value means, in a page's words, where the default is null or `~` may be set: "no limit". */
   readonly none?: string;
+  /**
+   * What holds where no level sets it, in a page's words, where that is not what `~` means: a setting
+   * per agent definition stands over its header (`agents.<definition>.limits.calls`), so unset it is
+   * "as its definition says", and `~` set at a level is `none` ("no limit"). Absent: unset is the default.
+   */
+  readonly unset?: string;
   /** A level may set `~` (null), which means what `none` says: a limit lifted. */
   readonly orNone?: true;
   /** Set for one connection at a time, named by its name or its id where the key has `<connection>`. */

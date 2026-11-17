@@ -9,7 +9,7 @@
 // (R-134): the plan's own `given: [chat:history[scene], world:scene(full, map)]` holds two names,
 // where YAML alone refuses the first and cuts the second in two.
 
-import type { Effort, FileText, ToolsAs } from "../contract/index";
+import type { DefinitionLimitsView, Effort, FileText, ToolsAs } from "../contract/index";
 import type { AgentDefinition, DefinitionLimits, Problem, Replaced } from "./api";
 import { BODY_FIELDS, DEFINITION_FIELDS } from "./api";
 import type { At, Split } from "./header";
@@ -24,6 +24,12 @@ const LIMITS = ["calls", "tokensIn", "tokensOut", "time", "callTokensIn", "callT
 
 /** The header's fields that hold lists of names. */
 const LISTS = ["tools", "out_of_reach", "reads", "given", "opening"] as const;
+
+/** Limits as the header and the settings write them, `time` and `callTime` in seconds, from the milliseconds the harness holds them in. */
+export function limitsWritten(limits: DefinitionLimits): DefinitionLimitsView {
+  const { time, callTime, ...rest } = limits;
+  return { ...rest, ...(time !== undefined ? { time: time / 1000 } : {}), ...(callTime !== undefined ? { callTime: callTime / 1000 } : {}) };
+}
 
 /** A list field's line when its value is a bracketed list, up to and with its `[`. */
 const LIST_START = new RegExp(`^(?:${LISTS.join("|")})[ \\t]*:[ \\t]+\\[`);

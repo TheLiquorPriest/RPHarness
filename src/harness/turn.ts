@@ -50,7 +50,7 @@ import { type Connection, connectionOf, lines, runnerTexts, template } from "./m
 import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
 import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
-import { callTerms, DEFAULT_SETTINGS, formFor, interruptFor, readSettings, type Settings } from "./settings";
+import { agentLimits, callTerms, DEFAULT_SETTINGS, formFor, interruptFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
@@ -424,6 +424,7 @@ export class Turn {
       settings: () => this.#settings.subAgents,
       perCall: () => this.#settings.perCall,
       terms: (definition) => callTerms(this.#settings, definition),
+      limits: (definition) => agentLimits(this.#settings, definition),
       track: (entry) => {
         this.#working.add(entry);
         return () => this.#working.delete(entry);
@@ -661,7 +662,7 @@ export class Turn {
       tools: declared,
       texts: this.#texts,
       settings: () => (settings.leadSampling === "preset" && req.presetSampling !== undefined ? { sampling: req.presetSampling } : undefined),
-      limits: definition.limits,
+      limits: agentLimits(settings, definition),
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,
@@ -817,9 +818,9 @@ export class Turn {
     return { text: joined([part.render({ ...(given.blocks.length > 0 ? { attachments: given.blocks.map((block) => ({ name: block.name, text: block.text })) } : {}), ...(given.missing.length > 0 ? { missing: given.missing } : {}) }).text]), handed };
   }
 
-  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the definition's alone. */
+  /** The connection a definition names: `default` (or none) is the default connection; any other name is a connection's name or id. The effort is the one the settings and its header give an agent of it. */
   #connection(definition: AgentDefinition): Promise<Connection> {
-    return connectionOf(this.#c.connections, this.scope, definition, this.#c.env.log);
+    return connectionOf(this.#c.connections, this.scope, definition, this.#c.env.log, this.#settings);
   }
 
   #ownTools(texts: ReadonlyMap<string, ToolText>, team: TeamWork, guidance: Guidance): OwnTool[] {
@@ -1221,7 +1222,7 @@ export class Turn {
       tools: held.tools,
       texts: this.#texts,
       settings: () => ({ ...(req.presetSampling !== undefined ? { sampling: req.presetSampling } : {}), ...(req.replyMaxTokens !== undefined ? { maxTokens: req.replyMaxTokens } : {}) }),
-      limits: definition.limits,
+      limits: agentLimits(this.#settings, definition),
       turn: this.#budget,
       stream: streamRules,
       runEnd: rules.runEnd,

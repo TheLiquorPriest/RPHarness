@@ -11,6 +11,7 @@
 import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { hookSettings, Hooks, type HookTrace, scopeJson } from "../external/hooks";
 import { listFacts, loadGuidance, partsApi } from "../files";
+import { limitsWritten } from "../files/definitions";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
@@ -28,7 +29,7 @@ import { keptOpening, Sessions } from "./sessions";
 import { rebuildRequest } from "./requests";
 import { switchRule, testRule } from "./ruletest";
 import { questionsCannot } from "./judge";
-import { formFor, readModelSettings, readSettings } from "./settings";
+import { agentEffort, agentLimits, formFor, readModelSettings, readSettings } from "./settings";
 import { Turn, type TurnCore } from "./turn";
 import { Registry } from "../tools";
 import { UsageBook } from "./usage";
@@ -204,10 +205,19 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     jobs,
 
     definitions: {
+      // Each with what it runs on and is held to at the scope: the settings set for it (`agents.<definition>`) over its header.
       list: async (scope) => {
-        const views = await loadGuidance(env.files, scope).definitions();
-        const connections = await layer.api.list(scope.user);
-        return views.map((view) => ({ ...view, runsOn: runOf(connections, view) }));
+        const guidance = loadGuidance(env.files, scope);
+        const [views, connections, settings] = await Promise.all([guidance.definitions(), layer.api.list(scope.user), readSettings(guidance, env.files, scope, env.log)]);
+        return Promise.all(
+          views.map(async (view) => {
+            const definition = await guidance.definition(view.name);
+            const limits = definition === undefined ? undefined : agentLimits(settings, definition);
+            const effort = agentEffort(settings, view);
+            const run = runOf(connections, { ...(view.model !== undefined ? { model: view.model } : {}), ...(effort !== undefined ? { effort } : {}) });
+            return { ...view, runsOn: { ...run, ...(limits !== undefined ? { limits: limitsWritten(limits) } : {}) } };
+          }),
+        );
       },
       // Every part of what the agent gets, as the one builder makes it for a run: its stack, for a lead
       // (the agent given the briefing) the reply contract in the form its connection's replies take,
@@ -217,7 +227,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const { guidance, settings, registry } = await registryOf(scope);
         const [definition, contract] = await Promise.all([guidance.definition(agent), guidance.part("reply-contract")]);
         const lead = definition?.given.includes("briefing") === true ? template(contract) : undefined;
-        const form = lead === undefined || definition === undefined ? undefined : formFor(settings, await connectionOf(layer.api, scope, definition, env.log)).form;
+        const form = lead === undefined || definition === undefined ? undefined : formFor(settings, await connectionOf(layer.api, scope, definition, env.log, settings)).form;
         const block = await openingOf({ guidance, agent, definition, tools: definition === undefined ? [] : registry.hold(definition.tools).tools, isTool: (name) => registry.has(name), ...(lead !== undefined && form !== undefined ? { contract: { part: lead, form } } : {}) });
         return block.parts;
       },

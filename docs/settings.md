@@ -30,6 +30,23 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `limits.day.tokens` | whole ≥ 1 | no limit | all | **Tokens in a day.** Tokens, sent and written, that all your agents may spend over any 24 hours, turns and jobs alike; past it no call is made. |
 | `limits.answerFloor` | whole ≥ 1 | 256 | all | **Least room for an answer.** Tokens an answer must have left at least, across every limit on tokens written; with less, no call is made and the work ends at the limit. |
 
+## `agents`
+
+| Key | Takes | Default | Levels | What it is |
+|---|---|---|---|---|
+| `agents.<definition>.effort` | off \\| minimal \\| low \\| medium \\| high \\| xhigh \\| max | as its definition says | all | **Effort.** How hard this agent's model reasons, in place of its definition's effort: off to max; a level its model does not have is the nearest it has. `~`: its connection's. |
+| `agents.<definition>.limits.calls` | whole ≥ 1 | as its definition says | all | **Calls.** Model calls this agent may make in one stretch of its work; past it its work ends at this limit. `~`: no limit. |
+| `agents.<definition>.limits.tokensIn` | whole ≥ 1 | as its definition says | all | **Tokens sent.** Tokens this agent's calls may send in one stretch of its work. `~`: no limit. |
+| `agents.<definition>.limits.tokensOut` | whole ≥ 1 | as its definition says | all | **Tokens written.** Tokens this agent's model may write in one stretch of its work. `~`: no limit. |
+| `agents.<definition>.limits.time` | whole ≥ 1 | as its definition says | all | **Time.** Seconds one stretch of this agent's work may take. `~`: no limit. |
+| `agents.<definition>.limits.callTokensIn` | whole ≥ 1 | as its definition says | all | **Tokens sent in a call.** Tokens one call of this agent may send, as estimated before it is sent. `~`: no limit. |
+| `agents.<definition>.limits.callTokensOut` | whole ≥ 1 | as its definition says | all | **Tokens written in a call.** Tokens the answer to one call of this agent may take. `~`: no limit. |
+| `agents.<definition>.limits.callTime` | whole ≥ 1 | as its definition says | all | **Time for a call.** Seconds one call of this agent may take, apart from the wait on a silent answer. `~`: no limit. |
+| `agents.<definition>.limits.toolRounds` | whole ≥ 1 | as its definition says | all | **Tool rounds.** Answers of this agent that call tools, in one stretch of its work. `~`: no limit. |
+| `agents.<definition>.limits.toolsPerAnswer` | whole ≥ 1 | as its definition says | all | **Tool calls in an answer.** Tool calls one answer of this agent may make; the calls past it are answered and not run. `~`: no limit. |
+| `agents.<definition>.limits.toolsAtOnce` | whole ≥ 1 | as its definition says | all | **Tool calls at once.** This agent's tool calls of one answer that run at the same time; one more waits for a place. `~`: as limits.toolsAtOnce says. |
+| `agents.<definition>.limits.messages` | whole ≥ 0 | as its definition says | all | **Messages after its first answer.** Messages this agent may be sent after its first answer, as a sub-agent; one past it is answered and the agent is not run. `~`: no limit. |
+
 ## `usage`
 
 | Key | Takes | Default | Levels | What it is |

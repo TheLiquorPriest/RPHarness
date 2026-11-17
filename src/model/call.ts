@@ -67,6 +67,7 @@ import type { Hold, Throttle, Throttles } from "./throttle";
 import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
+import { levelBelow, refusesEffort } from "./effort";
 import { addressed, answered, compatSays, holdsAddress, inPlace, keepsSystemInPlace } from "./transcript";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
@@ -466,17 +467,24 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const room = ask.maxTokens !== undefined ? Math.min(ask.maxTokens, most ?? Number.POSITIVE_INFINITY) : most;
     if (room === undefined && model.api === "anthropic-messages") throw new Error(`Nobody has said how long a reply "${model.id}" can write, and Anthropic's API must be told: enter it for the connection "${connection.name}" on the Connections page.`);
     // A level asked is the nearest the model has; none asked is no thinking, or the provider's own default where the agent's effort leaves it to the provider.
-    const level = ask.reasoning === undefined ? undefined : clampThinkingLevel(model, ask.reasoning);
-    const reasoning = level === undefined || level === "off" ? undefined : level;
+    // A level its provider refused for this model within the set time is passed over for the next one down it has, and the agent's run is told (effort.ts).
+    const asked = ask.reasoning === undefined ? undefined : clampThinkingLevel(model, ask.reasoning);
+    const refusedAt = (at: ModelThinkingLevel): string => JSON.stringify([connection.id, model.id, at]);
+    let level = asked;
+    while (level !== undefined && level !== "off" && deps.refusals.stands(refusedAt(level), deps.now(), settings.effortRefusalMinutes * MINUTE_MS)) level = levelBelow(model, level);
+    let reasoning = level === undefined || level === "off" ? undefined : level;
     const leftToProvider = ask.reasoning === undefined && shape.providerDefault;
     const openAI = model.api === "openai-completions" || model.api === "openai-responses";
     // An Anthropic model that thinks to a budget gets the budget on top of the room it was asked for; the budget is taken out of the room instead, so the call writes no more than it was allowed.
-    let budget: Pick<SimpleStreamOptions, "maxTokens" | "thinkingBudgets"> = room === undefined ? {} : { maxTokens: room };
-    const budgetLevel = clampReasoning(reasoning);
-    if (room !== undefined && reasoning !== undefined && budgetLevel !== undefined && model.api === "anthropic-messages" && !compatSays(model, "forceAdaptiveThinking")) {
-      const thinking = Math.min(ask.thinkingBudgets?.[budgetLevel] ?? DEFAULT_THINKING_BUDGETS[budgetLevel] ?? MIN_ANSWER_TOKENS, room - MIN_ANSWER_TOKENS);
-      if (thinking >= MIN_ANSWER_TOKENS) budget = { maxTokens: room - thinking, thinkingBudgets: { [budgetLevel]: thinking } };
-    }
+    const budgetAt = (thinksAt: ThinkingLevel | undefined): Pick<SimpleStreamOptions, "maxTokens" | "thinkingBudgets"> => {
+      const budgetLevel = clampReasoning(thinksAt);
+      if (room !== undefined && thinksAt !== undefined && budgetLevel !== undefined && model.api === "anthropic-messages" && !compatSays(model, "forceAdaptiveThinking")) {
+        const thinking = Math.min(ask.thinkingBudgets?.[budgetLevel] ?? DEFAULT_THINKING_BUDGETS[budgetLevel] ?? MIN_ANSWER_TOKENS, room - MIN_ANSWER_TOKENS);
+        if (thinking >= MIN_ANSWER_TOKENS) return { maxTokens: room - thinking, thinkingBudgets: { [budgetLevel]: thinking } };
+      }
+      return room === undefined ? {} : { maxTokens: room };
+    };
+    const budget = budgetAt(reasoning);
 
     // The sampling parameters its provider takes; the rest are left out. OpenAI's reasoning models refuse a temperature or a top_p.
     const taken: Partial<Record<SamplingName, unknown>> = {};
@@ -534,6 +542,17 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
         return (await theirs?.(changed, sent)) ?? changed;
       },
     };
+    // The call goes at a lower level than it asked, where its provider refused that one: its budget with it, and the agent's run is told.
+    const lowered = (to: ModelThinkingLevel): void => {
+      level = to;
+      reasoning = to === "off" ? undefined : to;
+      changes.thinking = reasoning !== undefined || leftToProvider;
+      delete options.reasoning;
+      delete options.thinkingBudgets;
+      Object.assign(options, budgetAt(reasoning), reasoning !== undefined ? { reasoning } : {});
+      if (asked !== undefined) ask.heard?.({ kind: "effort_lowered", connection: connection.name, model: model.id, asked, sent: to });
+    };
+    if (asked !== undefined && level !== undefined && level !== asked) lowered(level);
 
     // Its connection's throttle: a place among its calls at once, then room in its minute, each waited for; the agent's run is told of each wait. A call bigger than the whole minute is not made, and the run is told that limit.
     const waited = (wait: "minute" | "place"): (() => void) => {
@@ -632,6 +651,13 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
         toolsAsText = true;
         messages = sent(true);
         delete options.toolChoice;
+        tried -= 1;
+        continue;
+      }
+      // A provider that refuses the thinking level asked is sent the same call at once at the next level down its model has, `off` at the last; the refused level is passed over until the set time has passed.
+      if (level !== undefined && level !== "off" && !ended.aborted && refusesEffort(failed.errorMessage)) {
+        deps.refusals.note(refusedAt(level), deps.now());
+        lowered(levelBelow(model, level));
         tried -= 1;
         continue;
       }

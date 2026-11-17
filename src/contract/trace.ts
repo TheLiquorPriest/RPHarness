@@ -136,6 +136,12 @@ export type TraceEvent =
   | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number }
   /** The agent's definition names a connection that is no longer there: its call went on the default connection (`used`), with that connection's own model. */
   | { kind: "connection_stand_in"; named: string; used: string }
+  /**
+   * The provider refused the thinking level a call asked for (`asked`), now or within
+   * `calls.effortRefusalMinutes`: the call went at the next level down its model has (`sent`, `off`
+   * at the last) on that connection's model.
+   */
+  | { kind: "effort_lowered"; connection: string; model: string; asked: Effort; sent: Effort }
   /** A tool call began; `via` when it was reached through `tool_use`. */
   | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" }
   /** Part of a tool's answer, while it runs. */

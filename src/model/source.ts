@@ -45,10 +45,11 @@ export interface AgentModel {
 
 /**
  * What the layer tells the run an agent's call is made in, beside the call's answer (§13.2): a wait
- * for its connection's throttle, a stand-in connection, or the limit a call cannot be made within
- * (bigger than its connection's whole minute), at which the work ends.
+ * for its connection's throttle, a stand-in connection, a thinking level its provider refused and the
+ * level sent instead, or the limit a call cannot be made within (bigger than its connection's whole
+ * minute), at which the work ends.
  */
-export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "limit" }>;
+export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "effort_lowered" | "limit" }>;
 
 /** What the runner hands an agent's stream function besides pi-ai's options: where the layer tells the agent's run of each such event. Absent: nobody is told. */
 export interface LayerOptions {

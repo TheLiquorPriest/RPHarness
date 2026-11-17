@@ -93,6 +93,7 @@ Levels: every level where none is named; `shipped, global` means a chat's own fi
 | `calls.retries` | whole ≥ 0 | 2 | shipped, global | **Retries of a failed call.** Times a call that failed before any answer came is made again, where its connection sets no number of its own. |
 | `calls.cacheRetention` | none \\| short \\| long | short | shipped, global | **Prompt cache retention.** How long a provider is asked to keep a prompt in its cache: none, short or long. |
 | `calls.toolRefusalMinutes` | whole ≥ 1 | 60 | shipped, global | **Native tools tried again after.** Minutes a connection's model that refused native tools is offered them as text; then native tools are tried again. |
+| `calls.effortRefusalMinutes` | whole ≥ 1 | 60 | shipped, global | **Refused thinking level tried again after.** Minutes a connection's model that refused a thinking level is sent the next level down it has at once; then the refused level is tried again. |
 
 ## `throttles`
 

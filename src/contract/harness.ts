@@ -561,7 +561,7 @@ export interface DefinitionRun {
   connection: { id: string; name: string } | null;
   /** That connection's model; null where no connection resolves, or it names none. */
   model: string | null;
-  /** The effort it thinks at: the settings' for it, else its definition's, else its connection's own; null for its provider's own default. */
+  /** The effort it thinks at: the settings' for its definition, else the settings' for its connection (`effort.connections`), else its definition's, else its connection's own; null for its provider's own default. */
   effort: Effort | null;
   /** The limits it is held to: its header's, each one the settings set for it standing over it (`~` lifting it); absent where none holds. */
   limits?: DefinitionLimitsView;

@@ -6,7 +6,8 @@
 // from which a secret is looked for anywhere in them; the wait before a failed call is made again,
 // and how many times where its connection says nothing; how long a
 // provider is asked to keep a prompt in its cache; how long a connection's model that refused
-// native tools is offered them as text; each connection's throttle (§13.2): its requests and
+// native tools is offered them as text, and one that refused a thinking level is sent the next
+// one down; each connection's throttle (§13.2): its requests and
 // tokens a minute and its calls at once, with the calls at once of a connection that sets none; and
 // the connection and model a host's search by meaning has its vectors made on (§9.4, §10.5), none
 // until he names one, with how many texts go in each of its requests.
@@ -15,8 +16,8 @@
 // What these govern often has no chat in view (a connection's test, a sign-in, a request passed
 // through), so each is read at the levels every chat shares, shipped and global; the silent wait is
 // read at an agent's chat's levels too. A throttle holds one connection across every agent, turn and
-// job, so it is the same for every chat. An agent's thinking effort is no setting: it is its
-// definition's alone (READINGS N-7).
+// job, so it is the same for every chat. An agent's thinking effort is set with its other settings
+// (`agents.ts`): by its definition, and by its connection (`effort.connections`).
 
 import { worded } from "./entry";
 import { MODELS_WORDS } from "./models-words";
@@ -65,8 +66,3 @@ export const MODELS = worded(
   },
   MODELS_WORDS,
 );
-
-/** Keys this group once read and reads no longer, each with what holds in its place: a file that still sets one is told so in the log. */
-export const MODELS_GONE: Readonly<Record<string, string>> = {
-  "effort.connections": "an agent thinks at the effort its definition gives, or where it gives none at its connection's own",
-};

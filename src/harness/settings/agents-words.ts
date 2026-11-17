@@ -1,5 +1,6 @@
 export const AGENTS_WORDS = {
   "agents.<definition>.effort": { name: "Effort", about: "How hard this agent's model reasons, in place of its definition's effort: off to max; a level its model does not have is the nearest it has." },
+  "effort.connections.<connection>": { name: "Effort on a connection", about: "How hard every agent on this connection reasons, in place of its definition's effort; an agent's own effort setting stands over it." },
   "agents.<definition>.limits.calls": { name: "Calls", about: "Model calls this agent may make in one stretch of its work; past it its work ends at this limit.", below: "At 0 this agent makes no call: its work ends as it starts." },
   "agents.<definition>.limits.tokensIn": { name: "Tokens sent", about: "Tokens this agent's calls may send in one stretch of its work.", below: "At 0 no call of this agent can be sent." },
   "agents.<definition>.limits.tokensOut": { name: "Tokens written", about: "Tokens this agent's model may write in one stretch of its work.", below: "At 0 this agent's model can write nothing." },

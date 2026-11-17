@@ -68,7 +68,7 @@ export interface Connection {
  * the definition (`agentEffort`); where they give none, the connection's own. A judging call is no
  * agent's (`settings` undefined): the definition's effort alone.
  */
-export async function connectionOf(connections: ModelsApi, scope: RunScope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs"> & { name?: string }, log: Log, settings: Pick<Settings, "agents"> | undefined): Promise<Connection> {
+export async function connectionOf(connections: ModelsApi, scope: RunScope, definition: Pick<AgentDefinition, "model" | "effort" | "toolsAs"> & { name?: string }, log: Log, settings: Pick<Settings, "agents" | "efforts"> | undefined): Promise<Connection> {
   const named = definition.model === undefined || definition.model === "default" ? null : definition.model;
   const list = await connections.list(scope.user).catch((error: unknown) => {
     log.warn("The connections could not be listed.", { error: error instanceof Error ? error.message : String(error) });
@@ -77,7 +77,7 @@ export async function connectionOf(connections: ModelsApi, scope: RunScope, defi
   const view = list === undefined ? undefined : connectionNamed(list, definition.model);
   const id = view?.id ?? named;
   const name = view?.name ?? named;
-  const effort = settings === undefined ? definition.effort : agentEffort(settings, definition);
+  const effort = settings === undefined ? definition.effort : agentEffort(settings, definition, { id: id ?? null, name });
   return {
     choice: { user: scope.user, scope, connectionId: named === null ? null : id, model: null, ...(effort !== undefined ? { effort } : {}), ...(definition.toolsAs !== undefined ? { toolsAs: definition.toolsAs } : {}) },
     id: id ?? null,

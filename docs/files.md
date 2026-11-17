@@ -71,7 +71,7 @@ You are the lead of this roleplay ...
 |---|---|
 | `name`, `description` | Its name (the file's) and what it is for. |
 | `model` | The connection it runs on, by name or id; `default` (or left out) is the user's default connection. |
-| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. The setting `agents.<definition>.effort` stands over it ([settings](settings.md)). |
+| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. The setting `effort.connections.<connection>` stands over it for every agent on that connection, and `agents.<definition>.effort` over both ([settings](settings.md)). |
 | `tools_as` | How its tools are offered: `auto` (natively until the connection refuses them, then as text), `native`, `text`. |
 | `tools` | The tools it holds from its first call. Any other tool it reaches through `tool_search` and `tool_use`. |
 | `out_of_reach` | Families of tools it does not reach by searching. |

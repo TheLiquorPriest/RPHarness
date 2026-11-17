@@ -1,7 +1,7 @@
 // What a definition runs on among one user's connections (C28): the connection its header names, by
 // its name or its id (`default`, or none named, his default connection), that connection's model, and
-// the effort the agent thinks at, which is its definition's alone (READINGS N-7): where the definition
-// names none, the connection's own, and where that names none either, the provider's own default. A
+// the effort the agent thinks at, as the settings and its definition give it (the harness's
+// `agentEffort`): where they give none, the connection's own, and where that names none either, the provider's own default. A
 // run's agents are made on the connection `connectionNamed` finds, and the Agents page shows `runOf`.
 
 import type { ConnectionList, ConnectionView, DefinitionRun, Effort } from "../contract";

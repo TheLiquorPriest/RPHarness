@@ -53,6 +53,12 @@ words say after "`~`:".
 | `agents.<definition>.limits.toolsAtOnce` | whole ≥ 1 | as its definition says | all | **Tool calls at once.** This agent's tool calls of one answer that run at the same time; one more waits for a place. `~`: as limits.toolsAtOnce says. |
 | `agents.<definition>.limits.messages` | whole ≥ 0 | as its definition says | all | **Messages after its first answer.** Messages this agent may be sent after its first answer, as a sub-agent; one past it is answered and the agent is not run. `~`: no limit. |
 
+## `effort`
+
+| Key | Takes | Default | Levels | What it is |
+|---|---|---|---|---|
+| `effort.connections.<connection>` | off \\| minimal \\| low \\| medium \\| high \\| xhigh \\| max | as each agent's definition says | all | **Effort on a connection.** How hard every agent on this connection reasons, in place of its definition's effort; an agent's own effort setting stands over it. |
+
 ## `usage`
 
 | Key | Takes | Default | Levels | What it is |

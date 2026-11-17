@@ -31,7 +31,7 @@ import { HOOKS } from "./hooks";
 import { JOBS } from "./jobs";
 import { LIMITS } from "./limits";
 import { MCP } from "./mcp";
-import { MODELS, MODELS_GONE } from "./models";
+import { MODELS } from "./models";
 import { PROMPT } from "./prompt";
 import { REPLY } from "./reply";
 import { RULES } from "./rules";
@@ -44,7 +44,7 @@ import { USAGE } from "./usage";
 export const GROUPS = [LIMITS, AGENTS, USAGE, JOBS, MODELS, CALLS, REPLY, TOOLS, MCP, HOOKS, RULES, TRACE, PROMPT, COMPACTION, SESSIONS] as const;
 
 /** Keys the harness once read and reads no longer, each with what holds in its place. */
-const GONE: Readonly<Record<string, string>> = { ...MODELS_GONE, ...TRACE_GONE };
+const GONE: Readonly<Record<string, string>> = { ...TRACE_GONE };
 
 /** The settings of some groups as a host sees them: every entry with its words, and not where the harness keeps its value. */
 export function listOf(groups: readonly Group[]): readonly ListedSetting[] {
@@ -489,13 +489,17 @@ export function agentLimits(settings: Pick<Settings, "agents">, definition: Pick
 
 /**
  * The effort an agent of a definition thinks at, as far as the settings and its header say
- * (§2.1 point 5): a level's `agents.<definition>.effort` stands over the header's `effort:`, and `~`
- * there leaves it to its connection. Undefined: its connection's own.
+ * (§2.1 point 5; plan §20, `effort.connections`): a level's `agents.<definition>.effort` stands over
+ * everything, its `~` leaving the agent to its connection's; else the effort set for the connection
+ * it runs on, by the connection's id or name; else the header's `effort:`. Undefined: its connection's
+ * own.
  */
-export function agentEffort(settings: Pick<Settings, "agents">, definition: Pick<AgentDefinition, "effort"> & { name?: string }): Effort | undefined {
+export function agentEffort(settings: Pick<Settings, "agents" | "efforts">, definition: Pick<AgentDefinition, "effort"> & { name?: string }, connection: { id: string | null; name: string | null } | undefined): Effort | undefined {
+  const keys = connection === undefined ? [] : [connection.id, connection.name].filter((key): key is string => key !== null);
+  const onConnection = keys.map((key) => (Object.hasOwn(settings.efforts, key) ? settings.efforts[key] : undefined)).find((effort) => effort !== undefined);
   const own = definition.name !== undefined && Object.hasOwn(settings.agents, definition.name) ? settings.agents[definition.name] : undefined;
-  if (own !== undefined && Object.hasOwn(own, "effort")) return own.effort ?? undefined;
-  return definition.effort;
+  if (own !== undefined && Object.hasOwn(own, "effort")) return own.effort ?? onConnection;
+  return onConnection ?? definition.effort;
 }
 
 /** The user's counts for the jobs on one connection, under the setting's key that names it (its name or its id). */

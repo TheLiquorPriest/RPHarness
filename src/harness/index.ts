@@ -12,7 +12,7 @@ import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
 import { hookSettings, Hooks, type HookTrace, scopeJson } from "../external/hooks";
 import { listFacts, loadGuidance, partsApi } from "../files";
 import { limitsWritten } from "../files/definitions";
-import { createModelLayer, modelTexts, runOf } from "../model";
+import { connectionNamed, createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
 import { promptMapApi } from "../prompt";
@@ -205,7 +205,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     jobs,
 
     definitions: {
-      // Each with what it runs on and is held to at the scope: the settings set for it (`agents.<definition>`) over its header.
+      // Each with what it runs on and is held to at the scope: the settings set for it (`agents.<definition>`, `effort.connections`) over its header.
       list: async (scope) => {
         const guidance = loadGuidance(env.files, scope);
         const [views, connections, settings] = await Promise.all([guidance.definitions(), layer.api.list(scope.user), readSettings(guidance, env.files, scope, env.log)]);
@@ -213,7 +213,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
           views.map(async (view) => {
             const definition = await guidance.definition(view.name);
             const limits = definition === undefined ? undefined : agentLimits(settings, definition);
-            const effort = agentEffort(settings, view);
+            const on = connectionNamed(connections, view.model);
+            const effort = agentEffort(settings, view, on === undefined ? undefined : { id: on.id, name: on.name });
             const run = runOf(connections, { ...(view.model !== undefined ? { model: view.model } : {}), ...(effort !== undefined ? { effort } : {}) });
             return { ...view, runsOn: { ...run, ...(limits !== undefined ? { limits: limitsWritten(limits) } : {}) } };
           }),

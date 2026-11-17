@@ -3,10 +3,15 @@
 // level sets stands over the definition's own header (`effort:`, `limits:`), `~` included: `~` lifts
 // the header's limit, and for the effort leaves the agent at its connection's. With none set, the
 // header's holds. `time` and `callTime` are in seconds, as the header writes them.
+//
+// Beside them, the effort every agent on a connection thinks at, by the connection's name or id
+// (`effort.connections`; plan §20: "low effort on the floor model, set per connection, the shipped
+// definitions unchanged"): it stands over each definition's `effort:`, and an agent's own setting
+// stands over it. Not under `models`: a host keeps the model layer's connections there.
 
 import type { Effort } from "../../contract";
 import { AGENTS_WORDS } from "./agents-words";
-import { DEFINITION, worded } from "./entry";
+import { CONNECTION, DEFINITION, worded } from "./entry";
 
 /** Every effort a definition's `effort:` takes, which the setting takes too. */
 const EFFORTS: Record<Effort, true> = { off: true, minimal: true, low: true, medium: true, high: true, xhigh: true, max: true };
@@ -19,6 +24,7 @@ const AS_ITS_DEFINITION = "as its definition says";
 export const AGENTS = worded(
   {
     effort: { key: `${OWN}.effort`, takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, orNone: true, none: "its connection's", unset: AS_ITS_DEFINITION, perConnection: false, at: `${OWN}.effort`, noneKept: true },
+    connection: { key: `effort.connections.${CONNECTION}`, takes: { type: "oneOf", values: Object.keys(EFFORTS) as Effort[] }, default: null, orNone: true, none: "as each agent's definition says", perConnection: true, at: `efforts.${CONNECTION}` },
     calls: { key: `${LIMIT}.calls`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.calls`, noneKept: true },
     tokensIn: { key: `${LIMIT}.tokensIn`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensIn`, noneKept: true },
     tokensOut: { key: `${LIMIT}.tokensOut`, takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, unset: AS_ITS_DEFINITION, perConnection: false, at: `${LIMIT}.tokensOut`, noneKept: true },

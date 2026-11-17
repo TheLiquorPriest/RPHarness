@@ -74,6 +74,7 @@ cat > play/files/.agents/lead.md <<'EOF'
 name: lead
 description: The lead of the roleplay. It gives the one reply the player sees.
 model: default
+effort: max
 tools: [chat_read, file_read, file_write]
 reads: [rules]
 given:

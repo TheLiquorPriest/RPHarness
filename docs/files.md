@@ -56,7 +56,7 @@ agent are yours.
 name: lead
 description: The lead of a roleplay; gives the one reply the player sees.
 model: default
-effort: high
+effort: max
 tools: [file_read, file_write, chat_read, lore_search, skill_load, tool_search, tool_use, delegate, reply_release]
 reads: [rules]
 given:
@@ -71,7 +71,7 @@ You are the lead of this roleplay ...
 |---|---|
 | `name`, `description` | Its name (the file's) and what it is for. |
 | `model` | The connection it runs on, by name or id; `default` (or left out) is the user's default connection. |
-| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; left out, the connection's own. |
+| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. |
 | `tools_as` | How its tools are offered: `auto` (natively until the connection refuses them, then as text), `native`, `text`. |
 | `tools` | The tools it holds from its first call. Any other tool it reaches through `tool_search` and `tool_use`. |
 | `out_of_reach` | Families of tools it does not reach by searching. |

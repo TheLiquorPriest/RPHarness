@@ -36,7 +36,7 @@ A tool with a `command` runs it as you with its arguments as JSON on stdin, once
 answer is the result. From the command line only such tools run (a program that embeds the folder
 host gives the others their handlers).
 
-`host/config.json`: `{ "files": { "findLimit": 200, "grepBytes": 1048576, "grepLine": 1000, "listDepth": 1 }, "search": { "hits": 20, "snippet": 80 }, "tools": { "commandTimeout": 30, "answerMax": 1048576 }, "web": { "address": "https://…" } }`;
+`host/config.json`: `{ "files": { "findHits": 200, "grepBytes": 1048576, "grepLineChars": 1000, "listDepth": 1 }, "search": { "hits": 20, "snippetChars": 80 }, "tools": { "commandTimeoutSeconds": 30, "maxAnswerBytes": 1048576 }, "web": { "address": "https://…" } }`;
 each left out keeps the number shown. The web searcher is asked `GET <address>?q=<words>&limit=<n>` and
 answers a JSON list of `{ "url", "title", "snippet" }`.
 

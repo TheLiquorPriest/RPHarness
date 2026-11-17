@@ -487,10 +487,11 @@ class TreeGuidance implements Guidance {
   }
 
   /**
-   * Each name a definition's `reads:` gives that no instruction file has, §5.2's own parts among
-   * them (PlanHarnessCore-9 item 1): a problem at the line the name is written on, beside the stack's
-   * part marked missing. `rules` names the always-on rules, not a file, and is no such name. Checked
-   * once for each definition.
+   * Each name a definition's `reads:` gives that no instruction file has: a problem at the line the
+   * name is written on, beside the stack's part marked missing. §5.2's own parts (`ALL-AGENTS`, the
+   * rules, `AGENTS`, `WORLD`, `SIMULATION`, `WRITING`, `TURN`, `PRESET`) are aside: a chat starts
+   * without them and gains them as the owner writes or accepts them, so one not yet written is no
+   * mistake. Checked once for each definition.
    */
   #readsNothing(agent: string): Promise<void> {
     return this.#once(`reads ${agent}`, async () => {
@@ -502,7 +503,7 @@ class TreeGuidance implements Guidance {
       for (const read of def.reads) {
         const line = written.find(read) ?? written.field;
         const name = read.replace(/\.md$/, "");
-        if (name === RULES || (await this.#instructions(name)).length > 0) continue;
+        if (BEFORE_DEFINITION.includes(name) || AFTER_DEFINITION.includes(name) || (await this.#instructions(name)).length > 0) continue;
         this.#problems.push(problemAt(at, line, `\`reads:\` names ${read}, and no instruction file has that name, so ${agent}'s stack has nothing for it.`));
       }
     });

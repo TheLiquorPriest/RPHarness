@@ -116,8 +116,10 @@ A header and a body, the text the rule puts in front of an agent. `.rules/exampl
   - `question:` a yes-or-no question put to a judging model about `scope:` (`text`, `thinking`,
     `reply`), with `judge:` (a connection) and `interrupt: always` (the agent waits for the answer).
     The judging model's prompt is `.prompts/judge.md`.
-  - `at:` a moment, `turn-start`, `run-end` or `before-compaction`, with or without `fact:` (a test of
-    a named fact) or `command:` (a command of yours asked yes or no, once the host switches it on).
+  - `at:` a moment, `turn-start`, `run-end`, `before-compaction` or `after-message` (after each message
+    of an agent that made tool calls, its text going in with the agent's next call: `fact: limits.left
+    <= 2` warns of the last rounds as they come), with or without `fact:` (a test of a named fact) or
+    `command:` (a command of yours asked yes or no, once the host switches it on).
   - `every:` a number of turns, with or without `fact:`.
 - `repeat:` `once per turn` (left out), `once per session`, `after N turns`, `always`.
 

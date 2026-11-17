@@ -346,6 +346,7 @@ export class Team implements TeamWork {
       turn: d.budget(),
       stream: rules.stream(ref),
       runEnd: rules.runEnd,
+      afterMessage: rules.afterMessage,
       ...(questions !== undefined ? { questions } : {}),
       gate: d.gate(ref, origin.parent, held.tools),
       ...(keep !== undefined ? { keep } : {}),

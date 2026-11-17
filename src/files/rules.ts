@@ -26,9 +26,13 @@ export type RuleScope = { watch: "text" | "thinking" | "reply" } | { watch: "arg
 /** How often a rule may fire: once per turn (the default), once per session, again only after so many turns, or always. */
 export type Repeat = { per: "turn" } | { per: "session" } | { per: "always" } | { per: "turns"; turns: number };
 
-/** The moments `at:` can name. */
-export type RuleMomentName = "turn-start" | "run-end" | "before-compaction";
-const MOMENTS: readonly RuleMomentName[] = ["turn-start", "run-end", "before-compaction"];
+/**
+ * The moments `at:` can name: a turn's start, a run's end, before a compaction, and after each
+ * message of an agent that goes on (it made tool calls), before its next call, so that a fact such as
+ * `limits.left` reaches the agent at its threshold (PlanHarnessCore-14 item 8).
+ */
+export type RuleMomentName = "turn-start" | "run-end" | "before-compaction" | "after-message";
+const MOMENTS: readonly RuleMomentName[] = ["turn-start", "run-end", "before-compaction", "after-message"];
 
 /** What makes a rule fire. */
 export type RuleWhen =
@@ -193,8 +197,8 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
     else when = { trigger: "interval", every: h.every, ...(fact !== undefined ? { fact } : {}) };
   } else read.trigger = "always";
 
-  if (Object.hasOwn(h, "fact") && trigger !== "at" && trigger !== "every") fail("fact", "`fact:` is tested at a moment: give the rule `at:` (turn-start, run-end or before-compaction) or `every:`.");
-  if (Object.hasOwn(h, "command") && trigger !== "at") fail("command", "`command:` is asked at a moment: give the rule `at:` (turn-start, run-end or before-compaction).");
+  if (Object.hasOwn(h, "fact") && trigger !== "at" && trigger !== "every") fail("fact", `\`fact:\` is tested at a moment: give the rule \`at:\` (${MOMENTS.join(", ")}) or \`every:\`.`);
+  if (Object.hasOwn(h, "command") && trigger !== "at") fail("command", `\`command:\` is asked at a moment: give the rule \`at:\` (${MOMENTS.join(", ")}).`);
   if (trigger !== "condition" && trigger !== "question" && h.scope !== undefined) problem("scope", "`scope:` goes with `condition:` or `question:`, and is not read here.");
   if (trigger !== "condition" && trigger !== "question" && h.interrupt !== undefined) problem("interrupt", "`interrupt:` goes with `condition:` or `question:`, and is not read here.");
   if (trigger !== "condition" && h.hold !== undefined) problem("hold", "`hold:` goes with `condition:`, and is not read here.");

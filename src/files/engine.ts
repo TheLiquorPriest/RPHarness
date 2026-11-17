@@ -116,6 +116,7 @@ export function createRuleRun(input: RuleRunInput): RuleRun {
 class Run implements RuleRun {
   readonly problems: Problem[] = [];
   readonly runEnd: RunEndRules;
+  readonly afterMessage: RunEndRules;
   readonly #scope: Scope;
   /** The rules in force as last read: at the run's start, then at each moment and each model call's start. */
   #rules: readonly Rule[];
@@ -165,6 +166,12 @@ class Run implements RuleRun {
       due: async (moment) => {
         await this.#now();
         return this.#due(moment.agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "run-end" ? "run-end" : undefined));
+      },
+    };
+    this.afterMessage = {
+      due: async (moment) => {
+        await this.#now();
+        return this.#due(moment.agent, (rule) => (rule.when.trigger === "moment" && rule.when.at === "after-message" ? "after-message" : undefined));
       },
     };
   }

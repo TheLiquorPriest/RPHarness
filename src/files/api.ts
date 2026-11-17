@@ -473,6 +473,8 @@ export interface RuleRun {
   stream(agent: AgentRef): StreamRules;
   /** Rules `at: run-end` whose fact holds, for any agent. */
   readonly runEnd: RunEndRules;
+  /** Rules `at: after-message` whose fact holds, for any agent: after each of its messages that made tool calls, before its next call, which their texts go in with. */
+  readonly afterMessage: RunEndRules;
   /** Before a tool runs: rules on its arguments. */
   toolCall(agent: AgentRef, call: ToolCallSeen): Promise<ToolCallFired>;
   /** After a tool ran: rules on its result; their texts are added to it. */

@@ -112,6 +112,8 @@ export interface RunnerOptions {
   terms: CallTerms;
   stream?: StreamRules;
   runEnd?: RunEndRules;
+  /** The rules `at: after-message`, asked after each message that made tool calls: their texts go in with the next call. */
+  afterMessage?: RunEndRules;
   /** The `question:` rules, put to a judging model about each message it finishes. */
   questions?: QuestionRules;
   /** What is asked around each of its tool calls: permissions, rules, the bound on what the model reads. None: each call simply runs. */
@@ -1139,10 +1141,13 @@ export class AgentRunner {
     if (stint.halt !== undefined) return { action: "end" };
     const answers = this.#o.channel?.answers?.() ?? [];
     if (turn.toolResults.length > 0) {
-      // A message that made tool calls: the work goes on, and a reminder, what the reply's form has to say, and the rules a judging model's answer fired go in with the next call.
+      // A message that made tool calls: the work goes on, and a reminder, what the reply's form has to say, the rules a judging model's answer fired and the rules due after a message (a fact at its threshold: the last rounds) go in with the next call.
+      const due = (await this.#o.afterMessage?.due({ agent: this.agent, call: this.#calls })) ?? [];
+      if (stint.halt !== undefined) return { action: "end" };
       for (const fired of reminders) this.#add(stint, fired, "remind", "steer");
       for (const text of answers) this.#pi.steer(this.#message([text]));
       for (const judged of stint.judged.splice(0)) this.#judged(stint, judged, "steer");
+      for (const fired of due) this.#add(stint, fired, "remind", "steer");
       return undefined;
     }
     // The message made no tool call: the work would end here. What is due at a run's end goes in as a follow-up, and the agent

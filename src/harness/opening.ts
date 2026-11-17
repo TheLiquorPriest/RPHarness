@@ -9,16 +9,23 @@
 // it: a run's start hands it, read whole then (R-174).
 import { createHash } from "node:crypto";
 import type { Wanted } from "../agents/attachments";
-import { type Given, joined } from "../agents/attachments";
-import type { Log, StackPart } from "../contract";
+import { attach, type Given, joined } from "../agents/attachments";
+import type { AgentRef, Environment, Log, Scope, StackPart } from "../contract";
 import type { AgentDefinition, Fields, FrontPart, Guidance, PromptPart, Stack, StackEntry, StackSnapshot, TemplatePart } from "../files/api";
 import { splitHeader } from "../files/header";
 import { changes, changesText, snapshot } from "../files/stack";
+import type { ReplyTags } from "../reply/tags";
 import { SKILL_LOAD, SKILLS_PART, skillsIndex } from "../tools/base/other";
-import type { HeldTool } from "../tools/registry";
+import type { HeldTool, Registry } from "../tools/registry";
 import { TOOL_USE } from "../tools/search";
-import { template, toolTextOf } from "./means";
-import type { ReplyFormSetting } from "./settings";
+import { lines, template, toolTextOf } from "./means";
+import type { Opening } from "./sessions";
+import { formFor, type ReplyFormSetting, type Settings } from "./settings";
+
+/** How what an agent is given by name beyond its own blocks is laid out (`.prompts/given.md`): the lead's and the writer's after their blocks, and what a lead's definition gives as its session opens. */
+export const GIVEN_PART = "given";
+/** How a chat message and a lore entry are laid out in what an agent is given (`.prompts/delegation.md`). */
+export const DELEGATION_PART = "delegation";
 
 /** The family `skill_load` belongs to, which a definition's `out_of_reach:` may keep from a search. */
 const SKILLS_FAMILY = "skills";
@@ -196,4 +203,68 @@ export async function pinsOf(guidance: Guidance, agent: string, log: Log): Promi
   const pins = await guidance.pins(agent);
   for (const pin of pins) if (pin.problem !== undefined) log.warn("A file pinned for an agent cannot be handed.", { agent, file: pin.file, problem: pin.problem.message });
   return pins.map((pin) => ({ ref: `${FILE}${pin.file}`, from: "pin" as const }));
+}
+
+/** The tag names a reply contract's header gives, when it gives both. */
+function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefined {
+  const tags = header["tags"];
+  if (typeof tags !== "object" || tags === null || Array.isArray(tags)) return undefined;
+  const { reply, intent } = tags as Record<string, unknown>;
+  return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
+}
+
+/** What a lead's opening block is made from: as its session's first turn makes it, or as the owner's "Apply now" makes it afresh at his press (R-119). */
+export interface LeadOpeningOf {
+  env: Environment;
+  scope: Scope;
+  /** The lead, as the reader of what its definition's `opening:` names. */
+  lead: AgentRef;
+  guidance: Guidance;
+  definition: AgentDefinition;
+  /** The tools the session's runs hold, as the turn registers them. */
+  registry: Registry;
+  settings: Settings;
+  /** The connection the lead runs on, for the form its replies take. */
+  connection: { id: string | null; name: string | null };
+  contract: TemplatePart | undefined;
+  /** A slice of the prompt by its name as written, for what `opening:` names of it. */
+  slice: (ref: string, reader: AgentRef) => Promise<string | undefined>;
+}
+
+/**
+ * A lead's opening block, which holds still for the session (§5.2, §10.2), made by the one builder;
+ * what its definition's `opening:` names is asked of the host once, here (§8.2, R-163). Or why it
+ * cannot be made: the reply's form is the tags and the contract names none.
+ */
+export async function leadOpening(o: LeadOpeningOf): Promise<Opening | "no-tags"> {
+  const { env, guidance, definition, registry, settings, contract } = o;
+  const { form, stream } = formFor(settings, o.connection);
+  let tags: ReplyTags | undefined;
+  let intentFile: string | undefined;
+  if (contract !== undefined) {
+    tags = tagsOf(contract.header);
+    const file = contract.header["intent_file"];
+    intentFile = typeof file === "string" && file !== "" ? file : undefined;
+  }
+  if (form === "tags" && tags === undefined) return "no-tags";
+  const held = registry.hold(definition.tools);
+  const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
+  const items = await attach({ env, scope: o.scope, lines: lines(delegation), most: settings.perCall, moment: { task: "" }, slice: o.slice }, o.lead, definition.opening.map((ref) => ({ ref, from: "opening" as const })));
+  if (items.missing.length > 0) env.log.warn("What the lead's definition gives as its session opens could not be found.", { agent: definition.name, missing: items.missing });
+  // The skills in the block stand as the session opened it, and the briefing says when the list no longer does.
+  const block = await openingOf({ guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => registry.has(name), ...(contract !== undefined ? { contract: { part: contract, form } } : {}), items: { given: items, layout: template(layout) }, log: env.log });
+  return {
+    text: block.text,
+    snapshot: block.snapshot,
+    ...(block.skills !== "" ? { skills: block.skills } : {}),
+    tools: [...definition.tools],
+    given: [...definition.given],
+    outOfReach: [...definition.outOfReach],
+    declared: Object.fromEntries(held.tools.map((tool) => [tool.name, { description: tool.description, parameters: tool.parameters }])),
+    form,
+    stream,
+    ...(tags !== undefined ? { tags } : {}),
+    ...(intentFile !== undefined ? { intentFile } : {}),
+    ...(block.contract !== undefined && block.contract !== "" ? { contract: block.contract } : {}),
+  };
 }

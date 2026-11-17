@@ -8,14 +8,14 @@
 // opening block is kept in the session's file, and what the rules remembered at each turn's end in
 // the host's store, so a restart, or a session open again after a close, goes on with both. A job a
 // restart cut off is found in the host's store.
-import type { Environment, Harness, HarnessOptions, Scope } from "../contract";
+import type { Environment, Harness, HarnessOptions, JsonObject, Scope } from "../contract";
 import { hookSettings, Hooks, type HookTrace, scopeJson } from "../external/hooks";
 import { listFacts, loadGuidance, partsApi } from "../files";
 import { limitsWritten } from "../files/definitions";
 import { connectionNamed, createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
-import { promptMapApi } from "../prompt";
+import { keptPrompt, promptMapApi, promptSlice, type TurnPrompt } from "../prompt";
 import { Jobs } from "../jobs";
 import { External } from "../external";
 import { closingOf, type SessionChange, sessionsApi, viewOf } from "../sessions/api";
@@ -23,9 +23,9 @@ import { SessionListing } from "../sessions/listing";
 import { SessionBook } from "../sessions/book";
 import { LiveHub } from "./live";
 import { connectionOf, template } from "./means";
-import { openingOf } from "./opening";
+import { leadOpening, openingOf } from "./opening";
 import { listedTools, ownTexts } from "./own";
-import { keptOpening, Sessions } from "./sessions";
+import { keptOpening, type Opening, Sessions } from "./sessions";
 import { rebuildRequest } from "./requests";
 import { switchRule, testRule } from "./ruletest";
 import { questionsCannot } from "./judge";
@@ -232,15 +232,37 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const block = await openingOf({ guidance, agent, definition, tools: definition === undefined ? [] : registry.hold(definition.tools).tools, isTool: (name) => registry.has(name), ...(lead !== undefined && form !== undefined ? { contract: { part: lead, form } } : {}) });
         return block.parts;
       },
-      // "Apply now": the session file's mark puts every lead's block before it out of force, so the
-      // next run of each makes and writes its block afresh, over a restart too; memory lets go of them.
-      // A sub-agent's and a job's agent's blocks are made at each start already.
+      // "Apply now", at the press (R-119): each lead whose block the session holds has its block made
+      // afresh now, from the files as they stand (its definition's tool list and `given:` included),
+      // and kept in the session file as its newest, so the first run of it that starts after the press
+      // takes that block, over a restart too; a run already going keeps the block it started with. A
+      // lead whose block cannot be made now (its definition is gone or off, or its form is the tags and
+      // the contract names none) is logged, and the press's mark puts its old block out of force, so its
+      // next run makes one and says why it cannot. A sub-agent's and a job's agent's blocks are made at
+      // each start already.
       apply: async (scope) => {
+        const leads = await book.with(scope, (file) => file.log.openings().map((entry) => entry.lead));
+        if (leads.length === 0) return;
+        const { guidance, settings, registry } = await registryOf(scope);
+        const contract = template(await guidance.part("reply-contract"));
+        // What a definition's `opening:` names of the prompt is read from the session's newest kept prompt.
+        let prompt: Promise<TurnPrompt | undefined> | undefined;
+        const slice = promptSlice(() => (prompt ??= keptPrompt(env, scope).then((kept) => kept?.prompt)), guidance);
+        const made = new Map<string, Opening>();
+        for (const lead of leads) {
+          const definition = await guidance.definition(lead);
+          const opened = definition === undefined ? undefined : await leadOpening({ env, scope, lead: { id: ids(), definition: lead }, guidance, definition, registry, settings, connection: await connectionOf(layer.api, scope, definition, env.log, settings), contract, slice });
+          if (opened === undefined || opened === "no-tags") env.log.warn("Apply now could not make a lead's opening block afresh; its next run makes it.", { agent: lead, why: opened === undefined ? "no-definition" : opened });
+          else made.set(lead, opened);
+        }
         await book.with(scope, async (file) => {
-          if (file.log.openings().length > 0) file.add({ type: "applied", parent: file.log.leaf });
+          file.add({ type: "applied", parent: file.log.leaf });
+          for (const [lead, opening] of made) file.add({ type: "opening", parent: file.log.leaf, lead, opening: opening as unknown as JsonObject });
           await file.settled();
         });
-        core.sessions.of(scope).openings.clear();
+        const memory = core.sessions.of(scope).openings;
+        memory.clear();
+        for (const [lead, opening] of made) memory.set(lead, opening);
       },
       // What an agent's requests carry as its fixed list, as a run declares it: a lead's as its session opened it, else its definition's as the registry holds it now; with its size.
       declared: async (scope, agent) => {

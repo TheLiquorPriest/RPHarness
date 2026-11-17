@@ -26,7 +26,7 @@ import { factFields, factsNamed } from "../files/facts";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
-import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
+import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, TagReply } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
 import type { ReleaseCheck } from "../reply/release";
 import { SilentReply } from "../reply/silent";
@@ -35,7 +35,7 @@ import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, mat
 import { Compactor, type EarlierTurns, saveBeforeCompaction } from "../sessions/compact";
 import { entryOf } from "../sessions/runs";
 import { answer, type OwnTool, Registry, TodoLists, type ToolText, type Words } from "../tools";
-import { changedText, openingOf, pinsOf } from "./opening";
+import { changedText, DELEGATION_PART, GIVEN_PART, leadOpening, openingOf, pinsOf } from "./opening";
 import { ownTexts, ownTools } from "./own";
 import type { AgentReach } from "../tools/search";
 import type { GuidesGiven } from "../tools/search/tools";
@@ -50,7 +50,7 @@ import { type Connection, connectionOf, lines, runnerTexts, template } from "./m
 import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
 import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
-import { agentLimits, callTerms, DEFAULT_SETTINGS, formFor, interruptFor, readSettings, type Settings } from "./settings";
+import { agentLimits, callTerms, DEFAULT_SETTINGS, interruptFor, readSettings, type Settings } from "./settings";
 import type { UsageBook } from "./usage";
 
 /** Where the released reply is kept, inside the turn's `output/` folder (§5.3). */
@@ -58,12 +58,8 @@ export const RELEASED_FILE = "output/reply.md";
 /** What the lead was told at its run's start, in the turn's folder (§5.3). */
 const BRIEFING_FILE = "briefing.md";
 
-/** How what an agent is given by name beyond its own blocks is laid out (`.prompts/given.md`): the lead's and the writer's after their blocks, and what a lead's definition gives as its session opens. */
-const GIVEN_PART = "given";
 /** The name a writer's definition gives the brief `write_reply` hands it (`given: [prompt:*, brief]`): its own block, placed as itself. */
 const WRITER_BRIEF = "brief";
-/** How a chat message and a lore entry are laid out in what an agent is given (`.prompts/delegation.md`). */
-const DELEGATION_PART = "delegation";
 
 /** What every turn of a harness shares. */
 export interface TurnCore {
@@ -104,14 +100,6 @@ function plainPath(path: string): string {
     else if (part !== "" && part !== ".") parts.push(part);
   }
   return parts.join("/");
-}
-
-/** The tag names a reply contract's header gives, when it gives both. */
-function tagsOf(header: Readonly<Record<string, unknown>>): ReplyTags | undefined {
-  const tags = header["tags"];
-  if (typeof tags !== "object" || tags === null || Array.isArray(tags)) return undefined;
-  const { reply, intent } = tags as Record<string, unknown>;
-  return typeof reply === "string" && typeof intent === "string" ? { reply, intent } : undefined;
 }
 
 /** What the sink is told when the run ends without a reply released; where it ended with no reply, at a limit or stopped, the lead's last plain text outside any mark, where it wrote any. */
@@ -470,7 +458,7 @@ export class Turn {
     // The block the session opened with: as memory holds it, or, after a restart or once the session is open again after a close, as its file keeps it. Made afresh, it is kept in the file.
     let opening = session.openings.get(req.lead) ?? keptOpening(file.log, req.lead);
     if (opening === undefined) {
-      const opened = await this.#open(guidance, definition, registry, settings, connection, template(contract), slice);
+      const opened = await leadOpening({ env: this.#env, scope, lead: this.#lead, guidance, definition, registry, settings, connection, contract: template(contract), slice });
       if (typeof opened === "string") return this.#outcome({ status: "failed", error: { code: opened, agent: req.lead } });
       opening = opened;
       file.add({ type: "opening", parent: begun.id, lead: req.lead, opening: opening as unknown as JsonObject });
@@ -701,44 +689,6 @@ export class Turn {
     await judges.settled();
     await keepMemory(session, env, scope, rules.memory(), new Set(pathTurns(file.log, file.log.tip(scope.turn) ?? null).map((turn) => turn.entry.turn)));
     return this.#outcomeOf(outcome);
-  }
-
-  /**
-   * Opens the session for its lead: the opening block, which holds still for the session (§5.2,
-   * §10.2), made by the one builder; what its definition's `opening:` names is asked of the host
-   * once, here (§8.2, R-163). Or why it cannot be made.
-   */
-  async #open(guidance: Guidance, definition: AgentDefinition, registry: Registry, settings: Settings, connection: Connection, contract: TemplatePart | undefined, slice: (ref: string, reader: AgentRef) => Promise<string | undefined>): Promise<Opening | "no-tags"> {
-    const { env } = this.#c;
-    const { form, stream } = formFor(settings, connection);
-    let tags: ReplyTags | undefined;
-    let intentFile: string | undefined;
-    if (contract !== undefined) {
-      tags = tagsOf(contract.header);
-      const file = contract.header["intent_file"];
-      intentFile = typeof file === "string" && file !== "" ? file : undefined;
-    }
-    if (form === "tags" && tags === undefined) return "no-tags";
-    const held = registry.hold(definition.tools);
-    const [layout, delegation] = await Promise.all([guidance.part(GIVEN_PART), guidance.part(DELEGATION_PART)]);
-    const items = await attach({ env: this.#env, scope: this.scope, lines: lines(delegation), most: settings.perCall, moment: { task: "" }, slice }, this.#lead, definition.opening.map((ref) => ({ ref, from: "opening" as const })));
-    if (items.missing.length > 0) env.log.warn("What the lead's definition gives as its session opens could not be found.", { agent: definition.name, missing: items.missing });
-    // The skills in the block stand as the session opened it, and the briefing says when the list no longer does.
-    const block = await openingOf({ guidance, agent: definition.name, definition, tools: held.tools, isTool: (name) => registry.has(name), ...(contract !== undefined ? { contract: { part: contract, form } } : {}), items: { given: items, layout: template(layout) }, log: env.log });
-    return {
-      text: block.text,
-      snapshot: block.snapshot,
-      ...(block.skills !== "" ? { skills: block.skills } : {}),
-      tools: [...definition.tools],
-      given: [...definition.given],
-      outOfReach: [...definition.outOfReach],
-      declared: Object.fromEntries(held.tools.map((tool) => [tool.name, { description: tool.description, parameters: tool.parameters }])),
-      form,
-      stream,
-      ...(tags !== undefined ? { tags } : {}),
-      ...(intentFile !== undefined ? { intentFile } : {}),
-      ...(block.contract !== undefined && block.contract !== "" ? { contract: block.contract } : {}),
-    };
   }
 
   /**

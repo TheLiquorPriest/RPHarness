@@ -178,8 +178,9 @@ export interface CompactEntry extends EntryBase {
 
 /**
  * The owner pressed "Apply now" (R-119): every lead's opening block written before it no longer
- * stands, so the first run of each lead that starts after it makes its block afresh from the files as
- * they stand, and writes it. A mark of the host's word: it belongs to no turn, and is never the leaf.
+ * stands. The blocks made afresh at the press follow it as `opening` entries; a lead with none after
+ * it makes its block at its next run's start, and writes it. A mark of the host's word: it belongs to
+ * no turn, and is never the leaf.
  */
 export interface AppliedEntry extends EntryBase {
   type: "applied";

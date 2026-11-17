@@ -24,7 +24,7 @@ export function match(text: string, terms: readonly string[]): { score: number; 
   return { score, at, length };
 }
 
-/** The text around a match: `radius` code units on each side of it (`search.snippet` in the host's config). */
+/** The text around a match: `radius` code units on each side of it (`search.snippetChars` in the host's config). */
 export function snippetOf(text: string, at: number, length: number, radius: number): string {
   return text.slice(Math.max(0, at - radius), at + length + radius);
 }

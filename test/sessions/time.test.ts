@@ -12,7 +12,7 @@ afterEach(async () => {
   open = undefined;
 });
 
-const ONE_SECOND = "limits:\n  turn:\n    time: 1\ncompaction:\n  keepTurns: 2\n";
+const ONE_SECOND = "limits:\n  turn:\n    seconds: 1\ncompaction:\n  keepTurns: 2\n";
 
 /** t1 to t3, then t4 after a compaction the host asked for; t4's time runs out while its first model call holds. */
 async function outOfTime(s: Stage): Promise<void> {

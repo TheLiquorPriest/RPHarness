@@ -136,12 +136,12 @@ export type TraceEvent =
   | { kind: "waiting"; for: "tool" | "agent"; callId: string; tool: string; ms?: number }
   /** The agent's definition names a connection that is no longer there: its call went on the default connection (`used`), with that connection's own model. */
   | { kind: "connection_stand_in"; named: string; used: string }
-  /** A tool call began; `via` when it was reached through `tool_use`, and `closing` when the agent marked it so (§10.7). */
-  | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; closing: boolean; via?: "tool_use" }
+  /** A tool call began; `via` when it was reached through `tool_use`. */
+  | { kind: "tool_started"; callId: string; tool: string; args: JsonValue; via?: "tool_use" }
   /** Part of a tool's answer, while it runs. */
   | { kind: "tool_update"; callId: string; tool: string; partial: ToolResult }
   /**
-   * A tool's answer: whether it was clean, and whether it ended the batch's run (§10.7). For a write
+   * A tool's answer: whether it was clean, and whether it ended the agent's work (a question, §10.5). For a write
    * or external tool, the permission it ran under, or would have run under, Auto included (`never`:
    * refused; `confirm`: with the user's word), a call a limit or a switch kept from starting included.
    * `refused`: why a call that never ran did not (C1's note). A found tool's record is under its own name.

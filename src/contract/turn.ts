@@ -63,7 +63,7 @@ export interface TurnRequest {
    * Whether the run owes the player a reply (§10.7): absent or true, it does; false for a run that
    * writes nothing into the chat (one asked for to settle a turn's records, say). A fact, and
    * nothing more: the rules read it as `reply.owed` (1 while a reply is owed and none has been
-   * released), and it changes nothing of how the run ends, which its closing calls and its rules say.
+   * released), and it changes nothing of how the run ends: when the lead's message makes no tool call, and as its rules say.
    */
   owesReply?: boolean;
   /** Who the reply speaks as, in a group chat (§10.10). */

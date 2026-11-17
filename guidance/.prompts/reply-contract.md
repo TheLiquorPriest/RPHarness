@@ -1,5 +1,5 @@
 ---
-description: How a reply, an intent record and a closing call are marked, in the form this connection uses. It says only how things are marked. Whether to write an intent record, and what goes in it, is for the instructions that ask for one. The tags' names are set here and nowhere else, and so is the file an intent record is written to when the tags are not used.
+description: How a reply and an intent record are marked, in the form this connection uses, and what ends a run. It says only how things are marked. Whether to write an intent record, and what goes in it, is for the instructions that ask for one. The tags' names are set here and nowhere else, and so is the file an intent record is written to when the tags are not used.
 tags:
   reply: reply
   intent: intent
@@ -7,31 +7,14 @@ intent_file: scratch/intent.md
 ---
 # The reply contract
 
-## Closing calls
-
-A call marked `closing: true` is one that needs no answer and after which nothing is left to do this turn. When every closing call of a message comes back clean, and nothing else is due, the turn ends there, with no further call. If one comes back with a report, you get another call to read it. A call made before the reply has gone out is not a closing call: marked so, it would end the turn with no reply.
-
-## The marks
-
 {{#form.tags}}
-- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`, at the very start of your first message, before the reply and before any call.
+- **An intent record,** when your instructions ask for one: between `<{{tags.intent}}>` and `</{{tags.intent}}>`, at the head of your first message.
 - **The reply:** whatever the player should see goes between `<{{tags.reply}}>` and `</{{tags.reply}}>`. Nothing else you write reaches the chat. The replies among this conversation's assistant turns are shown unmarked, as the chat saved them; the reply you write is marked.
-- One reply per turn. Within one message the text comes first and its calls after it, so a message that opens with a call holds neither an intent record nor a reply. Calls may come before the reply, after it in the reply's own message, or both.
-
-A first message that holds an intent record, the reply and calls is marked like this, its calls after the text:
-
-```
-<{{tags.intent}}>
-…
-</{{tags.intent}}>
-
-<{{tags.reply}}>
-…
-</{{tags.reply}}>
-```
+- One reply per turn. Within one message the text comes first and its calls after it. Calls may come before the reply, after it, or both.
 {{/form.tags}}
 {{#form.two_step}}
 - **Working text goes in files, never in a message.** An intent record, when your instructions ask for one: written first to `{{intent_file}}` in the turn's folder with `file_write`.
-- **The reply:** the plain text of a message of its own. One reply per turn.
-- **What follows the reply rides with it.** A message with no call ends the turn. So whatever is to be recorded after the reply is called in the reply's own message, each call marked `closing: true` and no other call with them. They run once the reply is out.
+- **The reply:** the plain text of a message that makes no call. One reply per turn. The text of a message that makes a call is never shown.
 {{/form.two_step}}
+
+A message of yours that makes no call ends your run.

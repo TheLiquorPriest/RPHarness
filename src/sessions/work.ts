@@ -9,13 +9,11 @@ import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Api, AssistantMessage, Model, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { JsonObject } from "../contract";
 import { assistantMessage, userMessage } from "../harness/prompt";
-import { CLOSING } from "../loop";
 import type { CallEntry, ResultEntry, SessionLog } from "./file";
 
-/** A call's arguments as the model wrote them: closing among them where it marked the call so. */
+/** A call's arguments as the model wrote them. */
 function argumentsOf(entry: CallEntry): JsonObject {
-  const args = typeof entry.args === "object" && entry.args !== null && !Array.isArray(entry.args) ? { ...entry.args } : {};
-  return entry.closing === true ? { ...args, [CLOSING]: true } : args;
+  return typeof entry.args === "object" && entry.args !== null && !Array.isArray(entry.args) ? { ...entry.args } : {};
 }
 
 /** What came back to a call, as the model read it: its text, then each report. */

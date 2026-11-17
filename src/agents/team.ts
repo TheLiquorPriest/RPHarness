@@ -9,9 +9,9 @@
 // the lead's do, as itself.
 // A sub-agent's work ends with the turn's reply unless the agent that started it keeps it (`keep`):
 // a kept one may be continued after the reply, given what of its definition's items changed since
-// it was last given them, and a closing message sets it working past the end of the lead's run,
-// which the turn's end waits for (§13.4). Its own limits count per stretch of work, the turn's over
-// all of them. A handle is its turn's: the session numbers each definition's agents on.
+// it was last given them; a message waits for its answer (§13.4). Its own limits count per stretch
+// of work, the turn's over all of them. A handle is its turn's: the session numbers each
+// definition's agents on.
 //
 // Code holds a sub-agent to the user's limits on how deep, how many and how many at once (one past
 // it waits for a place), and to its definition's count of messages after its first answer, and to
@@ -100,8 +100,6 @@ export interface TeamDeps {
   job?: string;
   /** How many agents of each definition the session has started, for their handles, so a handle names an agent of one turn alone. None: counted in this team. */
   numbers?: Map<string, number>;
-  /** Fires once nothing more of the turn may start (stopped, left, out of time): a kept agent's work past the call that set it going ends with it, as does its wait for a place. None: no work goes on past its call. */
-  signal?: AbortSignal;
   /** A sub-agent ended before its run did (at the reply, §13.4): its session closes now. */
   end?(agent: AgentRef): void;
   /** His run-end hooks for an agent the team made, at the moment its work would end (§5.4, §13.3): a block's reason, which it goes on with for one more call. None asks nothing. */
@@ -229,7 +227,7 @@ export class Team implements TeamWork {
   #loaded: Promise<Loaded> | undefined;
   /** Where a sub-agent's work waits for a place past the sub-agents at once, made at its first use. */
   #line: PlaceLine | undefined;
-  /** Its members' stretches of work still going, a kept agent's past its call among them: the turn's end waits for them all. */
+  /** Its members' stretches of work still going: the turn's end waits for them all. */
   readonly #going = new Set<Promise<unknown>>();
 
   constructor(deps: TeamDeps) {
@@ -401,7 +399,6 @@ export class Team implements TeamWork {
             },
           });
     const runner = new AgentRunner({ ...options, ...(compactor !== undefined ? { point: compactor.point(model.limits.contextWindow?.tokens) } : {}) });
-    if (runner.leftOut.length > 0) d.env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: definition.name, tools: runner.leftOut });
     // Its definition's items as given now: a message that continues it gives again only those that changed.
     const again = new Map<string, string | undefined>(definition.given.map((name) => [name, given.blocks.find((block) => block.name === name)?.text]));
     // Its start record names only what it was handed.
@@ -432,12 +429,6 @@ export class Team implements TeamWork {
     member.messages += 1;
     member.waiting = true;
     const parent: ParentCall = { agent: ctx.agent.id, run: ctx.run, call: ctx.callId };
-    // A closing message to a kept agent needs no answer (§10.7): its work goes on past the call, and
-    // past the lead's run, until it ends or the turn's stop reaches it; the turn ends once it has.
-    if (ctx.closing === true && member.kept && d.signal !== undefined) {
-      void this.#hold(this.#continued(member, call, ctx, parent, d.signal, loaded)).catch((error: unknown) => d.env.log.error("A kept sub-agent's work past the lead's call failed in the harness.", { agent: member.ref.id, error: error instanceof Error ? error.message : String(error) }));
-      return said("");
-    }
     return this.#hold(this.#continued(member, call, ctx, parent, ctx.signal, loaded));
   }
 
@@ -498,11 +489,6 @@ export class Team implements TeamWork {
       if (member.runner.working || member.waiting) member.ending = true;
       else this.#finish(member);
     }
-  }
-
-  /** Whether any member's work goes on: at the lead's run's end, a kept agent's that a closing message set going. */
-  get going(): boolean {
-    return this.#going.size > 0;
   }
 
   /** The turn's work is over once every agent of it has ended (§13.4): waits for each member's work still going, then ends every member. */

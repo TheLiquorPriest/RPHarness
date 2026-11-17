@@ -14,7 +14,6 @@ import { listFacts, loadGuidance, partsApi } from "../files";
 import { createModelLayer, modelTexts, runOf } from "../model";
 import type { ModelSource } from "../model/source";
 import { tokensOf } from "../model/tokens";
-import { withClosing } from "../loop";
 import { promptMapApi } from "../prompt";
 import { Jobs } from "../jobs";
 import { External } from "../external";
@@ -237,7 +236,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const { guidance, settings, registry } = await registryOf(scope);
         const opening = core.sessions.of(scope).openings.get(agent) ?? (await book.with(scope, (file) => keptOpening(file.log, agent)));
         const held = opening !== undefined ? registry.opened(opening.tools, opening.declared, async () => ({ content: [], error: true })).tools : registry.hold((await guidance.definition(agent))?.tools ?? []).tools;
-        const tools = held.map((tool) => ({ name: tool.name, description: tool.description, parameters: withClosing(tool) }));
+        const tools = held.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
         return { tools, tokens: tokensOf(JSON.stringify(tools), settings.tokens.charsPerToken), most: settings.fixedTokens };
       },
       tools: async (scope) => {

@@ -23,7 +23,7 @@ import { CACHE, type CacheDeps, GUIDES_KEY, hostCached, keepCached, loreKey, PRO
 import { createFacts, loadGuidance, partFields } from "../files";
 import type { AgentDefinition, Facts, Fields, Guidance, LinesPart, OwnFactValues, PromptPart, RuleRun, TemplatePart } from "../files/api";
 import { factFields, factsNamed } from "../files/facts";
-import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, withClosing, type Work } from "../loop";
+import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, type ReplyTags, TagReply } from "../reply";
@@ -199,8 +199,6 @@ export class Turn {
   #lastText: string | undefined;
   #notices = 0;
   #stopped = false;
-  /** Fires once nothing more of the turn may start (stopped, left, out of time): a kept agent's work past the lead's run ends with it (§13.4). */
-  readonly #stopping = new AbortController();
   #timer: unknown;
   /** The turn's own time ran out, at this limit: nothing of the turn starts after it (§10.11). */
   #timeUp: LimitHit | undefined;
@@ -236,9 +234,8 @@ export class Turn {
   }
 
   /**
-   * Runs the turn: the lead's run, then whatever a kept agent goes on with past it (§13.4), the host
-   * told the run ended once the lead's is over; resolves once every agent of the turn has ended. The
-   * reply goes to the sink at release, or the sink is told why there is none.
+   * Runs the turn: the lead's run, then the host told the run ended; resolves once every agent of the
+   * turn has ended. The reply goes to the sink at release, or the sink is told why there is none.
    */
   async answer(signal: AbortSignal): Promise<TurnOutcome> {
     const { env, hub, usage } = this.#c;
@@ -258,16 +255,8 @@ export class Turn {
     }
     this.#keep?.stop();
     if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
-    // The lead's run is over. Where a kept agent goes on past it, the host is told so now (C-T10),
-    // and the turn ends once that work has, under the turn's limits and stop; its spend counts too.
-    const going = this.#team?.going === true;
-    if (going) {
-      await this.#told();
-      await this.#tell(env.events.ended(this.scope, outcome));
-    }
-    // Every sub-agent ends with the turn's work: its session closes.
+    // Every sub-agent ends with the turn's work, once what of it is still going has ended: its session closes.
     await this.#team?.over();
-    if (going) outcome = { ...outcome, usage: this.#usage() };
     signal.removeEventListener("abort", onAbort);
     if (this.#timer !== undefined) env.clock.clearTimeout(this.#timer);
     // What the turn's runs have spent, this run's added: a later run of the turn counts on from it (N-22).
@@ -278,7 +267,7 @@ export class Turn {
     await this.#keepScratch().catch((error: unknown) => env.log.error("The session's cache could not keep the turn's scratch files.", { turn: this.scope.turn, run: this.run, error: errorWords(error) }));
     await this.#settled();
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
-    if (!going) await this.#tell(env.events.ended(this.scope, outcome));
+    await this.#tell(env.events.ended(this.scope, outcome));
     usage.end(this.run);
     hub.ended(this.run);
     return { ...outcome, reply: this.#released?.text ?? "", ...(this.#released !== undefined ? { form: this.#released.form } : {}) };
@@ -288,7 +277,6 @@ export class Turn {
   stop(): void {
     this.#stopped = true;
     for (const { work } of this.#working) work.stop();
-    this.#stopping.abort();
   }
 
   /** Whether the turn was stopped, or its own time ran out: nothing more of it starts. */
@@ -450,7 +438,6 @@ export class Turn {
       hooks,
       slice,
       numbers: session.handles,
-      signal: this.#stopping.signal,
       end: (agent) => this.#agentRuns().end(agent),
     });
     this.#team = team;
@@ -503,7 +490,7 @@ export class Turn {
     const held = registry.opened(opening.tools, opening.declared, async (tool) => answer(this.#words("withdrawn", { tool }), true));
     this.#unheld("withdrawn", req.lead, held.withdrawn, "Tools the lead's session declared as it opened are no longer offered by the host; each answers that it is gone.");
     const declared = held.tools;
-    const listSize = { tokens: tokensOf(JSON.stringify(declared.map((tool) => ({ name: tool.name, description: tool.description, parameters: withClosing(tool) }))), settings.tokens.charsPerToken), most: settings.fixedTokens };
+    const listSize = { tokens: tokensOf(JSON.stringify(declared.map((tool) => ({ name: tool.name, description: tool.description, parameters: tool.parameters }))), settings.tokens.charsPerToken), most: settings.fixedTokens };
 
     const due = await rules.turnStart(this.#lead);
     for (const fired of due) if (fired.carried !== true) this.#trace.event(this.#lead, undefined, { kind: "rule_fired", firing: { ...fired.firing, agent: this.#lead, action: "briefing" } });
@@ -698,7 +685,6 @@ export class Turn {
 
     const runner = new AgentRunner({ ...leadOptions, point: compactor.point(model.limits.contextWindow?.tokens) });
     this.#leadRunner = runner;
-    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: req.lead, tools: runner.leftOut });
     let outcome: AgentOutcome | undefined;
     if (!this.#ended()) {
       const work = runner.start({ messages: [] }, { given: handed });
@@ -1245,7 +1231,6 @@ export class Turn {
       ...this.#keeper(ref),
       ...(this.#hooks !== undefined ? { atRunEnd: () => this.#hooks?.atRunEnd(this.scope, { agent: ref, parent }) ?? Promise.resolve(undefined) } : {}),
     });
-    if (runner.leftOut.length > 0) env.log.warn("Tools that take an argument named closing, which RPH adds to every tool, are left out.", { agent: writer, tools: runner.leftOut });
     // Each later stretch of the writer's work, which a message sets going, ends its run as well: its draft is kept, and its session let go.
     const stretchEnded = (ended: AgentOutcome): void => {
       if (!live) this.#drafted(ref, ended);
@@ -1345,7 +1330,6 @@ export class Turn {
     const hit = { limit: "time" as const, per: "turn" as const, max, value: (this.#earlier?.ms ?? 0) + this.#c.env.clock.now() - this.#startedAt };
     this.#timeUp = hit;
     for (const { runner } of this.#working) runner.limit(hit);
-    this.#stopping.abort();
   }
 
   /** Every record of the run: the usage, the lead's entries in the session file, progress lines, and what each fired rule's agent did next. */

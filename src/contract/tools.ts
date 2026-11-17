@@ -16,10 +16,7 @@ export type ToolTier = "read" | "write" | "external";
 /** A piece of what a tool gives the model: text, or a picture (base64, with its type). */
 export type ToolContent = { type: "text"; text: string } | { type: "image"; data: string; mimeType: string };
 
-/**
- * A tool's answer. It is clean when it has no `error` and no `reports`: a closing call whose result
- * is not clean keeps the run going for one more call (§10.7).
- */
+/** A tool's answer. It is clean when it has no `error` and no `reports`, as the trace records it. */
 export interface ToolResult {
   /** What the model is shown, in order. Every write's answer says what changed and how it now stands (§6.8). */
   content: ToolContent[];
@@ -50,14 +47,11 @@ export interface ToolCtx {
   signal: AbortSignal;
   /** Shows part of the answer while the call runs, in the live view. Calls after the tool has answered are ignored. */
   onUpdate(partial: ToolResult): void;
-  /** The agent marked this call closing (§10.7): its answer reaches no one, so a tool that starts work of its own (a closing `agent_message` to a kept agent) need not wait for it. */
-  closing?: true;
 }
 
 /**
- * One of the host's tools. RPH adds one optional argument to every tool, `closing`, by which an
- * agent says the call needs no answer (§10.7); the tool never sees it. A tool reached through
- * `tool_use` is checked, permitted, ruled on, hooked and traced under its own name (§6.8).
+ * One of the host's tools, called with its own arguments alone. A tool reached through `tool_use` is
+ * checked, permitted, ruled on, hooked and traced under its own name (§6.8).
  */
 export interface HostTool {
   /**

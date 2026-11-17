@@ -75,50 +75,6 @@ describe("around a tool call", () => {
     expect(recorder.of("tool_ended")[0]!.event).toMatchObject({ tool: "world_apply", clean: false, endedRun: false });
     expect(recorder.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.action])).toEqual([["vault-shut", "hold"]]);
   });
-
-  test("a tool that takes an argument named closing is left out and named, and the agent works with the rest", async () => {
-    const query = tool("world_query", async () => said("an answer"), { parameters: { type: "object", properties: { closing: { type: "string" } } } });
-    const note = tool("scene_note", async () => said("noted"));
-    const { runner, scripted, clock } = rigAgent(author, [{ pieces: [{ call: "world_query", args: { closing: "the door" } }] }, { pieces: [{ text: "Done." }] }], { tools: [query, note] });
-
-    expect(runner.leftOut).toEqual(["world_query"]);
-    const outcome = await clock.settle(runner.start({ messages: [user("Ask about the door.")] }).done);
-
-    expect(outcome.status).toBe("done");
-    expect(scripted.requests[0]!.tools.map((declared) => declared.name)).toEqual(["scene_note"]);
-    expect(textOf(scripted.requests[1]!.messages.at(-1)!)).toBe("Fixture: no tool named world_query.");
-  });
-
-  test("a host's tool that takes closing is left out of the lead's, a sub-agent's and the writer's requests, and the log names it for each", async () => {
-    const GM = "---\nname: gm\ndescription: Fixture GM.\nmodel: default\ntools: [world_query]\n---\nFixture GM: rule on what you are asked.\n";
-    const NARRATOR = "---\nname: narrator\ndescription: Fixture narrator.\nmodel: default\ntools: [world_query]\ngiven:\n  - prompt:*(as sent, with the preset's sampling and prefill)\n  - brief\n---\nFixture narrator: write the reply from the brief.\n";
-    const s = (open = await stage({
-      drafted: true,
-      files: { ".agents/gm.md": GM, ".agents/narrator.md": NARRATOR },
-      tools: { world_query: { tier: "read", description: "Fixture: reads the world, and takes its own closing.", parameters: { properties: { at: { type: "string" }, closing: { type: "string" } } }, run: async () => said("the boat is late") } },
-      answers: [
-        { pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule on the boat." }, id: "d-1" }] },
-        { pieces: [{ text: "The boat is late." }] },
-        { pieces: [{ call: "write_reply", args: { brief: "Wren says the boat is late.", live: true, closing: true }, id: "w-1" }] },
-        { pieces: [{ text: "Late again, Wren says." }] },
-      ],
-    }));
-
-    const { outcome } = await s.turn(request("t1"));
-
-    expect(outcome.status).toBe("released");
-    // Each request, by the agent whose call it was: a call's start is traced just before its request is made.
-    const by = s.trace.of("call_started").map((record, at) => [record.agent?.definition, s.model.requests[at]!.tools.map((declared) => declared.name)] as const);
-    expect(by.map(([agent]) => agent)).toEqual(["author", "gm", "author", "narrator"]);
-    for (const [, tools] of by) expect(tools).not.toContain("world_query");
-    expect(by[0]![1]).toContain("delegate");
-    const named = s.logged.filter((line) => line.message === "Tools that take an argument named closing, which RPH adds to every tool, are left out.").map((line) => line.fields);
-    expect(named).toEqual([
-      { agent: "author", tools: ["world_query"] },
-      { agent: "gm", tools: ["world_query"] },
-      { agent: "narrator", tools: ["world_query"] },
-    ]);
-  });
 });
 
 describe("a model that fails", () => {

@@ -82,14 +82,13 @@ export interface MessageEntry extends EntryBase {
   error?: string;
 }
 
-/** A tool call of the lead, as it ran: by `tool_use` when `via` says so, marked closing when the lead said so. */
+/** A tool call of the lead, as it ran: by `tool_use` when `via` says so. */
 export interface CallEntry extends EntryBase {
   type: "call";
   turn: string;
   callId: string;
   tool: string;
   args: JsonValue;
-  closing?: true;
   via?: "tool_use";
 }
 

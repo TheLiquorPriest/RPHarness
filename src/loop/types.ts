@@ -14,7 +14,7 @@ export type LoopClock = Pick<Clock, "now" | "setTimeout" | "clearTimeout">;
 export interface LoopTool {
   name: string;
   description: string;
-  /** Its arguments, as an object schema. The runner adds `closing` to it; the tool never sees that argument, and one that has its own argument of that name is left out (`AgentRunner.leftOut`). */
+  /** Its arguments, as an object schema: the model is told them as they are, and the tool is called with them. */
   parameters: JsonSchema;
   run(args: JsonValue, ctx: ToolCtx): Promise<LoopToolResult>;
   /** Runs alone: a message that calls it runs its calls one after another. */
@@ -42,7 +42,7 @@ export interface LoopToolResult extends ToolResult {
   refused?: CallRefusal;
 }
 
-/** A tool call as the gate sees it: who made it, the model's id for it, the tool, and its arguments without `closing`. */
+/** A tool call as the gate sees it: who made it, the model's id for it, the tool, and its arguments. */
 export interface GateCall {
   agent: AgentRef;
   callId: string;

@@ -551,8 +551,8 @@ export interface ListedDefinition extends DefinitionView {
 
 /**
  * What an agent's requests carry as its fixed list (§6.8, Appendix D.1), as `definitions.declared`
- * gives it: each tool's name, description and schema exactly as declared, `closing` among its
- * arguments, and the whole's size in tokens as the model layer counts a call's tools; `most` is the
+ * gives it: each tool's name, description and schema exactly as declared, and the whole's size in
+ * tokens as the model layer counts a call's tools; `most` is the
  * user's `tools.fixedTokens`, and a list over it is marked where it shows (nothing is refused).
  */
 export interface DeclaredTools {
@@ -592,13 +592,11 @@ export type StackLeft = "missing" | "off" | "empty" | "broken" | "needs";
 
 /**
  * What a part of an agent's opening block is (§5.2, §10.2): its definition; an instruction file; an
- * always-on rule; the reply contract (a lead's); the guide of a family of tools it holds; what the
- * `closing` argument every tool of its own list takes means (`.tools/closing.md`, said once, after the
- * guides, for an agent that holds any tool); a held tool's description, which its declaration carries
- * in the cached front; the skills' index; or what its definition's `opening:` names, as the host
- * answered when the session opened.
+ * always-on rule; the reply contract (a lead's); the guide of a family of tools it holds; a held
+ * tool's description, which its declaration carries in the cached front; the skills' index; or what
+ * its definition's `opening:` names, as the host answered when the session opened.
  */
-export type StackPartKind = "definition" | "instruction" | "rule" | "contract" | "guide" | "closing" | "description" | "skills" | "given";
+export type StackPartKind = "definition" | "instruction" | "rule" | "contract" | "guide" | "description" | "skills" | "given";
 
 /**
  * One part of what an agent gets (§5.2): which part, the file it came from, and whether it sits in the

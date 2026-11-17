@@ -6,4 +6,4 @@ arguments:
   consent: Only when you allow it to invent something - topic, what may be invented; bounds, within what bounds; gap_check, the gap check it rests on. It is kept with the turn.
   keep: true keeps the agent past this turn's reply, false lets it end when the reply goes out; left out, it stays as it was.
 ---
-Sends a message to an agent started this turn. It goes on from where it stopped, with everything it had; if it asked a question, the message is the answer. What it says next comes back as the answer to this call. A message marked closing, sent to an agent you kept, starts its work and does not wait: the agent works on after your run ends, and nothing comes back.
+Sends a message to an agent started this turn. It goes on from where it stopped, with everything it had; if it asked a question, the message is the answer. What it says next comes back as the answer to this call.

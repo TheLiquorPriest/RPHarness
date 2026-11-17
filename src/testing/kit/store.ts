@@ -148,7 +148,7 @@ function everyKind(agent: AgentRef): { [K in TraceKind]: Extract<TraceEvent, { k
     connection_wait: { kind: "connection_wait", connection: "kit-connection", for: "minute", ms: 1_500 },
     waiting: { kind: "waiting", for: "tool", callId: "kit-call-1", tool: "kit_tally", ms: 20 },
     connection_stand_in: { kind: "connection_stand_in", named: "kit-gone-connection", used: "kit-connection" },
-    tool_started: { kind: "tool_started", callId: "kit-call-1", tool: "kit_tally", args: { numbers: [1, 2] }, closing: true },
+    tool_started: { kind: "tool_started", callId: "kit-call-1", tool: "kit_tally", args: { numbers: [1, 2] } },
     tool_update: { kind: "tool_update", callId: "kit-call-1", tool: "kit_tally", partial: { content: [{ type: "text", text: "counting" }] } },
     tool_ended: { kind: "tool_ended", callId: "kit-call-1", tool: "kit_tally", result: { content: [{ type: "text", text: "3" }] }, clean: true, endedRun: true, ms: 2 },
     rule_fired: { kind: "rule_fired", firing: { rule: "kit-quiet", path: ".rules/kit-quiet.md", level: "global", moment: "run-end", agent, action: "follow-up" } },

@@ -18,7 +18,7 @@ export function entryOf(event: TraceEvent, turn: string, parent: string | null):
     case "call_ended":
       return { type: "message", parent, turn, call: event.call, text: event.text, stop: event.stop, ...(event.error !== undefined ? { error: event.error } : {}) };
     case "tool_started":
-      return { type: "call", parent, turn, callId: event.callId, tool: event.tool, args: event.args, ...(event.closing ? { closing: true as const } : {}), ...(event.via !== undefined ? { via: event.via } : {}) };
+      return { type: "call", parent, turn, callId: event.callId, tool: event.tool, args: event.args, ...(event.via !== undefined ? { via: event.via } : {}) };
     case "tool_ended": {
       const { result } = event;
       const text = result.content.map((part) => (part.type === "text" ? part.text : "")).join("");

@@ -122,7 +122,7 @@ function carrierGate(gate: ToolGate): ToolGate {
 function asItself(gate: ToolGate, trace: RunTrace, notices: Words): ToolReach["run"] {
   return async (tool, args, ctx) => {
     const call: GateCall = { agent: ctx.agent, callId: ctx.callId, tool: tool.name, args };
-    trace.event(ctx.agent, undefined, { kind: "tool_started", callId: ctx.callId, tool: tool.name, args, closing: false, via: TOOL_USE });
+    trace.event(ctx.agent, undefined, { kind: "tool_started", callId: ctx.callId, tool: tool.name, args, via: TOOL_USE });
     const fired: { fired: Fired; action: "hold" | "remind" }[] = [];
     const before = await gate.before(call, ctx.signal);
     fired.push(...before.remind.map((f) => ({ fired: f, action: "remind" as const })));

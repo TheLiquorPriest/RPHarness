@@ -31,7 +31,7 @@ describe("a model pi's catalogue lists", () => {
     r = rig();
     const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-flash" }, KEY);
     const pi = listed("deepseek-flash");
-    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: { tokens: pi.contextWindow, from: "pi" }, maxTokens: { tokens: pi.maxTokens, from: "pi" }, pictures: { takes: pi.input.includes("image"), from: "pi" }, asked: [] });
+    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: { tokens: pi.contextWindow, from: "pi" }, maxTokens: { tokens: pi.maxTokens, from: "pi" }, pictures: { takes: pi.input.includes("image"), from: "pi" }, audio: null, video: null, asked: [] });
     const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null });
     expect([agent.model.contextWindow, agent.model.maxTokens]).toEqual([pi.contextWindow, pi.maxTokens]);
     // What pi lists for DeepSeek's own API today, as the plan expects it to read them.
@@ -50,10 +50,10 @@ describe("a model pi's catalogue doesn't list", () => {
     r = rig();
     const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash" }, KEY);
     expect(deepseekProvider().getModels().map((m) => m.id)).not.toContain("deepseek-v4-flash");
-    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: null, maxTokens: null, pictures: null, asked: ["contextWindow", "maxTokens", "pictures"] });
+    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: null, maxTokens: null, pictures: null, audio: null, video: null, asked: ["contextWindow", "maxTokens", "pictures"] });
     const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null });
     expect([agent.model.contextWindow, agent.model.maxTokens]).toEqual([0, 0]);
-    expect(agent.limits).toEqual({ contextWindow: null, maxTokens: null, pictures: null, asked: ["contextWindow", "maxTokens", "pictures"] });
+    expect(agent.limits).toEqual({ contextWindow: null, maxTokens: null, pictures: null, audio: null, video: null, asked: ["contextWindow", "maxTokens", "pictures"] });
     // Not known to take pictures, so none is sent to it as one.
     expect(agent.model.input).toEqual(["text"]);
   });
@@ -73,7 +73,7 @@ describe("a model pi's catalogue doesn't list", () => {
   test("takes what the user entered for it, pictures too, and the agent's model carries them", async () => {
     r = rig();
     const saved = await r.layer.api.save(USER, { name: "DeepSeek", provider: "deepseek", auth: "key", model: "deepseek-v4-flash", limits: { "deepseek-v4-flash": { contextWindow: 1_000_000, maxTokens: 384_000, pictures: true } } }, KEY);
-    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: { tokens: 1_000_000, from: "user" }, maxTokens: { tokens: 384_000, from: "user" }, pictures: { takes: true, from: "user" }, asked: [] });
+    expect(await r.layer.api.limits(USER, saved.id)).toEqual({ contextWindow: { tokens: 1_000_000, from: "user" }, maxTokens: { tokens: 384_000, from: "user" }, pictures: { takes: true, from: "user" }, audio: null, video: null, asked: [] });
     const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null });
     expect([agent.model.contextWindow, agent.model.maxTokens, agent.model.input]).toEqual([1_000_000, 384_000, ["text", "image"]]);
   });
@@ -95,7 +95,7 @@ describe("a model pi's catalogue doesn't list", () => {
     expect((await r.layer.api.models(USER, saved.id)).map((m) => m.id)).toEqual(["harbour-7b", "routed-model", "quiet-model"]);
     expect(r.sent[0]?.url).toBe("http://127.0.0.1:8080/v1/models");
     expect(await r.layer.api.limits(USER, saved.id)).toMatchObject({ contextWindow: { tokens: 32_768, from: "connection" }, maxTokens: null, pictures: null });
-    expect(await r.layer.api.limits(USER, saved.id, "routed-model")).toEqual({ contextWindow: { tokens: 131_072, from: "connection" }, maxTokens: { tokens: 16_384, from: "connection" }, pictures: { takes: true, from: "connection" }, asked: [] });
+    expect(await r.layer.api.limits(USER, saved.id, "routed-model")).toEqual({ contextWindow: { tokens: 131_072, from: "connection" }, maxTokens: { tokens: 16_384, from: "connection" }, pictures: { takes: true, from: "connection" }, audio: { takes: false, from: "connection" }, video: { takes: false, from: "connection" }, asked: [] });
     expect(await r.layer.api.limits(USER, saved.id, "quiet-model")).toMatchObject({ contextWindow: null, maxTokens: null });
     // What the user enters still governs what the server said.
     await r.layer.api.save(USER, { id: saved.id, name: "Local", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "harbour-7b", limits: { "harbour-7b": { contextWindow: 16_384 } } });
@@ -135,7 +135,7 @@ describe("a call's room", () => {
 
 describe("limits, each found on its own", () => {
   test("the user's entry first, then pi's, then the server's report; a number of 0 is none", () => {
-    expect(limitsOf({ contextWindow: 200_000, maxTokens: 0, input: ["text", "image"] }, { contextWindow: 100_000, maxTokens: 8_192 }, { maxTokens: 4_096, pictures: false })).toEqual({ contextWindow: { tokens: 200_000, from: "pi" }, maxTokens: { tokens: 4_096, from: "user" }, pictures: { takes: false, from: "user" }, asked: [] });
-    expect(limitsOf(undefined, { maxTokens: 8_192 }, undefined)).toEqual({ contextWindow: null, maxTokens: { tokens: 8_192, from: "connection" }, pictures: null, asked: ["contextWindow", "pictures"] });
+    expect(limitsOf({ contextWindow: 200_000, maxTokens: 0, input: ["text", "image"] }, { contextWindow: 100_000, maxTokens: 8_192 }, { maxTokens: 4_096, pictures: false })).toEqual({ contextWindow: { tokens: 200_000, from: "pi" }, maxTokens: { tokens: 4_096, from: "user" }, pictures: { takes: false, from: "user" }, audio: null, video: null, asked: [] });
+    expect(limitsOf(undefined, { maxTokens: 8_192 }, undefined)).toEqual({ contextWindow: null, maxTokens: { tokens: 8_192, from: "connection" }, pictures: null, audio: null, video: null, asked: ["contextWindow", "pictures"] });
   });
 });

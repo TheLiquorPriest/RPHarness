@@ -142,9 +142,13 @@ export function settingWords(setting: SettingWords): string {
   return `The setting "${setting.name}" on the Settings page`;
 }
 
-/** A picture of a request passed through, `part` naming its place, that the model it goes to takes none of: the request goes whole or not at all (READINGS R-100). */
-export function pictureUntakenWords(part: string, model: string, connection: string): string {
-  return `${part} is a picture, and the model "${model}" on the connection "${connection}" takes no pictures: send the request without it, or on a connection whose model takes pictures`;
+/** How a picture, audio and a video are said in the line that refuses one: what the part is, and what the model takes none of. */
+const UNTAKEN = { picture: ["a picture", "pictures"], audio: ["audio", "audio"], video: ["a video", "video"] } as const;
+
+/** A picture, audio or a video of a request passed through, `part` naming its place, that the model it goes to takes none of: the request goes whole or not at all (READINGS R-100). */
+export function untakenWords(media: keyof typeof UNTAKEN, part: string, model: string, connection: string): string {
+  const [is, takes] = UNTAKEN[media];
+  return `${part} is ${is}, and the model "${model}" on the connection "${connection}" takes no ${takes}: send the request without it, or on a connection whose model takes ${takes}`;
 }
 
 /** An error's text: its message, or what it is. */

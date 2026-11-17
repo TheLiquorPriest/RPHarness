@@ -17,8 +17,8 @@
 // the model choose or not, a prefix to continue where the call can't continue one, and any field of
 // the body the API has no place for. Dropped, any of them would change what the model is told and
 // nobody would know. A message is named by its place in the body, where each tool's result is a
-// message of its own. A picture the model takes none of (its figures say so: limits.ts) refuses the
-// request on any API, named.
+// message of its own. A picture, audio or a video the model takes none of (its figures say so:
+// limits.ts) refuses the request on any API, named.
 //
 // Of the APIs a connection speaks, only Anthropic's continues an assistant's message given last, and
 // Anthropic refuses that prefix to Claude 4.6 and later whatever they are asked, and to an earlier
@@ -44,7 +44,7 @@ import { isRecord } from "../contract/json";
 import type { Sampling } from "./kinds";
 import type { ModelEffort } from "./source";
 import { compatSays } from "./transcript";
-import { errorWords, pictureUntakenWords } from "./words";
+import { errorWords, untakenWords } from "./words";
 
 /** Something of a request that can't be carried: the request is refused with these words. */
 class NotCarried extends Error {}
@@ -322,13 +322,20 @@ function refuseUnplaced(body: JsonObject, shape: CallShape): void {
   }
 }
 
-/** Refuses a picture the model takes none of, named by its place in the body with the model (READINGS R-100): never dropped, on any API. A model nobody has said takes pictures or not is sent it. */
+/** What a part of a passed message holds that a model may take none of, by the part's type: a picture, audio or a video. */
+const MEDIA_PARTS = { image_url: "picture", input_audio: "audio", video_url: "video" } as const;
+
+/** Refuses a picture, audio or a video the model takes none of, named by its place in the body with the model (READINGS R-100): never dropped, on any API. A model nobody has said takes it or not is sent it. */
 function refuseUntaken(raw: unknown, shape: CallShape): void {
-  if (shape.limits.pictures?.takes !== false || !Array.isArray(raw)) return;
+  if (!Array.isArray(raw)) return;
+  const { limits } = shape;
+  const takes = { picture: limits.pictures?.takes, audio: limits.audio?.takes, video: limits.video?.takes };
   raw.forEach((m: unknown, i) => {
     if (!isRecord(m) || !Array.isArray(m.content)) return;
     m.content.forEach((part: unknown, j) => {
-      if (isRecord(part) && part.type === "image_url") throw new NotCarried(pictureUntakenWords(`message ${i + 1}'s part ${j + 1}`, shape.model.id, shape.connection.name));
+      if (!isRecord(part) || typeof part.type !== "string" || !Object.hasOwn(MEDIA_PARTS, part.type)) return;
+      const media = MEDIA_PARTS[part.type as keyof typeof MEDIA_PARTS];
+      if (takes[media] === false) throw new NotCarried(untakenWords(media, `message ${i + 1}'s part ${j + 1}`, shape.model.id, shape.connection.name));
     });
   });
 }

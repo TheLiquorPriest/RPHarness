@@ -142,6 +142,16 @@ describe("a request passed through", () => {
     expect(r.sent).toEqual([]);
   });
 
+  test("audio or a video sent through to a model its connection says takes none fails with a line naming the part and the model, and nothing reaches the server", async () => {
+    r = rig();
+    const saved = await r.layer.api.save(USER, { name: "Writer", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model", limits: { "served-model": { audio: false, video: false } } });
+    const audio: JsonObject = { ...BODY, messages: [{ role: "user", content: [{ type: "text", text: "Listen." }, { type: "input_audio", input_audio: { data: "UklGRg==", format: "wav" } }] }] };
+    expect((await pass(r, audio, saved.id)).error).toEqual({ code: "not-carried", detail: refused('message 1\'s part 2 is audio, and the model "served-model" on the connection "Writer" takes no audio: send the request without it, or on a connection whose model takes audio') });
+    const video: JsonObject = { ...BODY, messages: [{ role: "user", content: [{ type: "video_url", video_url: { url: "data:video/mp4;base64,AAAA" } }] }] };
+    expect((await pass(r, video, saved.id)).error).toEqual({ code: "not-carried", detail: refused('message 1\'s part 1 is a video, and the model "served-model" on the connection "Writer" takes no video: send the request without it, or on a connection whose model takes video') });
+    expect(r.sent).toEqual([]);
+  });
+
   test("gives a provider with another API what it has a place for, refuses by name each field it has none for, and continues a prefix where Anthropic can", async () => {
     r = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: " broke at dawn." }))) });
     await r.layer.api.save(USER, { name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, ANTHROPIC_KEY);

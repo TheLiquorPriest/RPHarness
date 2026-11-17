@@ -21,11 +21,13 @@ export type ConnectionAuth = "key" | "signin" | "none";
  */
 export type ToolsAs = "auto" | "native" | "text";
 
-/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures. */
+/** A model's figures as entered or reported: its context window and its longest answer, in tokens, and whether it takes pictures, audio and video. */
 export interface ModelLimitsEntry {
   contextWindow?: number;
   maxTokens?: number;
   pictures?: boolean;
+  audio?: boolean;
+  video?: boolean;
 }
 
 /** A connection as the layer keeps it. */
@@ -222,6 +224,12 @@ export interface ModelPictures {
   from: "user" | "pi" | "connection";
 }
 
+/** Whether a model takes audio, or video, and where that came from: pi's catalogue says neither, so the user's entry or the connection's server. */
+export interface ModelMedia {
+  takes: boolean;
+  from: "user" | "connection";
+}
+
 /** A figure of a model the Connections page asks for where nobody has given it. */
 export type ModelFigure = "contextWindow" | "maxTokens" | "pictures";
 
@@ -230,11 +238,16 @@ export type ModelFigure = "contextWindow" | "maxTokens" | "pictures";
  * pi's catalog, else what the connection's server reported. Null: nobody knows it, so the page asks
  * (§18.1 row 0.10); none is assumed. A model nobody has said takes pictures is not known to (C26):
  * RPH leaves no picture out by itself, and the host leaves them out of what it gives that agent.
+ * Whether it takes audio and video is the user's entry, else the server's report, and is not asked
+ * for: a request passed through that carries one the model is said to take none of is refused,
+ * named (READINGS R-100); one nobody has said anything of goes.
  */
 export interface ModelLimits {
   contextWindow: ModelLimit | null;
   maxTokens: ModelLimit | null;
   pictures: ModelPictures | null;
+  audio: ModelMedia | null;
+  video: ModelMedia | null;
   /** The figures nobody has given, in this order: the ones the page asks for. */
   asked: ModelFigure[];
 }

@@ -185,8 +185,10 @@ export function scriptedModel(answers: readonly Answer[], options: ScriptedOptio
   const limits: ModelLimits = {
     contextWindow: options.contextWindow !== undefined ? { tokens: options.contextWindow, from: "user" } : null,
     maxTokens: options.maxTokens !== undefined ? { tokens: options.maxTokens, from: "user" } : null,
-    // A scripted model takes pictures, as its model says.
+    // A scripted model takes pictures, as its model says; nobody says whether it takes audio or video.
     pictures: { takes: true, from: "user" },
+    audio: null,
+    video: null,
     asked: [...(options.contextWindow === undefined ? ["contextWindow" as const] : []), ...(options.maxTokens === undefined ? ["maxTokens" as const] : [])],
   };
 

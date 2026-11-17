@@ -21,7 +21,7 @@ repeat: once per turn
 # question: Does the reply speak for the player's character?
 # Goes with `question`. The name of the connection the judging model runs on; left out, the agent's own.
 # judge: cheap
-# TRIGGER, a moment, in place of `condition`. `turn-start`, `run-end` or `before-compaction`.
+# TRIGGER, a moment, in place of `condition`. `turn-start`, `run-end`, `before-compaction`, or `after-message`: after each message of the agent that made tool calls, the rule's text going in with its next call.
 # at: run-end
 # Goes with `at` or `every`. A fact of the turn and a test of it, such as `todo.open > 0` or `limits.left <= 2`: the rule fires only while it holds.
 # fact: todo.open > 0

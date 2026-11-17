@@ -133,7 +133,7 @@ describe("jobs the owner switches off or holds", () => {
   test("a job's time limit does not run while the owner holds it", async () => {
     const first = gate();
     const s = (open = await stage({
-      config: "jobs:\n  run:\n    time: 10\n",
+      config: "jobs:\n  run:\n    seconds: 10\n",
       files: FILES,
       answers: [{ pieces: [{ hold: first }, { text: "Counted three so far." }, MORE] }, { pieces: [{ wait: 60_000 }, { text: "Counted seven." }] }],
     }));
@@ -321,7 +321,7 @@ describe("the limits of the owner's own start", () => {
 
   test("a job the owner starts with 5 calls and an hour runs past jobs.run's 1 call and 5 seconds; a job an agent started is held to them", async () => {
     const s = (open = await stage({
-      config: "jobs:\n  run:\n    calls: 1\n    time: 5\n",
+      config: "jobs:\n  run:\n    calls: 1\n    seconds: 5\n",
       files: FILES,
       answers: [
         // The owner's own start: three calls, the second waits ten seconds of the clock.

@@ -133,7 +133,7 @@ describe("the connections", () => {
     const saved = await r.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model", headers: { "x-portkey-provider": "openai", "x-gateway-token": "gw-01234" } }, "sk-01234");
     const tested = await r.layer.api.test(USER, saved.id);
     expect(r.sent.map((s) => [s.headers.authorization, s.headers["x-gateway-token"], s.headers["x-portkey-provider"]])).toEqual([["Bearer sk-01234", "gw-01234", "openai"]]);
-    // A header's value is the connection's secret whatever it says: "openai", shorter than calls.secretFloor, is taken out where it stands as a word of its own.
+    // A header's value is the connection's secret whatever it says: "openai", shorter than calls.minSecretChars, is taken out where it stands as a word of its own.
     expect(tested).toMatchObject({ ok: false, error: "401: Unknown key Bearer [secret] with token [secret] for [secret]. (invalid_request_error)" });
   });
 

@@ -7,7 +7,7 @@
 //
 // And what keeps a secret out of every word that leaves the layer: a key, a token or a header's
 // value the layer holds, whatever its length, wherever it shows up in a provider's text (some echo a
-// key they refused), is taken out, and no text that leaves is longer than `calls.wordsMost` says.
+// key they refused), is taken out, and no text that leaves is longer than `calls.maxFailureChars` says.
 //
 // The words of a wait that ran out name its setting as the list of settings names it, and say where
 // it is changed. A part of a request passed through that its model can't take is named, never
@@ -82,7 +82,7 @@ const HIDDEN = "[secret]";
 /** Where pi-ai cut a long error body short ("… [truncated 120 chars]"): a secret the cut went through leaves its first characters just before it. */
 const CUT_MARK = "... [truncated ";
 
-/** What words are cleaned by: how long they may be (`calls.wordsMost`), and the length from which a secret is looked for anywhere in them (`calls.secretFloor`). */
+/** What words are cleaned by: how long they may be (`calls.maxFailureChars`), and the length from which a secret is looked for anywhere in them (`calls.minSecretChars`). */
 export type SecretTerms = Pick<ModelSettings, "wordsMost" | "secretFloor">;
 
 /** A secret shorter than the floor where it stands as a word of its own: no letter, digit or underscore on either side of it. */

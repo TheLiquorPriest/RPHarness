@@ -5,9 +5,9 @@
 // runs on this machine, where pi-ai's callback catches it and the flow finishes by itself.
 //
 // One flow at a time for each provider (OpenAI's callback listens on one fixed port), and a flow
-// left open expires after `calls.signInOpen`. The tokens a flow gets are kept with the book's secrets
+// left open expires after `calls.signInOpenSeconds`. The tokens a flow gets are kept with the book's secrets
 // (book.ts), and pi-ai renews them by itself as calls need them. Why a flow ended without signing in
-// is kept for `calls.signInWordsKept`, so a page that asks how the sign-in stands can say it. A
+// is kept for `calls.signInWordsKeptSeconds`, so a page that asks how the sign-in stands can say it. A
 // sign-in has no chat in view: its settings are read at the levels every chat shares, as each is used.
 
 import type { AuthInteraction, MutableModels } from "@earendil-works/pi-ai";
@@ -53,7 +53,7 @@ const EXCHANGE_FAILURE = /status=(\d{3}); url=[^;]*; body=([\s\S]*?)(?:; stack=|
 /** A report of an answer pi-ai took but couldn't read quotes that answer, and its parser's words after it quote it again: it may hold the new tokens. */
 const QUOTES_ANSWER = /\bbody=/;
 
-/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `calls.wordsMost` characters; of a report that quotes an answer it couldn't read, only its first sentence; a port in use, said in the layer's own words. */
+/** A failed sign-in's words: the provider's status and message where the flow reported them, with no secret in them, cut to `calls.maxFailureChars` characters; of a report that quotes an answer it couldn't read, only its first sentence; a port in use, said in the layer's own words. */
 function failure(error: unknown, secrets: Iterable<string>, terms: SecretTerms): string {
   const text = errorWords(error);
   const port = PORT_IN_USE.exec(text);

@@ -155,9 +155,9 @@ export type TraceEvent =
   | { kind: "tool_ended"; callId: string; tool: string; result: ToolResult; clean: boolean; endedRun: boolean; ms: number; permission?: CallPermission; refused?: CallRefusal }
   /** A rule fired (§5.4), as it fired: its `then` comes later, in `TurnEvents.ruleFired`. */
   | { kind: "rule_fired"; firing: RuleFiring }
-  /** A rule's pattern ran out of `rules.patternTime` on a text (R-55): that check counted as no match, and the rule stays in force. `length`: the text's, in characters. */
+  /** A rule's pattern ran out of `rules.patternMs` on a text (R-55): that check counted as no match, and the rule stays in force. `length`: the text's, in characters. */
   | { kind: "rule_failed"; rule: string; path: string; why: "time"; length: number }
-  /** A rule's command failed or ran out of `rules.commandTimeout` (C5): the rule did not fire, and is unable to work, never a "no". `detail`: why, in words. */
+  /** A rule's command failed or ran out of `rules.commandTimeoutSeconds` (C5): the rule did not fire, and is unable to work, never a "no". `detail`: why, in words. */
   | { kind: "rule_failed"; rule: string; path: string; why: "command"; detail: string }
   /** A question rule's question cannot be put (§5.4, §17.2): the judging model's part is missing, off or names no `yes:`, its connection is none, or it has no model. Shown each time it would be asked, never taken as a "no". `detail`: what is missing, in words. */
   | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string }

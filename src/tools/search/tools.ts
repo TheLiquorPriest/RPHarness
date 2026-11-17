@@ -30,7 +30,7 @@ export interface ToolSearchDeps {
    * are answered with the same line as a fixed tool's (`invalid`).
    */
   notices: Words;
-  /** Characters of a tool's schema that the answer to a call that does not fit it shows whole (`tools.schemaShown`). */
+  /** Characters of a tool's schema that the answer to a call that does not fit it shows whole (`tools.schemaShownChars`). */
   schemaShown: number;
   /** Each tool's file, by tool name. */
   texts: ReadonlyMap<string, ToolText>;

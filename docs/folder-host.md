@@ -48,7 +48,7 @@ bun src/hosts/folder/cli.ts <dir> [--manifest <file>] [--chat <id>] [--user <nam
 
 (`rph-folder` once the package's `bin` names it.) The chat is `--chat`, or the one chat under
 `host/chats/`; the user `--user`, or the one `chat.json` names, or the one the host keeps records for;
-the lead `--lead`, or the `lead` setting.
+the lead `--lead`, or the `turn.lead` setting.
 
 | Command | What it does |
 |---|---|
@@ -61,7 +61,7 @@ the lead `--lead`, or the `lead` setting.
 | `answer` | The questions a lane set to Confirm waits on. `answer <call> yes\|no [reason]` answers one; the turn that asked goes on. |
 | `connections` | Your connections, each with its newest tag check. |
 | `connect <name> --provider <p> [--model m] [--base-url u] [--api a] [--auth key\|none] [--default]` | Adds a connection, or changes the one of that name, the key read from stdin: `printf %s "$KEY" \| … connect main --provider deepseek --model deepseek-chat`. Providers: `anthropic`, `openai`, `google`, `openrouter`, `deepseek`, `xai`, `groq`, `mistral`, `openai-compatible`, `anthropic-compatible` (the last two need `--base-url`). |
-| `tagcheck <connection>` | Whether a connection keeps the reply's tags: plays the turns of your `.prompts/tag-check.md` on it and sets its `reply.forms.<connection>` in `files/config.yml`. |
+| `tagcheck <connection>` | Whether a connection keeps the reply's tags: plays the turns of your `.prompts/tag-check.md` on it and sets its `connections.<connection>.reply.form` in `files/config.yml`. |
 | `secret <name>` | A secret your HTTP tools and MCP servers send, its value from stdin; nothing takes it away. |
 
 Every command first lists your jobs, so a job a cut-off process left running is kept as interrupted

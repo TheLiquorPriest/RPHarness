@@ -58,7 +58,7 @@ describe("a call through tool_use", () => {
   test("the found tool is refused by the player's Never, held by a rule on its arguments, and clipped once, each as itself; its arguments are taken by its own schema", async () => {
     const ran: string[] = [];
     const s = (open = await stage({
-      config: "results:\n  clip: 40\n",
+      config: "results:\n  clipChars: 40\n",
       files: { ".rules/fixture-hold.md": HOLD },
       approvals: NEVER_ON_ENGINE,
       tools: hostTools(ran),

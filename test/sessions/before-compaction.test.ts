@@ -115,7 +115,7 @@ test("the user's setting gives the call before compaction more model calls", asy
 });
 
 /** Every first call is past the reserve (the scripted model's window is 64,000 tokens). */
-const TIGHT = "compaction:\n  reserve: 63999\n  keepTurns: 2\n";
+const TIGHT = "compaction:\n  reserveTokens: 63999\n  keepTurns: 2\n";
 
 /** Plays t1 to t5 under the save rule; each turn's whole work is one model call, none of them a call before compaction. */
 async function noCallBeforeCompaction(files: Record<string, string>, answer: (n: number) => Answer): Promise<void> {

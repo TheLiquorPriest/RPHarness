@@ -23,7 +23,7 @@ interface Signed {
   a: string;
 }
 
-/** A slice's signature: each stretch of its text, in order, with `head` characters of its start (`prompt.signatureHead`). A signature keeps its own start, so it is found whatever the setting is later. */
+/** A slice's signature: each stretch of its text, in order, with `head` characters of its start (`prompt.signatureChars`). A signature keeps its own start, so it is found whatever the setting is later. */
 export function signatureOf(texts: readonly string[], spans: readonly Span[], head: number): string {
   const signed: Signed[] = mergedSpans(texts, spans).map((span) => {
     const text = (texts[span.message] ?? "").slice(span.start, span.end);

@@ -55,7 +55,7 @@ test("a document that no longer reads: the turns run on the connections last rea
 
 test("a call held by its connection's throttle shows the wait in the trace", async () => {
   const { fetch, sent } = scriptedFetch(() => eventStream(chatStream([chunk({ role: "assistant", content: "<reply>No boat tonight.</reply>" }), chunk({}, "stop")])));
-  const s = (open = await stage({ fetch, answers: [], config: "throttles:\n  connections:\n    Harbour:\n      requestsPerMinute: 1\n" }));
+  const s = (open = await stage({ fetch, answers: [], config: "connections:\n  Harbour:\n    throttles:\n      requestsPerMinute: 1\n" }));
   const saved = await s.harness.models.save(USER, { name: "Harbour", provider: "openai-compatible", auth: "none", baseUrl: "http://127.0.0.1:8080/v1", model: "first-model" });
   await s.harness.models.setDefault(USER, saved.id);
 

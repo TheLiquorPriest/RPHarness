@@ -68,7 +68,7 @@ export interface GateBefore {
 }
 
 /**
- * One call held to the user's bound on what the model reads of a call (`results.clip`): `result`, its
+ * One call held to the user's bound on what the model reads of a call (`results.clipChars`): `result`, its
  * answer as it is kept (cut to the bound where it is longer, with the file's line on what was left
  * out and where the whole is, among its reports where it has any); `read`, what the model reads of
  * the call, in order: the answer's text, its reports and the texts that go after it, as far as the
@@ -130,7 +130,7 @@ export interface CallSettings {
 export interface CallTerms {
   /** Characters per token, where a provider has not counted (`tokens.charsPerToken`). */
   charsPerToken: number;
-  /** The least room an answer is given (`limits.answerFloor`): with less left under a limit, no call is made. */
+  /** The least room an answer is given (`limits.minAnswerTokens`): with less left under a limit, no call is made. */
   answerFloor: number;
   /** What a token read again from a provider's cache counts for against every limit on tokens sent (`limits.cachedWeight`); absent, in full. */
   cachedWeight?: number;
@@ -138,7 +138,7 @@ export interface CallTerms {
   toolsAtOnce?: number;
   /** The same call with the same arguments this many times in a row, nothing written between, ends the run (`limits.repeats`); absent, never. */
   repeats?: number;
-  /** Its definition's sampling (`sampling.<definition>`), on each call whose settings give none. */
+  /** Its definition's sampling (`agents.<definition>.sampling`), on each call whose settings give none. */
   sampling?: Sampling;
 }
 

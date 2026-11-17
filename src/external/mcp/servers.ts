@@ -145,7 +145,7 @@ export class McpServers {
     return lists.flat();
   }
 
-  /** One call of a server's tool, within `mcp.callTimeout`: its answer as data, or why there is none, in the file's words. */
+  /** One call of a server's tool, within `mcp.callTimeoutSeconds`: its answer as data, or why there is none, in the file's words. */
   async #call(user: string, server: McpServer, own: string, tool: string, args: JsonValue, signal: AbortSignal, terms: McpTerms, words: Words): Promise<ToolResult> {
     const running = await this.#running(user, server, terms);
     if ("not" in running) return answer(words("not_switched_on", { tool, name: server.name, kind: "mcp-server", ...(running.not === "waiting" ? { waiting: true } : {}) }), true);

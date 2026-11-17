@@ -131,7 +131,7 @@ export interface RuleFiring {
   matched?: string;
   /** The fact that held, with its value then. */
   fact?: { name: string; value: FactValue };
-  /** A stream rule that would stop the call reminded instead, as its agent's connection is set to (`rules.interrupt`, `rules.interrupts`). */
+  /** A stream rule that would stop the call reminded instead, as its agent's connection is set to (`rules.interrupt`, `connections.<connection>.rules.interrupt`). */
   reminded?: "connection";
   action: RuleAction;
   /** For a `cut`: the text dropped before it was shown. */

@@ -100,7 +100,7 @@ export interface ToolManifest {
   parameters: JsonObject;
   /** A command line, run as the server's user with the arguments as JSON on stdin; or an address the arguments go to as a JSON body, with headers whose values are the secrets of the names given. */
   runs: { command: string } | { address: string; method: string; headers: Record<string, string> };
-  /** Seconds it may take; absent: the user's `tools.commandTimeout` or `tools.httpTimeout`. */
+  /** Seconds it may take; absent: the user's `tools.commandTimeoutSeconds` or `tools.httpTimeoutSeconds`. */
   timeout?: number;
   path: string;
   level: LayerLevel;
@@ -385,7 +385,7 @@ export interface RuleRunOptions {
    * stretches of a tool's arguments or result. Absent: the whole text.
    */
   window?: number;
-  /** Milliseconds one pattern may run on one text (`rules.patternTime`). */
+  /** Milliseconds one pattern may run on one text (`rules.patternMs`). */
   patternTime: number;
   /** Told of a rule whose pattern ran out of time on a text, with the text's length; the run's trace and log say so. */
   ranOut?(agent: AgentRef, rule: { rule: string; path: string }, length: number): void;

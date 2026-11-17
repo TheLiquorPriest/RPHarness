@@ -7,12 +7,12 @@ import { TOOLS_WORDS } from "./tools-words";
 export const TOOLS = worded(
   {
     // A tool's answer is cut only where the whole would not fit the call that reads it (§10.2); this is the owner's own ceiling, none by default.
-    clip: { key: "results.clip", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "no ceiling", perConnection: false, at: "clipChars" },
+    clip: { key: "results.clipChars", takes: { type: "whole", least: 1 }, default: null, orNone: true, none: "no ceiling", perConnection: false, at: "clipChars" },
     // A handful of tools an agent reads at a glance.
     search: { key: "tools.search", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, at: "searchHits" },
     // At about 200 characters a hit, a check of three places comes to about the 12,000 characters of a
     // result the model reads whole by default.
-    gapCheck: { key: "tools.gapCheck", takes: { type: "whole", least: 1 }, default: 20, perConnection: false, at: "gapHits" },
+    gapCheck: { key: "tools.gap.hits", takes: { type: "whole", least: 1 }, default: 20, perConnection: false, at: "gapHits" },
     // The longest stretch the history window holds under Appendix D.1's settings (40 messages, a step
     // of 20, and 40 more held for the story's record), and five times the hits a gap check takes from
     // a place by default.
@@ -20,15 +20,15 @@ export const TOOLS = worded(
     // About 190 tokens: the schema of a tool of two or three arguments with their descriptions, as RPH's
     // own file tools are; a tool of many arguments, whose schema costs more to read than the call cost
     // to write, is answered with what did not fit alone.
-    schemaShown: { key: "tools.schemaShown", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, at: "schemaShown" },
+    schemaShown: { key: "tools.schemaShownChars", takes: { type: "whole", least: 0 }, default: 600, perConnection: false, at: "schemaShown" },
     // Appendix D.1: the fixed list's tools under 8,000 tokens. A list over it is marked, never refused.
     fixedTokens: { key: "tools.fixedTokens", takes: { type: "whole", least: 0 }, default: 8_000, perConnection: false, at: "fixedTokens" },
     // §16: a command he writes answers in seconds or has hung; half a minute leaves room for a slow one.
-    commandTimeout: { key: "tools.commandTimeout", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "commandTimeout", ms: true },
+    commandTimeout: { key: "tools.commandTimeoutSeconds", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "commandTimeout", ms: true },
     // The same half minute for an address's answer.
-    httpTimeout: { key: "tools.httpTimeout", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "httpTimeout", ms: true },
+    httpTimeout: { key: "tools.httpTimeoutSeconds", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "httpTimeout", ms: true },
     // 1 MiB: far past what a model reads of one answer, and short of what a runaway could fill memory with.
-    answerMax: { key: "tools.answerMax", takes: { type: "whole", least: 1 }, default: 1_048_576, perConnection: false, at: "answerMax" },
+    answerMax: { key: "tools.maxAnswerBytes", takes: { type: "whole", least: 1 }, default: 1_048_576, perConnection: false, at: "answerMax" },
   },
   TOOLS_WORDS,
 );

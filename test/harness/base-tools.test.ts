@@ -85,7 +85,7 @@ test("the player's bound on one call holds RPH's lead's read of the chat, and th
 
 test("the hits a gap check takes from each place when the agent names no limit are the player's setting", async () => {
   const s = (open = await stage({
-    config: "tools:\n  gapCheck: 1\n",
+    config: "tools:\n  gap:\n    hits: 1\n",
     chat: CHAT_PATH,
     answers: [{ pieces: [{ call: "gap_check", args: { topic: "Wren" } }] }, { pieces: [{ text: "<reply>Wren is there.</reply>" }] }],
   }));

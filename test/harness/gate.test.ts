@@ -220,7 +220,7 @@ describe("answers in a file's words", () => {
   test("a call that does not fit is told which arguments did not fit and whether each was left out, never the check's own words; the whole schema only for a tool whose schema is within the setting", async () => {
     const s = (open = await stage({
       drafted: true,
-      config: "tools:\n  schemaShown: 1500\n",
+      config: "tools:\n  schemaShownChars: 1500\n",
       tools: {
         world_query: { tier: "read", description: "Fixture: the tide on a day.", parameters: { properties: { day: { type: "integer" } }, required: ["day"] }, run: async () => said("calm") },
         world_apply: { tier: "read", description: "Fixture: a long form.", parameters: { properties: { note: { type: "string", description: "Fixture: ".padEnd(2_000, "x") } }, required: ["note"] }, run: async () => said("noted") },
@@ -239,7 +239,7 @@ describe("answers in a file's words", () => {
     const long = "The tide table for the week: ".padEnd(100, "x");
     const s = (open = await stage({
       drafted: true,
-      config: "results:\n  clip: 40\n",
+      config: "results:\n  clipChars: 40\n",
       tools: { world_query: { tier: "read", description: "Fixture: a long read.", run: async () => said(long) } },
       answers: [{ pieces: [{ call: "world_query" }] }, { pieces: [{ text: "<reply>High water at six.</reply>" }] }],
     }));
@@ -261,7 +261,7 @@ describe("the bound on one answer", () => {
   test("a tool's reports count with its text: what the model reads, what the session file keeps and what the next turn carries stay within the setting, and the line says how much was left out and where the whole answer is", async () => {
     const s = (open = await stage({
       drafted: true,
-      config: "results:\n  clip: 200\n",
+      config: "results:\n  clipChars: 200\n",
       tools: { world_apply: { tier: "read", description: "Fixture: paints a floor.", run: async () => ({ content: [{ type: "text", text: DONE }], reports: OFF }) } },
       answers: [{ pieces: [{ call: "world_apply" }] }, { pieces: [{ text: "<reply>The floor is painted.</reply>" }] }, { pieces: [{ text: "<reply>The paint dries.</reply>" }] }],
     }));
@@ -293,7 +293,7 @@ describe("the bound on one answer", () => {
   test("an answer that reported something is not clean though the bound left out every report, and with the notices file's line taken out: a closing call on it goes on for one more call", async () => {
     const s = (open = await stage({
       drafted: true,
-      config: "results:\n  clip: 20\n",
+      config: "results:\n  clipChars: 20\n",
       files: { ".prompts/tool-notices.md": "---\ndescription: Fixture - the notices with no line for a clipped answer.\nformat: lines\n---\nfailed: {{tool}} failed.\n" },
       tools: { world_apply: { tier: "read", description: "Fixture: paints a floor.", run: async () => ({ content: [{ type: "text", text: DONE }], reports: OFF.slice(0, 1) }) } },
       answers: [{ pieces: [{ text: "<reply>The floor is painted.</reply>" }, { call: "world_apply", args: { closing: true } }] }, { pieces: [{ text: "Noted." }] }],

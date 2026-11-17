@@ -215,8 +215,8 @@ class Played {
   async lead(scope: Scope): Promise<string> {
     const named = this.flags.get("lead");
     if (named !== undefined) return named;
-    const settings = await readSettings(loadGuidance(this.host.files, scope), this.host.files, scope, this.host.log);
-    if (settings.lead === undefined) throw new Usage("Name the definition that leads with --lead, or set `lead` in a config file.");
+    const settings = await readSettings(loadGuidance(this.host.files, scope), this.host, scope);
+    if (settings.lead === undefined) throw new Usage("Name the definition that leads with --lead, or set `turn.lead` in a config file.");
     return settings.lead;
   }
 

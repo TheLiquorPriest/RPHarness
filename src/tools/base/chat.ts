@@ -4,7 +4,7 @@
 // host's story choice leaves out of the story; asked for the story alone (`story: true`), either tool
 // gives only the story's messages. One call takes at most the user's `tools.perCall`: a read stops
 // there and says which stretch it gave. A long answer is clipped by what runs around every call (the
-// user's `results.clip`), as every tool's is.
+// user's `results.clipChars`), as every tool's is.
 import type { ChatMessage, JsonValue } from "../../contract";
 import { answer, argumentsOf, fieldsOf, type OwnTool, text, whole, type Words } from "../kit";
 import { type BaseToolsDeps, heldLimit, inChat, linesAnswer, wordsOf } from "./deps";

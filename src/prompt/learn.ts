@@ -60,7 +60,7 @@ function finderOf(prompt: TurnPrompt, spans: readonly Span[], head: number): Pro
   return { signature: signatureOf(prompt.texts, spans, head), ...(name !== undefined ? { block: name } : {}), ...(role !== undefined ? { role } : {}) };
 }
 
-/** Learns a map from the slices written for this prompt, keeping the player's own slices of the map before it. Each signature keeps `head` characters of its slice's start (`prompt.signatureHead`). */
+/** Learns a map from the slices written for this prompt, keeping the player's own slices of the map before it. Each signature keeps `head` characters of its slice's start (`prompt.signatureChars`). */
 export function learn(prompt: TurnPrompt, written: readonly WrittenSlice[], head: number): Learned {
   const problems: Problem[] = [];
   const preset = prompt.preset;

@@ -25,7 +25,7 @@ export interface BaseToolsDeps {
   ids(): string;
   /** The host's web searcher; without one there is no `web_search`. */
   web?: WebSearchPort;
-  /** The hits `gap_check` takes from each place when the agent names no limit (the user's `tools.gapCheck`). */
+  /** The hits `gap_check` takes from each place when the agent names no limit (the user's `tools.gap.hits`). */
   gapHits: number;
   /**
    * The most one call takes (the user's `tools.perCall`): the messages `chat_read` gives, the

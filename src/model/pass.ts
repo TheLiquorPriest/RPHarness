@@ -88,7 +88,7 @@ function onlyFields(record: Record<string, unknown>, fields: readonly string[], 
 /**
  * Media given as a base64 `data:` URL, which is how the layer's calls take it: its type (with
  * whatever parameters the type has) and its data. Media named by an address can't be handed on,
- * since nothing here downloads; a refusal quotes `quoted` characters of the address (`calls.quoted`).
+ * since nothing here downloads; a refusal quotes `quoted` characters of the address (`calls.quotedChars`).
  */
 function dataOf(url: unknown, what: string, quoted: number): { mimeType: string; data: string } {
   if (typeof url !== "string" || url === "") throw new NotCarried(`${what} has no data`);

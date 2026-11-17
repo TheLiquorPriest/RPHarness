@@ -11,13 +11,13 @@ export const COMPACTION = worded(
     // Appendix D.1: the reserve pi's coding agent keeps (16,384 tokens), the newest 3 turns kept as they
     // are, and records folded once they pass 6,000 tokens. §11: the lead gets one call with the rule's
     // text before anything is summarized.
-    reserve: { key: "compaction.reserve", takes: { type: "whole", least: 0 }, default: 16_384, perConnection: false, at: "compaction.reserve" },
+    reserve: { key: "compaction.reserveTokens", takes: { type: "whole", least: 0 }, default: 16_384, perConnection: false, at: "compaction.reserveTokens" },
     keepTurns: { key: "compaction.keepTurns", takes: { type: "whole", least: 0 }, default: 3, perConnection: false, at: "compaction.keepTurns" },
-    records: { key: "compaction.records", takes: { type: "whole", least: 1 }, default: 6_000, perConnection: false, at: "compaction.records" },
+    records: { key: "compaction.recordsTokens", takes: { type: "whole", least: 1 }, default: 6_000, perConnection: false, at: "compaction.recordsTokens" },
     saveCalls: { key: "compaction.saveCalls", takes: { type: "whole", least: 1 }, default: 1, perConnection: false, at: "compaction.saveCalls" },
     // pi's coding agent compacts and sends a refused call again once, and keeps its newest 20,000 tokens whole (`keepRecentTokens`).
     overflowTries: { key: "compaction.overflowTries", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, at: "compaction.overflowTries" },
-    keepRecent: { key: "compaction.keepRecent", takes: { type: "whole", least: 0 }, default: 20_000, perConnection: false, at: "compaction.keepRecent" },
+    keepRecent: { key: "compaction.keepRecentTokens", takes: { type: "whole", least: 0 }, default: 20_000, perConnection: false, at: "compaction.keepRecentTokens" },
   },
   COMPACTION_WORDS,
 );

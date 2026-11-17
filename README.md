@@ -84,7 +84,7 @@ given:
 ---
 You are the lead of this roleplay: read what the player wrote and everything you were given, and write the reply.
 EOF
-echo 'lead: lead' > play/files/config.yml
+printf 'turn:\n  lead: lead\n' > play/files/config.yml
 printf %s "$DEEPSEEK_API_KEY" | bun src/hosts/folder/cli.ts play connect main --provider deepseek --model deepseek-chat
 bun src/hosts/folder/cli.ts play say "I climb the stairs to the lamp room."
 ```

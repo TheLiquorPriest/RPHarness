@@ -33,7 +33,7 @@ const QUESTION = "Is the mill open?";
 
 /** A config file's throttle for the connection "Writer", its lines as YAML under the connection. */
 function throttled(lines: string): string {
-  return `throttles:\n  connections:\n    Writer:\n${lines}`;
+  return `connections:\n  Writer:\n    throttles:\n${lines}`;
 }
 
 /** A server's answer, with the tokens it reports spent when `used` is given. */

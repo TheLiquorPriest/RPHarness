@@ -5,7 +5,7 @@
 // the run began: a rule switched off, or held by a `needs:` no longer in force, stops at once, an
 // edited one fires as it now reads, and `repeat:` counts carry across, by the rule's name. On the
 // stream, whose check cannot wait, the rules are those read at the start of the model call. Every
-// pattern runs where it can be stopped (pattern.ts), under `rules.patternTime`: one that runs out of
+// pattern runs where it can be stopped (pattern.ts), under `rules.patternMs`: one that runs out of
 // time counts as no match, is told (`ranOut`), and the rule stays in force (R-55). A stream rule that
 // interrupts reminds instead where the agent's connection is set to (`stops`), and its firing says so.
 
@@ -27,11 +27,11 @@ export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandF
   memory?: RuleMemory;
   /** How many characters a pattern looks at at a time; absent, the whole text. */
   window?: number;
-  /** Milliseconds one pattern may run on one text (`rules.patternTime`). */
+  /** Milliseconds one pattern may run on one text (`rules.patternMs`). */
   patternTime: number;
   /** Told of a rule whose pattern ran out of time on a text, with the text's length: the check counted as no match. */
   ranOut?(agent: AgentRef, rule: { rule: string; path: string }, length: number): void;
-  /** Whether a stream rule that interrupts may stop `agent`'s call, as its connection's setting says (`rules.interrupt`, `rules.interrupts`); absent: it may. Asked at each model call's start. */
+  /** Whether a stream rule that interrupts may stop `agent`'s call, as its connection's setting says (`rules.interrupt`, `connections.<connection>.rules.interrupt`); absent: it may. Asked at each model call's start. */
   stops?(agent: AgentRef): Promise<boolean>;
 }
 

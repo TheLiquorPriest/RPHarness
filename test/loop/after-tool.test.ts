@@ -1,5 +1,5 @@
 // After a tool, pi's own hook for it (`afterToolCall`, §13.3) carries the rules on its result and
-// the bound on what the model reads of one call (`results.clip`, R-118): the tool's answer and
+// the bound on what the model reads of one call (`results.clipChars`, R-118): the tool's answer and
 // reports, the rules' texts after it, and, for a call answered in its tool's place, a refusal's or a
 // hold's words. What the model reads stays within the setting, the clipped line comes last, and the
 // whole is kept in the turn's `cache/results/`, where the line says. A tool found through `tool_use`
@@ -72,7 +72,7 @@ describe("after a tool, in pi's afterToolCall", () => {
     const ran: string[] = [];
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".rules/fixture-tides.md": TIDE_RULE },
-      config: "results:\n  clip: 120\n",
+      config: "results:\n  clipChars: 120\n",
       tools: hostTools(ran),
       answers: [{ pieces: [{ call: "tide_table", args: { day: 9 }, id: "f-1" }] }, REPLY],
     }));
@@ -90,7 +90,7 @@ describe("after a tool, in pi's afterToolCall", () => {
     const ran: string[] = [];
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".rules/fixture-tides.md": TIDE_RULE },
-      config: "results:\n  clip: 120\n",
+      config: "results:\n  clipChars: 120\n",
       tools: hostTools(ran),
       answers: [{ pieces: [{ call: "tide_table", args: { day: 9 }, id: "f-1" }, { call: "tool_use", args: { name: "tide_table", args: { day: 10 } }, id: "u-1" }] }, REPLY],
     }));
@@ -115,7 +115,7 @@ describe("after a tool, in pi's afterToolCall", () => {
     const ran: string[] = [];
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".rules/fixture-hold.md": HOLD },
-      config: "results:\n  clip: 30\n",
+      config: "results:\n  clipChars: 30\n",
       approvals: NEVER_ON_ENGINE,
       tools: hostTools(ran),
       answers: [{ pieces: [{ call: "ledger_open", args: { holder: "Mira" }, id: "w-1" }, { call: "bell_toll", args: { when: "at night" }, id: "h-1" }] }, REPLY],
@@ -151,7 +151,7 @@ describe("after a tool, in pi's afterToolCall", () => {
     };
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD, ".rules/fixture-tides.md": TIDE_RULE },
-      config: "results:\n  clip: 30\n",
+      config: "results:\n  clipChars: 30\n",
       tools,
       filesPort: (inner) => ({
         layers: async (scope) => {
@@ -185,7 +185,7 @@ describe("after a tool, in pi's afterToolCall", () => {
   test("an answer pi words for a long refused argument list keeps to the clip, its whole kept", async () => {
     const s = (open = await stage({
       files: { ".agents/lead.md": LEAD },
-      config: "results:\n  clip: 60\n",
+      config: "results:\n  clipChars: 60\n",
       tools: hostTools([]),
       answers: [{ pieces: [{ call: "tide_table", args: { day: "the ninth ".repeat(40) }, id: "p-1" }] }, REPLY],
     }));
@@ -204,7 +204,7 @@ describe("after a tool, in pi's afterToolCall", () => {
     const keeper = "---\nname: keeper\ndescription: Fixture keeper.\nmodel: default\ntools: [tide_table]\n---\nFixture keeper: you read the tides.\n";
     const s = (open = await stage({
       files: { ".agents/keeper.md": keeper },
-      config: "results:\n  clip: 40\n",
+      config: "results:\n  clipChars: 40\n",
       tools: hostTools([]),
       answers: [{ pieces: [{ call: "tide_table", args: { day: 9 }, id: "j-1" }] }, { pieces: [{ text: "Read." }] }],
     }));

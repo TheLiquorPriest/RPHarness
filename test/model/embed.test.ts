@@ -31,7 +31,7 @@ describe("embed", () => {
         // Given back out of order: the layer puts them in order by index.
         return json({ model: "served-embed", data: input.map((t, index) => ({ index, embedding: [t.length, index] })).reverse(), usage: { total_tokens: 3 } });
       },
-      global: "calls:\n  retryWait: 0\nembedding:\n  connection: Local\n  model: served-embed\n  batch: 2\n",
+      global: "calls:\n  retryWaitSeconds: 0\nembedding:\n  connection: Local\n  model: served-embed\n  batch: 2\n",
     });
     await r.layer.api.save(USER, { name: "Local", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" }, KEY);
     const local = await r.clock.settle(r.layer.api.embed(USER, ["a", "bb", "ccc"]));

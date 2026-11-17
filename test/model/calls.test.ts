@@ -3,9 +3,9 @@
 // `inherit` the connection's own, else the provider's default), the sampling parameters the
 // provider takes and none it would refuse, one tool per answer when the connection asks it, and the
 // prompt cache as `calls.cacheRetention` says. And what a failed call says: the provider's words with
-// the status first, never a key or a header's value the layer holds, cut to `calls.wordsMost`, and
+// the status first, never a key or a header's value the layer holds, cut to `calls.maxFailureChars`, and
 // what to do when the connection can't be used; pi-ai never tries again on its own, and the layer
-// tries again as the connection or `calls.retries` says, after `calls.retryWait`, doubling.
+// tries again as the connection or `calls.retries` says, after `calls.retryWaitSeconds`, doubling.
 
 import { afterEach, describe, expect, test } from "bun:test";
 import type { Message, SimpleStreamOptions, Tool } from "@earendil-works/pi-ai";
@@ -215,7 +215,7 @@ describe("a call that failed before any piece of its answer came", () => {
         at.push(made.clock.now());
         return rateLimited();
       },
-      global: "calls:\n  retryWait: 3\n  retries: 3\n",
+      global: "calls:\n  retryWaitSeconds: 3\n  retries: 3\n",
     });
     r = made;
     const unsaid = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
@@ -229,7 +229,7 @@ describe("a call that failed before any piece of its answer came", () => {
     expect(at.map((t) => t - at[0]!)).toEqual([0, 3_000]);
     // Changed in the file, the setting holds from the next call.
     at.length = 0;
-    made.configs.global = "calls:\n  retryWait: 0\n  retries: 1\n";
+    made.configs.global = "calls:\n  retryWaitSeconds: 0\n  retries: 1\n";
     await made.clock.settle(call(await made.layer.agentModel({ user: USER, connectionId: unsaid.id, model: null, effort: "off" }), ASK));
     expect(at.map((t) => t - at[0]!)).toEqual([0, 0]);
   });
@@ -263,27 +263,27 @@ describe("a call that failed before any piece of its answer came", () => {
 
 describe("each size is its setting", () => {
   test("a set value changes the test's room, the list read and the words' length", async () => {
-    const made = rig({ script: anthropicAnswer, global: "calls:\n  testRoom: 32\n" });
+    const made = rig({ script: anthropicAnswer, global: "calls:\n  testRoomTokens: 32\n" });
     r = made;
     const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
     expect((await made.layer.api.test(USER, saved.id)).ok).toBe(true);
-    made.configs.global = "calls:\n  testRoom: 48\n";
+    made.configs.global = "calls:\n  testRoomTokens: 48\n";
     expect((await made.layer.api.test(USER, saved.id)).ok).toBe(true);
     expect(made.sent.map((sent) => bodyOf(sent).max_tokens)).toEqual([32, 48]);
     await made.done();
 
-    // A list a little over one megabyte: past `listMost: 1`, refused in words that name the setting; read under 2.
+    // A list a little over one mebibyte: past `maxModelListMiB: 1`, refused in words that name the setting; read under 2.
     const list = JSON.stringify({ data: [{ id: "served-model", name: "x".repeat(1024 * 1024) }] });
-    const listed = rig({ script: () => new Response(list, { status: 200, headers: { "content-type": "application/json" } }), global: "calls:\n  listMost: 1\n" });
+    const listed = rig({ script: () => new Response(list, { status: 200, headers: { "content-type": "application/json" } }), global: "calls:\n  maxModelListMiB: 1\n" });
     r = listed;
     const server = await listed.layer.api.save(USER, { name: "Proxy", provider: "openai-compatible", auth: "key", baseUrl: "https://proxy.example.com/v1", model: "served-model" }, SERVER_KEY);
     await expect(listed.layer.api.models(USER, server.id)).rejects.toThrow('The server didn\'t list its models: its answer is larger than 1 MB, more than is read. The setting "Most of a model list read" on the Settings page says how much of it is read.');
-    listed.configs.global = "calls:\n  listMost: 2\n";
+    listed.configs.global = "calls:\n  maxModelListMiB: 2\n";
     expect(await listed.layer.api.models(USER, server.id)).toEqual([{ id: "served-model", name: "x".repeat(1024 * 1024) }]);
     await listed.done();
 
     // The words of a failure are cut where the setting says.
-    expect(await anthropicFailure(() => failed(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }), "calls:\n  wordsMost: 10\n")).toBe("401: inval…");
+    expect(await anthropicFailure(() => failed(401, { type: "error", error: { type: "authentication_error", message: "invalid x-api-key" } }), "calls:\n  maxFailureChars: 10\n")).toBe("401: inval…");
   });
 });
 

@@ -6,7 +6,7 @@
 // well as `a testament to`; left out, it counts). A rule that cannot be read whole is broken and is
 // not in force: guessing at half of one would put words in front of an agent that the user did not
 // ask for. A pattern is refused only when it cannot be parsed (R-55): one that could take long runs
-// where it can be stopped (pattern.ts), under the user's `rules.patternTime`.
+// where it can be stopped (pattern.ts), under the user's `rules.patternMs`.
 
 import type { FileText, RuleTrigger } from "../contract/index";
 import type { Problem, Replaced, Template } from "./api";

@@ -1,5 +1,5 @@
 // An agent thinks at its definition's `effort:`, or, where it names none, at its connection's own;
-// the settings stand over both: `effort.connections.<connection>` over the definition's, and
+// the settings stand over both: `connections.<connection>.effort` over the definition's, and
 // `agents.<definition>.effort` over that. `definitions.list` gives what each definition runs on,
 // resolved among the user's connections (C28).
 import { afterEach, expect, test } from "bun:test";
@@ -13,11 +13,11 @@ afterEach(async () => {
 
 const LEAD = "---\nname: lead\ndescription: Fixture lead on a named connection.\nmodel: Floor\neffort: low\ntools: [todo]\ngiven:\n  - prompt:*\n  - briefing\n---\nFixture lead: answer the player.\n";
 
-test("a config that sets `effort.connections` for the agent's connection: the agent runs at it over its definition's effort, and nothing is logged", async () => {
-  const s = (open = await stage({ config: "effort:\n  connections:\n    Floor: high\n", files: { ".agents/lead.md": LEAD }, answers: [{ pieces: [{ text: "<reply>The lamp turns.</reply>" }] }] }));
+test("a config that sets `connections.<connection>.effort` for the agent's connection: the agent runs at it over its definition's effort, and nothing is logged", async () => {
+  const s = (open = await stage({ config: "connections:\n  Floor:\n    effort: high\n", files: { ".agents/lead.md": LEAD }, answers: [{ pieces: [{ text: "<reply>The lamp turns.</reply>" }] }] }));
   expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
   expect(s.model.requests[0]!.options.reasoning).toBe("high");
-  expect(s.logged.filter((line) => line.fields?.setting === "effort.connections")).toEqual([]);
+  expect(s.logged.filter((line) => line.fields?.setting === "connections.Floor.effort")).toEqual([]);
 });
 
 test("definitions.list gives each definition's resolved connection, model and effort: its own, the default's where it names none, the connection's own effort where it says inherit", async () => {

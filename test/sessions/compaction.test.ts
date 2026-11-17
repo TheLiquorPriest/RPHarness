@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 /** A reserve as large as the scripted model's window (64,000 tokens) less one: every first call is past it. */
-const TIGHT = "compaction:\n  reserve: 63999\n  keepTurns: 2\n";
+const TIGHT = "compaction:\n  reserveTokens: 63999\n  keepTurns: 2\n";
 const COMPACTION_WORDS = "Write what the lead must still have after the detail is gone";
 
 test("a first call that would not fit: the lead's call under the rule first, then one summary call written from the compaction part; the summary takes the older turns' place, the newest stay as they were, and the file keeps them all", async () => {

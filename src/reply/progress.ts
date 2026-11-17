@@ -8,7 +8,7 @@ import type { ReplySink } from "../contract";
 import { REPLY } from "../harness/settings/reply";
 import type { LoopClock } from "../loop/types";
 
-/** Where `progress.silence`'s advice stands, in milliseconds: past it, the chat application's own cut (ten minutes with nothing shown) may come before a progress line does. The turn's own time is held at it when no line can keep the turn alive. */
+/** Where `progress.silenceSeconds`'s advice stands, in milliseconds: past it, the chat application's own cut (ten minutes with nothing shown) may come before a progress line does. The turn's own time is held at it when no line can keep the turn alive. */
 export const SILENCE_MOST_MS = REPLY.silence.advise.above * 1000;
 
 export interface KeepAliveOptions {

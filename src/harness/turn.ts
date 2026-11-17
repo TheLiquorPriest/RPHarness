@@ -279,7 +279,7 @@ export class Turn {
     const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
     this.#guidance = guidance;
     const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, file] = await Promise.all([
-      readSettings(guidance, env.files, scope, env.log),
+      readSettings(guidance, env, scope),
       env.files.places(scope),
       guidance.definition(req.lead),
       guidance.part("progress"),
@@ -557,7 +557,7 @@ export class Turn {
       carriedAt === undefined || carriedNow === undefined || layout === undefined
         ? undefined
         : {
-            starting: () => (file.log.asked !== undefined ? "asked" : recordsTokens(carriedNow, settings.tokens.charsPerToken) > settings.compaction.records ? "fold" : undefined),
+            starting: () => (file.log.asked !== undefined ? "asked" : recordsTokens(carriedNow, settings.tokens.charsPerToken) > settings.compaction.recordsTokens ? "fold" : undefined),
             left: () => earlierPlan() !== undefined,
             compact: async (summarize, facts) => {
               const current = file.log.turn(scope.turn);
@@ -667,7 +667,7 @@ export class Turn {
       const ratio = settings.tokens.charsPerToken;
       const tokens = tokensOf(opening.text, ratio) + tokensOf(JSON.stringify(declared.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio) + promptTokens(messages, ratio);
       const window = model.limits.contextWindow?.tokens;
-      const spans = await compactor.check({ agent: this.#lead, call: 1, messages, context: { from: 0, to: messages.length }, window, reserve: settings.compaction.reserve, tokens, signal: new AbortController().signal });
+      const spans = await compactor.check({ agent: this.#lead, call: 1, messages, context: { from: 0, to: messages.length }, window, reserve: settings.compaction.reserveTokens, tokens, signal: new AbortController().signal });
       for (const span of spans ?? []) messages.splice(span.from, span.to - span.from, ...span.messages);
     }
     // What the Author was told, as sent: what the session carried into the turn and the briefing (§5.3 l.489).

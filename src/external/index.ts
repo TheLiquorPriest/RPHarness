@@ -23,7 +23,7 @@ export interface ExternalDeps {
 }
 
 /** The settings his tools, servers and rule commands run under. */
-export type ExternalSettings = Pick<Settings, "commandTimeout" | "httpTimeout" | "answerMax" | "ruleCommandTimeout" | "mcpStartTimeout" | "mcpCallTimeout" | "calls">;
+export type ExternalSettings = Pick<Settings, "commandTimeout" | "httpTimeout" | "answerMax" | "ruleCommandTimeout" | "mcpStartTimeout" | "mcpCallTimeout" | "model">;
 
 export class External implements ExternalApi {
   readonly #d: ExternalDeps;
@@ -40,13 +40,13 @@ export class External implements ExternalApi {
 
   /** His tools as the run's files write them, for its registry: his manifests' and those of his MCP servers that are switched on, each server started when first needed. */
   async tools(guidance: Guidance, settings: ExternalSettings, words: Words): Promise<HostTool[]> {
-    const terms = { commandTimeout: settings.commandTimeout, httpTimeout: settings.httpTimeout, answerMax: settings.answerMax, secrets: { wordsMost: settings.calls.wordsMost, secretFloor: settings.calls.secretFloor } };
+    const terms = { commandTimeout: settings.commandTimeout, httpTimeout: settings.httpTimeout, answerMax: settings.answerMax, secrets: { wordsMost: settings.model.wordsMost, secretFloor: settings.model.secretFloor } };
     const servers = (await guidance.mcpServers()).flatMap((read) => (read.server !== undefined ? [read.server] : []));
     const [own, mcp] = await Promise.all([ownerTools({ guidance, switches: this.#d.switches, words, terms, secret: this.#d.secret }), this.#servers.tools(guidance.scope.user, servers, guidance, { ...terms, startMs: settings.mcpStartTimeout, callMs: settings.mcpCallTimeout }, words)]);
     return [...own, ...mcp];
   }
 
-  /** How a run's rules ask a rule's command (`RuleRunOptions.command`), under the user's `rules.commandTimeout`. */
+  /** How a run's rules ask a rule's command (`RuleRunOptions.command`), under the user's `rules.commandTimeoutSeconds`. */
   ruleCommands(user: string, settings: ExternalSettings): NonNullable<RuleRunOptions["command"]> {
     return (_agent, rule, input) => askRuleCommand({ rule: rule.rule, command: rule.command, user, input, timeoutMs: settings.ruleCommandTimeout, readMost: settings.answerMax, switches: this.#d.switches });
   }

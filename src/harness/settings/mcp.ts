@@ -6,9 +6,9 @@ import { MCP_WORDS } from "./mcp-words";
 export const MCP = worded(
   {
     // A server started by a command loads its runtime first (npx, uvx): half a minute covers a cold start.
-    startTimeout: { key: "mcp.startTimeout", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "mcpStartTimeout", ms: true },
+    startTimeout: { key: "mcp.startTimeoutSeconds", takes: { type: "whole", least: 1 }, default: 30, perConnection: false, at: "mcpStartTimeout", ms: true },
     // A server's tool may do real work (a search, a build): a minute, twice a command tool's.
-    callTimeout: { key: "mcp.callTimeout", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, at: "mcpCallTimeout", ms: true },
+    callTimeout: { key: "mcp.callTimeoutSeconds", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, at: "mcpCallTimeout", ms: true },
   },
   MCP_WORDS,
 );

@@ -35,7 +35,7 @@ export interface SettingAdvice {
 
 /** A setting as the code that reads it declares it: what a page needs to show it, to check a value before writing it, and to say what it is for. */
 export interface SettingDef {
-  /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection, `<definition>` where a setting set per agent definition names the definition (`sampling.<definition>.temperature`). */
+  /** The key as a config file writes it, dotted (`limits.turn.calls`); `<connection>` where a setting set per connection names its connection, `<definition>` where a setting set per agent definition names the definition (`agents.<definition>.sampling.temperature`). A time or a size ends with its unit (`Ms`, `Seconds`, `Minutes`, `Hours`, `Days`, `Bytes`, `KiB`, `MiB`, `Chars`, `Tokens`, `Words`, `Lines`, `Feet`; under `limits` the last part is the unit itself: `limits.turn.seconds`), which a page shows beside it; a count names what it counts. */
   readonly key: string;
   readonly takes: SettingTakes;
   /** Lines the page shows while the value is past a point beyond which it still has a meaning, but one to know of: the value is taken. */

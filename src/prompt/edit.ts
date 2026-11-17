@@ -73,7 +73,7 @@ export function promptMapApi(env: Env): PromptMapApi {
 
     async edit(scope, edit, by) {
       const guidance = loadGuidance(env.files, scope);
-      const [words, settings, kept] = await Promise.all([promptWords(guidance), readSettings(guidance, env.files, scope, env.log), keptPrompt(env, scope, scope.turn)]);
+      const [words, settings, kept] = await Promise.all([promptWords(guidance), readSettings(guidance, env, scope), keptPrompt(env, scope, scope.turn)]);
       const refused = (line: string, fields?: Fields): PromptMapEdited => ({ status: "refused", words: words(line, fields) ?? "" });
       if (kept === undefined) return refused("no_prompt");
       const { prompt } = kept;

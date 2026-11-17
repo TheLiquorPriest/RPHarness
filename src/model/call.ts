@@ -10,7 +10,7 @@
 // own words with its status first, a stop with the reason "aborted", and never a secret the layer
 // holds. A call that failed before any piece of its answer came (its server couldn't be reached, or
 // answered 429 or 5xx) is made again, as many times as its connection says (`calls.retries` where it
-// says nothing), after a wait that starts at `calls.retryWait` and doubles each time; one that failed
+// says nothing), after a wait that starts at `calls.retryWaitSeconds` and doubles each time; one that failed
 // after something came never is. pi-ai's own retries stay off, so these are the only ones.
 //
 // Every request carries everything it is about, so that what an agent was sent can be read back
@@ -23,7 +23,7 @@
 // than the connection now goes to wait for the host's switches (book.ts), and the call isn't made
 // until then. Google's calls are the one kind that can't go out through the layer's own fetch, so a
 // Google connection takes no address but Google's own (book.ts).
-// A stream that goes silent once its answer has begun is ended after `calls.silentAfter`
+// A stream that goes silent once its answer has begun is ended after `calls.silentAfterSeconds`
 // (`silenceWatch`), in words that say so and name that setting. A call is made under its terms, read
 // as it is made at its agent's chat's levels, or, with no chat in view, at the levels every chat
 // shares: the layer's settings, and its texts (texts.ts). On an Anthropic sign-in the line pi-ai puts
@@ -343,7 +343,7 @@ const LONGEST_TIMER = 2_147_483_647;
 
 /**
  * Watches a call for silence, and calls `silent` once it has lasted `ms` (none at all where `ms` is
- * none: `calls.silentAfter` set to no limit). The wait starts with the answer, at its first piece of
+ * none: `calls.silentAfterSeconds` set to no limit). The wait starts with the answer, at its first piece of
  * text, of thinking or of a tool call: until then the model may still be reading a long prompt, or
  * thinking where nothing of it is shown, and a slow start is no dead stream. From then on anything
  * from the server is life: any byte of the response (a ping or a keep-alive that pi-ai never passes

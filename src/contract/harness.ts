@@ -66,7 +66,7 @@ export interface JobView {
  * A tag check's record for one of his connections (§10.7 l.1285, §14 l.1563; C-20): the simple turns
  * it played on the connection under the shipped reply contract, how many came back with the reply and
  * the intent record each in its tags, against the count the tag form needs (`reply.check.kept`), and
- * the form that set for the connection (`reply.forms.<connection>` in his global config, his to
+ * the form that set for the connection (`connections.<connection>.reply.form` in his global config, his to
  * change after; `set` false where the file could not be written). The newest check of each stands.
  */
 export interface TagCheck {
@@ -111,7 +111,7 @@ export interface JobLimits {
    * default), every other token in full. The record of a job it stopped gives that count.
    */
   tokens?: number;
-  /** Seconds of the job's run, as `jobs.run.time` is written. */
+  /** Seconds of the job's run, as `jobs.run.seconds` is written. */
   time?: number;
   /**
    * Tokens, counted as `tokens` is, at which the job is held, not ended, and the owner is asked
@@ -554,14 +554,14 @@ export interface DefinitionView {
 /**
  * What a definition runs on, resolved among the user's connections for the scope it is listed for
  * (C28), as the Agents page shows it, with what the settings at that scope set for it
- * (`agents.<definition>`, `effort.connections`) standing over its header.
+ * (`agents.<definition>`, `connections.<connection>.effort`) standing over its header.
  */
 export interface DefinitionRun {
   /** The connection its header names, by name or id; `default`, or none named, his default. Null where none is there. */
   connection: { id: string; name: string } | null;
   /** That connection's model; null where no connection resolves, or it names none. */
   model: string | null;
-  /** The effort it thinks at: the settings' for its definition, else the settings' for its connection (`effort.connections`), else its definition's, else its connection's own; null for its provider's own default. */
+  /** The effort it thinks at: the settings' for its definition, else the settings' for its connection (`connections.<connection>.effort`), else its definition's, else its connection's own; null for its provider's own default. */
   effort: Effort | null;
   /** The limits it is held to: its header's, each one the settings set for it standing over it (`~` lifting it); absent where none holds. */
   limits?: DefinitionLimitsView;

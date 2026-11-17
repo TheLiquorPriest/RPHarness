@@ -8,7 +8,7 @@
 // intent record, each opened and closed by the contract's tags, and the reply not empty. A turn the
 // provider failed ends the check failed, with nothing set: a failure is no measure of the tags. At
 // its end the record is kept under the connection (the newest stands), and the connection's form
-// written into his global config as `reply.forms.<connection>`: the tag form at `reply.check.kept`
+// written into his global config as `connections.<connection>.reply.form`: the tag form at `reply.check.kept`
 // kept turns or more, else the two-step form; his to change after.
 
 import type { AgentRef, ConnectionView, JsonObject, JsonValue, TagCheck, Usage } from "../contract";
@@ -66,19 +66,20 @@ function block(key: string, value: JsonValue, indent: number): string[] {
 }
 
 /**
- * The config's text with `reply.forms.<connection>` set to `form`: the `reply:` entry written back in
- * its place as blocks, the rest of the file as it was; added at its end where the file has none.
- * Throws, saying why, where the file is no mapping of settings.
+ * The config's text with `connections.<connection>.reply.form` set to `form`: the `connections:`
+ * entry written back in its place as blocks, the rest of the file as it was; added at its end where
+ * the file has none. Throws, saying why, where the file is no mapping of settings.
  */
 export function withForm(text: string, connection: string, form: TagCheck["form"]): string {
   const rows = normalized(text).replace(/\n+$/, "").split("\n");
   const parsed: unknown = text.trim() === "" ? {} : Bun.YAML.parse(normalized(text));
   if (parsed !== null && parsed !== undefined && !isMapping(parsed)) throw new Error("the config is not `name: value` lines");
   const config = (parsed ?? {}) as JsonObject;
-  const reply = isRecord(config["reply"]) ? config["reply"] : {};
-  const forms = isRecord(reply["forms"]) ? reply["forms"] : {};
-  const written = block("reply", { ...reply, forms: { ...forms, [connection]: form } }, 0);
-  const row = rows.findIndex((line) => /^reply[ \t]*:/.test(line));
+  const connections = isRecord(config["connections"]) ? config["connections"] : {};
+  const own = isRecord(connections[connection]) ? connections[connection] : {};
+  const reply = isRecord(own["reply"]) ? own["reply"] : {};
+  const written = block("connections", { ...connections, [connection]: { ...own, reply: { ...reply, form } } }, 0);
+  const row = rows.findIndex((line) => /^connections[ \t]*:/.test(line));
   let out: string[];
   if (row === -1) out = [...(rows.length === 1 && rows[0] === "" ? [] : rows), ...written];
   else {
@@ -104,7 +105,7 @@ export async function prepareTagCheck(core: JobCore, ask: Pick<JobAsk, "id" | "s
   const { scope } = ask;
   const user = scope.user;
   const guidance = loadGuidance(env.files, scope);
-  const [settings, list, part, contract] = await Promise.all([readSettings(guidance, env.files, scope, env.log), core.connections.list(user), guidance.part(TAG_CHECK), guidance.part("reply-contract")]);
+  const [settings, list, part, contract] = await Promise.all([readSettings(guidance, env, scope), core.connections.list(user), guidance.part(TAG_CHECK), guidance.part("reply-contract")]);
   const connection: ConnectionView | undefined = list.connections.find((c) => c.id === named || c.name === named);
   if (connection === undefined) return { refused: "connection", connection: named };
   const turns = lines(part);

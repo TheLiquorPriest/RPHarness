@@ -113,7 +113,7 @@ class Started implements Transport {
       }
       // One message past the most read of an answer is a runaway: the server is stopped.
       if (buffer.length > most) {
-        this.#gone = `it wrote a message longer than ${most} bytes (the setting "tools.answerMax")`;
+        this.#gone = `it wrote a message longer than ${most} bytes (the setting "tools.maxAnswerBytes")`;
         this.#proc.kill("SIGKILL");
         return;
       }
@@ -226,7 +226,7 @@ class Reached implements Transport {
       return undefined;
     }
     const read = response.body === null ? { bytes: new Uint8Array(), cut: false } : await readUpTo(response.body, this.#readMost);
-    if (read.cut) throw new Error(`its answer was longer than ${this.#readMost} bytes (the setting "tools.answerMax")`);
+    if (read.cut) throw new Error(`its answer was longer than ${this.#readMost} bytes (the setting "tools.maxAnswerBytes")`);
     const text = new TextDecoder().decode(read.bytes);
     if (!response.ok) throw new Error(`the address answered ${response.status}${text.trim() !== "" ? `: ${text.trim().slice(0, 500)}` : ""}`);
     const type = response.headers.get("content-type") ?? "";
@@ -310,7 +310,7 @@ export class McpClient {
       ]);
     } catch (error) {
       await client.close();
-      throw new Error(signal.aborted ? `it did not start within ${start.startMs / 1000} seconds (the setting "mcp.startTimeout")` : errorText(error));
+      throw new Error(signal.aborted ? `it did not start within ${start.startMs / 1000} seconds (the setting "mcp.startTimeoutSeconds")` : errorText(error));
     }
     return client;
   }

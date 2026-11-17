@@ -100,7 +100,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   // The registry as a run builds it for a scope, for the pages: RPH's own tools as a page lists them, and the host's.
   const registryOf = async (scope: Scope) => {
     const guidance = loadGuidance(env.files, scope);
-    const [settings, texts] = await Promise.all([readSettings(guidance, env.files, scope, env.log), ownTexts(guidance)]);
+    const [settings, texts] = await Promise.all([readSettings(guidance, env, scope), ownTexts(guidance)]);
     return { guidance, settings, registry: new Registry(listedTools(env, guidance, texts, settings, jobs), await env.tools.all(scope), await external.tools(guidance, settings, () => undefined)) };
   };
 
@@ -161,8 +161,8 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     sessions: sessionsApi(book, {
       files: env.files,
       now: () => env.clock.now(),
-      keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).compaction.keepTurns,
-      pageSize: async (scope) => (await readSettings(loadGuidance(env.files, scope), env.files, scope, env.log)).sessions.page,
+      keepTurns: async (scope) => (await readSettings(loadGuidance(env.files, scope), env, scope)).compaction.keepTurns,
+      pageSize: async (scope) => (await readSettings(loadGuidance(env.files, scope), env, scope)).sessions.page,
       carriedPart: async (scope) => template(await loadGuidance(env.files, scope).part("carried")),
       listing,
       closed: sessionClosed,
@@ -171,7 +171,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
       // His session-close hooks: a run of the host's word of its own, as `told`'s, with no agent.
       closing: async (scope, facts) => {
         const guidance = loadGuidance(env.files, scope);
-        const settings = await readSettings(guidance, env.files, scope, env.log);
+        const settings = await readSettings(guidance, env, scope);
         const port = hub.tee(env.trace, scope);
         const run = ids();
         let seq = 0;
@@ -186,7 +186,7 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
         const guidance = loadGuidance(env.files, scope);
         const views = await guidance.rules(env.switches);
         if (!views.some((view) => view.trigger === "question" && view.inForce)) return views;
-        const settings = await readSettings(guidance, env.files, scope, env.log);
+        const settings = await readSettings(guidance, env, scope);
         const judge = await questionsCannot(guidance, layer.api, scope.user, settings.judge);
         return judge === undefined ? views : views.map((view) => (view.trigger === "question" && view.inForce ? { ...view, inForce: false, why: "judge" as const, judge } : view));
       },
@@ -205,10 +205,10 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
     jobs,
 
     definitions: {
-      // Each with what it runs on and is held to at the scope: the settings set for it (`agents.<definition>`, `effort.connections`) over its header.
+      // Each with what it runs on and is held to at the scope: the settings set for it (`agents.<definition>`, `connections.<connection>.effort`) over its header.
       list: async (scope) => {
         const guidance = loadGuidance(env.files, scope);
-        const [views, connections, settings] = await Promise.all([guidance.definitions(), layer.api.list(scope.user), readSettings(guidance, env.files, scope, env.log)]);
+        const [views, connections, settings] = await Promise.all([guidance.definitions(), layer.api.list(scope.user), readSettings(guidance, env, scope)]);
         return Promise.all(
           views.map(async (view) => {
             const definition = await guidance.definition(view.name);

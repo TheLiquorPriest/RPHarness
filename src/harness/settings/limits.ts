@@ -1,6 +1,6 @@
 // The limits on one turn (§10.11: "every one is a setting"; Appendix D.1), shared by every agent of
 // the turn, under `limits.turn` in a config file, and the limits every agent is held to where its
-// definition sets none of its own, under `limits`. `time` is in seconds. No default cuts an agent's
+// definition sets none of its own, under `limits`. A time is in seconds. No default cuts an agent's
 // work short (§2.1 point 4): calls, tool rounds, tokens and time have none, and one he sets is held.
 // What waits for a place (sub-agents and tool calls at once) queues work and cuts none.
 
@@ -17,7 +17,7 @@ export const LIMITS = worded(
     // file sets (§5.4: limits per chat and global; §5.2: the nearer level's value is the one in force).
     tokensIn: { key: "limits.turn.tokensIn", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "turn.tokensIn" },
     tokensOut: { key: "limits.turn.tokensOut", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "turn.tokensOut" },
-    time: { key: "limits.turn.time", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "turn.time", ms: true },
+    time: { key: "limits.turn.seconds", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "turn.time", ms: true },
     // Today's build's own (LumiAH's `turn.toolTurns`, none): the answers that call tools, across all the turn's agents.
     toolRounds: { key: "limits.turn.toolRounds", takes: { type: "whole", least: 0 }, advise: { below: 1 }, default: null, orNone: true, none: NO_LIMIT, perConnection: false, at: "turn.toolRounds" },
     // Today's build's own (LumiAH's `delegation.depth` and `delegation.perRun`), kept as §10.11 says;

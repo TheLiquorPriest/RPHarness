@@ -110,7 +110,7 @@ export interface ModelLayer extends ModelSource {
   close(): Promise<void>;
 }
 
-/** Megabytes, as `calls.listMost` counts them, in bytes. */
+/** Mebibytes, as `calls.maxModelListMiB` counts them, in bytes. */
 const MEGABYTE = 1024 * 1024;
 
 /** pi-ai reads credentials from nowhere but the book: no environment variable, no file of another program's, ever signs a call. */
@@ -227,7 +227,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
     return desk;
   };
 
-  /** A signal the layer's own wait ends after the provider wait (`calls.providerWait`), with words that say what didn't come in time (`late`, given the wait in words) and name that setting; and its timer's release. */
+  /** A signal the layer's own wait ends after the provider wait (`calls.providerWaitSeconds`), with words that say what didn't come in time (`late`, given the wait in words) and name that setting; and its timer's release. */
   const deadline = (settings: ModelSettings, late: (wait: string) => string): { signal: AbortSignal; clear(): void } => {
     const ms = settings.providerWait;
     const stop = new AbortController();
@@ -250,7 +250,7 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
   /**
    * A compatible server's own list of its models (`GET …/models`, Anthropic's under `/v1`), with what
    * it says of each one's limits: no redirect followed, since its key and headers would go with it,
-   * and no more of it read than `calls.listMost`. A list has no chat in view: its settings are the
+   * and no more of it read than `calls.maxModelListMiB`. A list has no chat in view: its settings are the
    * levels every chat shares.
    */
   const serverModels = async (desk: Desk, c: Connection, api: string): Promise<(ModelChoice & { reported: ModelLimitsEntry })[]> => {

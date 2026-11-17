@@ -67,7 +67,7 @@ function writtenOf(args: JsonValue): WrittenSlice[] {
   });
 }
 
-/** `prompt_map_write`, made with how many characters of each slice's start its signature keeps (`prompt.signatureHead`). */
+/** `prompt_map_write`, made with how many characters of each slice's start its signature keeps (`prompt.signatureChars`). */
 export function promptMapWrite(deps: PromptToolsDeps & { signatureHead: number }): OwnTool {
   const own = deps.texts.get("prompt_map_write");
   const slice = {

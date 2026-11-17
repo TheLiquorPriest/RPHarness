@@ -158,24 +158,24 @@ describe("signing in to Anthropic", () => {
     expect((await r.layer.api.signIn(USER).state("anthropic")).ended).toBe(words);
   });
 
-  test("each size is its setting: a failed sign-in's words are kept as long as calls.signInWordsKept says, and cut to calls.wordsMost", async () => {
+  test("each size is its setting: a failed sign-in's words are kept as long as calls.signInWordsKeptSeconds says, and cut to calls.maxFailureChars", async () => {
     tokenEndpoint(() => failed(400, { error: "invalid_grant", error_description: "Invalid authorization code" }));
-    const { r } = await signInRig({ global: "calls:\n  signInWordsKept: 30\n  wordsMost: 12\n" });
+    const { r } = await signInRig({ global: "calls:\n  signInWordsKeptSeconds: 30\n  maxFailureChars: 12\n" });
     const start = await r.layer.api.signIn(USER).start("anthropic");
     await expect(r.layer.api.signIn(USER).finish(start.flow, `stale-code#${new URL(start.url).searchParams.get("state")}`)).rejects.toThrow("The Anthropic sign-in didn't finish: 400: Invalid…. Start it again.");
     r.clock.advance(29_000);
     expect((await r.layer.api.signIn(USER).state("anthropic")).ended).toBe("The Anthropic sign-in didn't finish: 400: Invalid…. Start it again.");
     // Changed in the file, the time holds from the next ask.
-    r.configs.global = "calls:\n  signInWordsKept: 60\n";
+    r.configs.global = "calls:\n  signInWordsKeptSeconds: 60\n";
     r.clock.advance(2_000);
     expect((await r.layer.api.signIn(USER).state("anthropic")).ended).not.toBeNull();
-    r.configs.global = "calls:\n  signInWordsKept: 30\n";
+    r.configs.global = "calls:\n  signInWordsKeptSeconds: 30\n";
     expect((await r.layer.api.signIn(USER).state("anthropic")).ended).toBeNull();
   });
 
   test("a flow left open expires after the wait its setting gives, one cancelled ends, and each says why for ten minutes", async () => {
     tokenEndpoint(anthropicTokens(3600));
-    const { r } = await signInRig({ global: "calls:\n  signInOpen: 90\n" });
+    const { r } = await signInRig({ global: "calls:\n  signInOpenSeconds: 90\n" });
     const ended = async (): Promise<string | null> => (await r.layer.api.signIn(USER).state("anthropic")).ended;
     const left = await r.layer.api.signIn(USER).start("anthropic");
     r.clock.advance(90_000);

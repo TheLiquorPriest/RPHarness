@@ -61,8 +61,8 @@ export interface CompactorDeps {
   terms: CallTerms;
   texts: RunnerTexts;
   budget?: Budget;
-  /** `compaction.reserve`, `compaction.overflowTries` and `compaction.keepRecent`, as the run read them. */
-  settings: { reserve: number; overflowTries: number; keepRecent: number };
+  /** `compaction.reserveTokens`, `compaction.overflowTries` and `compaction.keepRecentTokens`, as the run read them. */
+  settings: { reserveTokens: number; overflowTries: number; keepRecentTokens: number };
   /** The compaction part and the carried part, as they stand. */
   parts(): Promise<{ compaction: TemplatePart | undefined; carried: TemplatePart | undefined }>;
   ids(): string;
@@ -212,7 +212,7 @@ export class Compactor {
 
   /** The run's point before each request (§11). */
   point(window: number | undefined): RequestPoint {
-    return { ...(window !== undefined && window > 0 ? { window } : {}), reserve: this.#d.settings.reserve, resend: this.#d.settings.overflowTries, check: (request) => this.check(request) };
+    return { ...(window !== undefined && window > 0 ? { window } : {}), reserve: this.#d.settings.reserveTokens, resend: this.#d.settings.overflowTries, check: (request) => this.check(request) };
   }
 
   /** What to put in place before `request` goes out: nothing, or the spans the compaction gives. */
@@ -228,7 +228,7 @@ export class Compactor {
     this.#signal = request.signal;
     if ((!tight && start === undefined) || this.#stopped()) return undefined;
     const reason: CompactReason = refused ? "refused" : tight ? "would-not-fit" : start!;
-    const keep = Math.min(d.settings.keepRecent, Number.isFinite(fits) ? Math.floor(fits / 2) : d.settings.keepRecent);
+    const keep = Math.min(d.settings.keepRecentTokens, Number.isFinite(fits) ? Math.floor(fits / 2) : d.settings.keepRecentTokens);
     const earlier = d.earlier?.left() === true;
     const own = tight ? olderWork(request.messages, request.context.to, keep, ratio, this.#summaries) : undefined;
     const fields = { ...(d.trace.scope.turn !== undefined ? { turn: d.trace.scope.turn } : {}), run: d.trace.run, agent: d.agent.id, tokens: request.tokens, ...(window > 0 ? { window, reserve: request.reserve } : {}) };

@@ -260,7 +260,7 @@ test("every text sent to a provider in five whole turns, as the provider receive
   ];
   const { s, bodies } = await served(tagged, {
     drafted: true,
-    config: "results:\n  clip: 90\n",
+    config: "results:\n  clipChars: 90\n",
     files: RULES,
     approvals: APPROVALS,
     tools: {

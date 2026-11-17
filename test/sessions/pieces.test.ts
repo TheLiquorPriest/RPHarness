@@ -46,7 +46,7 @@ test("a session that grew under a larger window compacts on a smaller one: each 
   expect(s.trace.of("compacted")).toEqual([]);
 
   // The window it is played on now leaves 24,000 tokens for a call.
-  await Bun.write(join(s.dir, "files", "config.yml"), "compaction:\n  reserve: 40000\n  keepTurns: 1\n");
+  await Bun.write(join(s.dir, "files", "config.yml"), "compaction:\n  reserveTokens: 40000\n  keepTurns: 1\n");
   limit = 64_000 - 40_000 + 16;
   await play(s, ["t5"], "t4");
 

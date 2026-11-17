@@ -2,7 +2,7 @@ export const LIMITS_WORDS = {
   "limits.turn.calls": { name: "Calls in a turn", about: "Model calls all the agents of one turn may make between them.", below: "At 0 no call is made, and the turn ends with no reply." },
   "limits.turn.tokensIn": { name: "Tokens sent in a turn", about: "Tokens sent to models across all the agents of one turn.", below: "At 0 no call can be sent, and the turn ends with no reply." },
   "limits.turn.tokensOut": { name: "Tokens written in a turn", about: "Tokens models write across all the agents of one turn.", below: "At 0 no answer can be written, and the turn ends with no reply." },
-  "limits.turn.time": { name: "Time for a turn", about: "Seconds one turn may take, all its agents' work included.", below: "At 0 the turn ends as it starts, with no reply." },
+  "limits.turn.seconds": { name: "Time for a turn", about: "Seconds one turn may take, all its agents' work included.", below: "At 0 the turn ends as it starts, with no reply." },
   "limits.turn.toolRounds": { name: "Tool rounds in a turn", about: "Answers that call tools, across all the agents of one turn; past it the turn's work ends at this limit.", below: "At 0 the turn's work ends at its first answer that calls a tool." },
   "limits.turn.depth": { name: "Sub-agent depth", about: "How deep sub-agents may go: at 1 only the lead starts them, at 2 they may start their own, at 0 none is started." },
   "limits.turn.agents": { name: "Sub-agents in a turn", about: "Sub-agents one turn may start in all." },

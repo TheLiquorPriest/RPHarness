@@ -44,7 +44,7 @@ export interface BudgetCount {
 
 /** What the next call is asked about its answer's room. */
 export interface RoomAsk {
-  /** The least room an answer is given (`limits.answerFloor`): with less left under a limit, no call is made. */
+  /** The least room an answer is given (`limits.minAnswerTokens`): with less left under a limit, no call is made. */
   floor: number;
   /** The other bounds on the answer, each absent where there is none: the model's longest reply (or the connection's entry), the call's own, the agent's answer per call. */
   bounds: readonly (number | undefined)[];

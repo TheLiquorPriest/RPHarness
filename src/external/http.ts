@@ -47,7 +47,7 @@ export async function callHttpTool(c: HttpToolCall): Promise<ToolResult> {
     values[header] = value;
   }
   const sent = Object.values(values);
-  // An answer is taken whole, its length held by `tools.answerMax`; a failure's words are cut as the layer cuts a provider's.
+  // An answer is taken whole, its length held by `tools.maxAnswerBytes`; a failure's words are cut as the layer cuts a provider's.
   const clean = (text: string, whole = false): string => redact(text, sent, whole ? { ...c.secrets, wordsMost: Number.MAX_SAFE_INTEGER } : c.secrets);
   const timeout = new AbortController();
   const timer = setTimeout(() => timeout.abort(), c.timeoutMs);

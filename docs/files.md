@@ -44,7 +44,7 @@ YAML. Besides the settings ([settings.md](settings.md)), five keys:
 - `pins:` files handed whole to an agent at the start of each of its runs:
   `pins: [{ file: persistent-workspace/plan.md, agent: keeper }]`.
 
-`lead:` (a setting) names the definition that leads the chat's turns.
+`turn.lead` (a setting) names the definition that leads the chat's turns.
 
 ## Agent definitions (`<agents>/<name>.md`)
 
@@ -71,14 +71,14 @@ You are the lead of this roleplay ...
 |---|---|
 | `name`, `description` | Its name (the file's) and what it is for. |
 | `model` | The connection it runs on, by name or id; `default` (or left out) is the user's default connection. |
-| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. The setting `effort.connections.<connection>` stands over it for every agent on that connection, and `agents.<definition>.effort` over both ([settings](settings.md)). |
+| `effort` | How hard its model reasons: `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`; a level its model does not have is the nearest it has, so `max` is its highest; left out, the connection's own. The setting `connections.<connection>.effort` stands over it for every agent on that connection, and `agents.<definition>.effort` over both ([settings](settings.md)). |
 | `tools_as` | How its tools are offered: `auto` (natively until the connection refuses them, then as text), `native`, `text`. |
 | `tools` | The tools it holds from its first call. Any other tool it reaches through `tool_search` and `tool_use`. |
 | `out_of_reach` | Families of tools it does not reach by searching. |
 | `reads` | The instruction files of its stack, and `rules` for the always-on rules it is named in. Their order in the stack is fixed: `ALL-AGENTS`, the rules, `AGENTS`, `WORLD`, `SIMULATION`, `WRITING`, then other files, the definition, then `TURN`, `PRESET`. |
 | `given` | What it is handed at the start of a run, by name (below). |
 | `opening` | What it is handed once, when its session opens, by the same names. |
-| `limits` | Its own limits: `calls`, `tokensIn`, `tokensOut`, `time` (s), `callTokensIn`, `callTokensOut`, `callTime` (s), `toolRounds`, `toolsPerAnswer`, `toolsAtOnce`, `messages`. Each setting `agents.<definition>.limits.<limit>` stands over the header's, `~` lifting it ([settings](settings.md)). |
+| `limits` | Its own limits: `calls`, `tokensIn`, `tokensOut`, `time` (s), `callTokensIn`, `callTokensOut`, `callTime` (s), `toolRounds`, `toolsPerAnswer`, `toolsAtOnce`, `messages`. Each setting `agents.<definition>.limits.<limit>` stands over the header's, `~` lifting it; the settings for `time` and `callTime` are `seconds` and `callSeconds` ([settings](settings.md)). |
 | `writer` | The definition `write_reply` hands the prose to. |
 
 The body is a template ([Templates](#templates)); a sub-agent's may name `{{agent}}`, `{{definition}}`
@@ -160,7 +160,7 @@ A tool's manifest, one per file, the tool named by the file:
   result. Or `address`: an http(s) address the arguments are sent to as a JSON body, with `method`
   (`POST`, `PUT`, `PATCH`) and `headers`, each header naming the secret its value is kept under
   (`{ "Authorization": "weather-token" }`); a value is never written in a file.
-- `takes`: a JSON schema of an object; `timeout`: seconds, else `tools.commandTimeout` / `tools.httpTimeout`.
+- `takes`: a JSON schema of an object; `timeout`: seconds, else `tools.commandTimeoutSeconds` / `tools.httpTimeoutSeconds`.
 - Its description for the model is `.tools/<name>.md` where there is one.
 
 MCP servers, `.tools/mcp.json`, every level's (a nearer server replaces a farther one of its name):
@@ -189,7 +189,7 @@ before-tool:
 - Moments: `turn-start`, `before-tool`, `after-tool`, `before-release`, `after-release`, `run-end`,
   `session-close`, `before-compaction`, `job-start`, `job-end`.
 - Each hook has a `name`, a `command` exactly as you would type it, and a `timeout` in seconds
-  (else `hooks.timeout`). The hooks of a moment run one after another, the farthest level's first and
+  (else `hooks.timeoutSeconds`). The hooks of a moment run one after another, the farthest level's first and
   each file in its order; a nearer hook replaces a farther one of its name; `off: [hooks/<name>]`
   switches one off. A hook runs only once the host has switched it on.
 - The input always holds `hook` and `event`, and where the moment has them `scope` and `agent`;
@@ -197,7 +197,7 @@ before-tool:
 - It answers with JSON on stdout: `{"decision": "block", "reason": "…"}` blocks; `{"context": "…"}`
   adds a line to what is told next; `{"input": {…}}` before a tool gives the arguments the call goes
   with. Exiting with `hooks.blockExit` (2) blocks too, its stderr the reason. Any other failure, an
-  answer past `hooks.answerMax`, or a timeout blocks nothing and shows in the trace.
+  answer past `hooks.maxAnswerBytes`, or a timeout blocks nothing and shows in the trace.
 - The hooks before a tool run before any call of the model's message runs, so a slow one holds the
   message's other calls. A tool reached through `tool_use` is hooked as itself.
 

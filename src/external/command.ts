@@ -66,8 +66,8 @@ export async function askRuleCommand(c: RuleCommandCall): Promise<RuleCommandAns
   const result = await runCommand({ command: c.command, kind: "rule-command", name: c.rule, user: c.user, input: c.input, timeoutMs: c.timeoutMs, readMost: c.readMost }, c.switches);
   if (result.status === "failed") return { failed: `it could not be started: ${result.why}` };
   if (result.status !== "ran") return result.status;
-  if (result.timedOut) return { failed: `it did not answer within ${c.timeoutMs / 1000} seconds (the setting "rules.commandTimeout")` };
-  if (result.cut) return { failed: `its answer was longer than ${c.readMost} bytes (the setting "tools.answerMax")` };
+  if (result.timedOut) return { failed: `it did not answer within ${c.timeoutMs / 1000} seconds (the setting "rules.commandTimeoutSeconds")` };
+  if (result.cut) return { failed: `its answer was longer than ${c.readMost} bytes (the setting "tools.maxAnswerBytes")` };
   const stderr = result.stderr.trim();
   if (result.exit !== 0) return { failed: `it ended with code ${result.exit ?? "none"}${stderr !== "" ? `: ${stderr.slice(-300)}` : ""}` };
   const said = typeof result.output === "boolean" ? String(result.output) : typeof result.output === "string" ? result.output : result.text;

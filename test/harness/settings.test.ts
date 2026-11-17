@@ -91,7 +91,7 @@ async function readOf(groups: readonly Group[], configs: { global?: JsonObject; 
 async function settingsOf(configs: { global?: JsonObject; chat?: JsonObject }): Promise<{ settings: Settings; logged: { setting: JsonValue; file: JsonValue }[]; said: Said[] }> {
   const { log, logged, said } = recorder();
   const files = filesOf(configs);
-  return { settings: await readSettings(loadGuidance(files, SCOPE), files, SCOPE, log), logged, said };
+  return { settings: await readSettings(loadGuidance(files, SCOPE), { files, log }, SCOPE), logged, said };
 }
 
 /** A config that sets one setting, for `CONNECTION` where it is set per connection. */
@@ -178,52 +178,52 @@ const LANDED: Readonly<Record<string, string>> = {
   "limits.turn.calls": "turn.calls",
   "limits.turn.tokensIn": "turn.tokensIn",
   "limits.turn.tokensOut": "turn.tokensOut",
-  "limits.turn.time": "turn.time ms",
+  "limits.turn.seconds": "turn.time ms",
   "limits.turn.depth": "subAgents.depth",
   "limits.turn.agents": "subAgents.agents",
   "jobs.atOnce": "jobs.atOnce",
   "jobs.perDay": "jobs.perDay",
   "jobs.perRun": "jobs.perRun",
   "jobs.tokensPerDay": "jobs.tokensPerDay",
-  "jobs.connections.<connection>.atOnce": "jobs.connections.<connection>.atOnce",
-  "jobs.connections.<connection>.perDay": "jobs.connections.<connection>.perDay",
+  "connections.<connection>.jobs.atOnce": "jobs.byConnection.<connection>.atOnce",
+  "connections.<connection>.jobs.perDay": "jobs.byConnection.<connection>.perDay",
   "jobs.run.calls": "jobs.run.calls",
   "jobs.run.tokensIn": "jobs.run.tokensIn",
   "jobs.run.tokensOut": "jobs.run.tokensOut",
-  "jobs.run.time": "jobs.run.time ms",
-  "calls.silentAfter": "calls.silentAfter ms",
-  "calls.providerWait": "calls.providerWait ms",
-  "calls.signInOpen": "calls.signInOpen ms",
-  "calls.testRoom": "calls.testRoom",
-  "calls.listMost": "calls.listMost",
-  "calls.quoted": "calls.quoted",
-  "calls.signInWordsKept": "calls.signInWordsKept ms",
-  "calls.wordsMost": "calls.wordsMost",
-  "calls.retryWait": "calls.retryWait ms",
-  "calls.retries": "calls.retries",
-  "calls.cacheRetention": "calls.cacheRetention",
-  "calls.toolRefusalMinutes": "calls.toolRefusalMinutes",
+  "jobs.run.seconds": "jobs.run.timeMs ms",
+  "calls.silentAfterSeconds": "model.silentAfter ms",
+  "calls.providerWaitSeconds": "model.providerWait ms",
+  "calls.signInOpenSeconds": "model.signInOpen ms",
+  "calls.testRoomTokens": "model.testRoom",
+  "calls.maxModelListMiB": "model.listMost",
+  "calls.quotedChars": "model.quoted",
+  "calls.signInWordsKeptSeconds": "model.signInWordsKept ms",
+  "calls.maxFailureChars": "model.wordsMost",
+  "calls.retryWaitSeconds": "model.retryWait ms",
+  "calls.retries": "model.retries",
+  "calls.cacheRetention": "model.cacheRetention",
+  "calls.toolRefusalMinutes": "model.toolRefusalMinutes",
   "reply.form": "form",
-  "reply.forms.<connection>": "forms.<connection>",
+  "connections.<connection>.reply.form": "forms.<connection>",
   "reply.streamAnyway": "streamAnyway",
   "reply.heldSentences": "heldSentences",
   "reply.tailSentences": "tailSentences",
   "reply.leadSampling": "leadSampling",
   "progress.show": "progress",
-  "progress.silence": "silenceMs ms",
-  "results.clip": "clipChars",
+  "progress.silenceSeconds": "silenceMs ms",
+  "results.clipChars": "clipChars",
   "tools.search": "searchHits",
-  "tools.gapCheck": "gapHits",
+  "tools.gap.hits": "gapHits",
   "tools.perCall": "perCall",
-  "tools.schemaShown": "schemaShown",
-  "rules.window": "ruleWindow",
+  "tools.schemaShownChars": "schemaShown",
+  "rules.windowChars": "ruleWindow",
   "rules.judge": "judge",
   "trace.requests": "requests",
   "prompt.kept": "promptKept",
   "live.backlog": "liveBacklog",
-  "compaction.reserve": "compaction.reserve",
+  "compaction.reserveTokens": "compaction.reserveTokens",
   "compaction.keepTurns": "compaction.keepTurns",
-  "compaction.records": "compaction.records",
+  "compaction.recordsTokens": "compaction.recordsTokens",
   "compaction.saveCalls": "compaction.saveCalls",
 };
 
@@ -427,21 +427,21 @@ test("a list of names with a blank item: the reader logs it once, naming the key
 });
 
 test("a number JSON cannot write is named as itself in a reason: NaN for a setting, Infinity for a mapping of settings", async () => {
-  const silence = SETTINGS.find((def) => def.key === "progress.silence")!;
-  expect(checkSettingValue(silence, Number.NaN)).toEqual({ ok: false, why: "progress.silence takes a whole number from 1 to 540, not NaN." });
+  const silence = SETTINGS.find((def) => def.key === "progress.silenceSeconds")!;
+  expect(checkSettingValue(silence, Number.NaN)).toEqual({ ok: false, why: "progress.silenceSeconds takes a whole number from 1 to 540, not NaN." });
   // As a config file writes them, in YAML's own words.
   const { log, said } = recorder();
-  const files = configFiles({ [CHAT_FILE]: "progress:\n  silence: .nan\nlimits: .inf\n" });
-  const settings = await readSettings(loadGuidance(files, SCOPE), files, SCOPE, log);
+  const files = configFiles({ [CHAT_FILE]: "progress:\n  silenceSeconds: .nan\nlimits: .inf\n" });
+  const settings = await readSettings(loadGuidance(files, SCOPE), { files, log }, SCOPE);
   expect({ silenceMs: settings.silenceMs, turn: settings.turn }).toEqual({ silenceMs: DEFAULT_SETTINGS.silenceMs, turn: DEFAULT_SETTINGS.turn });
   expect(said.map(({ setting, why }) => ({ setting, why }))).toEqual([
     { setting: "limits", why: "limits holds the settings under it as a mapping of keys, not Infinity." },
-    { setting: "progress.silence", why: "progress.silence takes a whole number from 1 to 540, not NaN." },
+    { setting: "progress.silenceSeconds", why: "progress.silenceSeconds takes a whole number from 1 to 540, not NaN." },
   ]);
 });
 
 test("a connection named like an object's own fields gets no form or counts but what the files give it: each connection map holds connections' names alone", async () => {
-  const { settings } = await settingsOf({ global: { reply: { forms: { [CONNECTION]: "two-step" } } } });
+  const { settings } = await settingsOf({ global: { connections: { [CONNECTION]: { reply: { form: "two-step" } } } } });
   expect(formFor(settings, { id: null, name: "constructor" })).toEqual({ form: "tags", stream: false });
   expect(jobCountsFor(settings, { id: "toString", name: "hasOwnProperty" })).toEqual([]);
   // Every connection map, read by a name it was not given, has nothing under it, inherited or not.
@@ -450,7 +450,7 @@ test("a connection named like an object's own fields gets no form or counts but 
     for (const name of ["constructor", "toString", "hasOwnProperty", "__proto__"]) expect({ key: entry.key, name, under: (map as Record<string, unknown>)[name] }).toEqual({ key: entry.key, name, under: undefined });
   }
   // Named so in the files, it is read as its own.
-  const named = await settingsOf({ global: { reply: { forms: { constructor: "two-step" } }, jobs: { connections: { toString: { atOnce: 1 } } } } });
+  const named = await settingsOf({ global: { connections: { constructor: { reply: { form: "two-step" } }, toString: { jobs: { atOnce: 1 } } } } });
   expect(formFor(named.settings, { id: null, name: "constructor" })).toEqual({ form: "two-step", stream: false });
   expect(jobCountsFor(named.settings, { id: null, name: "toString" })).toEqual([{ key: "toString", counts: { atOnce: 1 } }]);
 });
@@ -458,13 +458,13 @@ test("a connection named like an object's own fields gets no form or counts but 
 test("a key in a section only the harness's settings use that names none of them is logged once with its file, and every setting is read as before", async () => {
   // `limits.turn.cals` for `calls`, and a connection's `atOnc`; a section no entry lives in is another reader's.
   const global: JsonObject = { limits: { turn: { cals: 12, calls: 30 } }, lantern: { wick: 3 } };
-  const chat: JsonObject = { jobs: { connections: { [CONNECTION]: { atOnc: 1, perDay: 2 } } }, limits: { turn: { cals: 12 } } };
+  const chat: JsonObject = { connections: { [CONNECTION]: { jobs: { atOnc: 1, perDay: 2 } } }, limits: { turn: { cals: 12 } } };
   const read = await settingsOf({ global, chat });
-  expect({ turn: read.settings.turn, counts: read.settings.jobs.connections[CONNECTION] }).toEqual({ turn: { calls: 30 }, counts: { perDay: 2 } });
+  expect({ turn: read.settings.turn, counts: read.settings.jobs.byConnection[CONNECTION] }).toEqual({ turn: { calls: 30 }, counts: { perDay: 2 } });
   expect(read.said.map(({ message, setting, file, why }) => ({ message, setting, file, why }))).toEqual([
-    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: GLOBAL_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, toolRounds, depth, agents, agentsAtOnce." },
-    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: CHAT_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, time, toolRounds, depth, agents, agentsAtOnce." },
-    { message: "A key among the harness's settings names none of them; it is passed over.", setting: `jobs.connections.${CONNECTION}.atOnc`, file: CHAT_FILE, why: `jobs.connections.${CONNECTION}.atOnc is no setting the harness reads: jobs.connections.${CONNECTION} holds atOnce, perDay.` },
+    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: GLOBAL_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, seconds, toolRounds, depth, agents, agentsAtOnce." },
+    { message: "A key among the harness's settings names none of them; it is passed over.", setting: "limits.turn.cals", file: CHAT_FILE, why: "limits.turn.cals is no setting the harness reads: limits.turn holds calls, tokensIn, tokensOut, seconds, toolRounds, depth, agents, agentsAtOnce." },
+    { message: "A key among the harness's settings names none of them; it is passed over.", setting: `connections.${CONNECTION}.jobs.atOnc`, file: CHAT_FILE, why: `connections.${CONNECTION}.jobs.atOnc is no setting the harness reads: connections.${CONNECTION}.jobs holds atOnce, perDay.` },
   ]);
 });
 
@@ -515,17 +515,17 @@ test("every setting name the model layer's words use is the name of a listed set
 });
 
 test("the exported merge is the one readSettings reads by: a chat's value over a global one, mappings merged key by key, a value that is not a mapping replacing one that is", async () => {
-  const global: JsonObject = { limits: { turn: { calls: 12, depth: 1 } }, reply: { forms: { "Harbour model": "two-step" } }, jobs: { connections: { "Harbour model": { atOnce: 1 } }, run: { calls: 30, time: 600 } } };
-  const chat: JsonObject = { limits: { turn: { calls: 8 } }, reply: { forms: { "Lantern model": "tags" } }, jobs: { connections: { "Lantern model": { perDay: 4 } }, run: 5 } };
+  const global: JsonObject = { limits: { turn: { calls: 12, depth: 1 } }, connections: { "Harbour model": { reply: { form: "two-step" }, jobs: { atOnce: 1 } } }, jobs: { run: { calls: 30, seconds: 600 } } };
+  const chat: JsonObject = { limits: { turn: { calls: 8 } }, connections: { "Lantern model": { reply: { form: "tags" }, jobs: { perDay: 4 } } }, jobs: { run: 5 } };
   const merged = mergedConfig(global, chat);
   expect(merged).toEqual({
     limits: { turn: { calls: 8, depth: 1 } },
-    reply: { forms: { "Harbour model": "two-step", "Lantern model": "tags" } },
-    jobs: { connections: { "Harbour model": { atOnce: 1 }, "Lantern model": { perDay: 4 } }, run: 5 },
+    connections: { "Harbour model": { reply: { form: "two-step" }, jobs: { atOnce: 1 } }, "Lantern model": { reply: { form: "tags" }, jobs: { perDay: 4 } } },
+    jobs: { run: 5 },
   });
   // A mapping over a value that is not one replaces it whole as well; and the merge changes neither config it is given.
   expect(mergedConfig({ jobs: { run: 5 } }, { jobs: { run: { calls: 9 } } })).toEqual({ jobs: { run: { calls: 9 } } });
-  expect(global.jobs).toEqual({ connections: { "Harbour model": { atOnce: 1 } }, run: { calls: 30, time: 600 } });
+  expect(global.jobs).toEqual({ run: { calls: 30, seconds: 600 } });
 
   // The two files read as levels give, setting by setting, what the one file the merge makes gives.
   const levels = await settingsOf({ global, chat });
@@ -533,26 +533,26 @@ test("the exported merge is the one readSettings reads by: a chat's value over a
   expect(levels.settings.turn.calls).toBe(8);
   expect(levels.settings.subAgents.depth).toBe(1);
   expect(levels.settings.forms).toEqual({ "Harbour model": "two-step", "Lantern model": "tags" });
-  expect(levels.settings.jobs.connections).toEqual({ "Harbour model": { atOnce: 1 }, "Lantern model": { perDay: 4 } });
+  expect(levels.settings.jobs.byConnection).toEqual({ "Harbour model": { atOnce: 1 }, "Lantern model": { perDay: 4 } });
   // The chat's `run: 5` stands in place of the global mapping and is passed over: the run's limits are at their defaults.
   expect(levels.settings.jobs.run).toEqual(DEFAULT_SETTINGS.jobs.run);
   expect(levels.logged).toEqual([{ setting: "jobs.run", file: CHAT_FILE }]);
 });
 
-test("progress.silence takes no value past nine minutes: 600 in a chat's file leaves the default with one log line naming the key and the file", async () => {
+test("progress.silenceSeconds takes no value past nine minutes: 600 in a chat's file leaves the default with one log line naming the key and the file", async () => {
   // §10.7: a generation that sends no text for ten minutes is ended, so a progress line must come inside them.
-  const past = await settingsOf({ global: { progress: { silence: 120 } }, chat: { progress: { silence: 600 } } });
+  const past = await settingsOf({ global: { progress: { silenceSeconds: 120 } }, chat: { progress: { silenceSeconds: 600 } } });
   expect(past.settings.silenceMs).toBe(DEFAULT_SETTINGS.silenceMs);
-  expect(past.logged).toEqual([{ setting: "progress.silence", file: CHAT_FILE }]);
+  expect(past.logged).toEqual([{ setting: "progress.silenceSeconds", file: CHAT_FILE }]);
   // Nine minutes is the most it takes.
-  const most = await settingsOf({ global: { progress: { silence: 120 } }, chat: { progress: { silence: 540 } } });
+  const most = await settingsOf({ global: { progress: { silenceSeconds: 120 } }, chat: { progress: { silenceSeconds: 540 } } });
   expect({ silenceMs: most.settings.silenceMs, logged: most.logged }).toEqual({ silenceMs: 540_000, logged: [] });
-  expect(SETTINGS.find((def) => def.key === "progress.silence")?.takes).toEqual({ type: "whole", least: 1, most: 540 });
+  expect(SETTINGS.find((def) => def.key === "progress.silenceSeconds")?.takes).toEqual({ type: "whole", least: 1, most: 540 });
 });
 
 test("changing an entry's default changes what the tool uses; no source but the entry holds the old values", async () => {
   // The groups as they would read with these five defaults changed in their modules, and nothing else.
-  const CHANGED: Readonly<Record<string, number>> = { "tools.search": 3, "tools.gapCheck": 2, "reply.heldSentences": 2, "reply.tailSentences": 5, "progress.silence": 30 };
+  const CHANGED: Readonly<Record<string, number>> = { "tools.search": 3, "tools.gap.hits": 2, "reply.heldSentences": 2, "reply.tailSentences": 5, "progress.silenceSeconds": 30 };
   const changed = GROUPS.map((group) => Object.fromEntries(Object.entries(group).map(([name, entry]) => [name, Object.hasOwn(CHANGED, entry.key) ? { ...entry, default: CHANGED[entry.key]! } : entry])));
   const files = filesOf({});
   // The same entries with other defaults, so what they read has RPH's settings' shape.
@@ -595,7 +595,7 @@ test("changing an entry's default changes what the tool uses; no source but the 
   // ...and neither tool has a count to fall back on: one made without the user's does not build.
   // @ts-expect-error: tool search is given the user's `tools.search`, and has no count of its own.
   ({}) as Omit<ToolSearchDeps, "hits"> satisfies ToolSearchDeps;
-  // @ts-expect-error: gap_check is given the user's `tools.gapCheck`, and has no count of its own.
+  // @ts-expect-error: gap_check is given the user's `tools.gap.hits`, and has no count of its own.
   ({}) as Omit<BaseToolsDeps, "gapHits"> satisfies BaseToolsDeps;
 });
 

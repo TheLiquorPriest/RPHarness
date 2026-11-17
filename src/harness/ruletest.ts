@@ -138,7 +138,7 @@ export async function testRule(d: RuleTestDeps, scope: Scope, name: string, turn
   const { env } = d;
   const at: Scope = { ...scope, turn };
   const guidance = loadGuidance(env.files, at);
-  const [rule, settings, places, definitions] = await Promise.all([guidance.rule(name), readSettings(guidance, env.files, at, env.log), env.files.places(at), guidance.definitions()]);
+  const [rule, settings, places, definitions] = await Promise.all([guidance.rule(name), readSettings(guidance, env, at), env.files.places(at), guidance.definitions()]);
   if (rule === undefined) throw new Error(`No rule named ${name} reads whole: see it on the Rules page.`);
   const folder = places.turn;
   if (folder === undefined) throw new Error(`The turn ${turn} has no folder to read.`);

@@ -49,7 +49,7 @@ export interface GateDeps {
   words: Words;
   /** The agent's tools by name, with their tier and lane. */
   tools: ReadonlyMap<string, HeldTool>;
-  /** The owner's own ceiling on the characters of one call that the model reads (`results.clip`); none by default. */
+  /** The owner's own ceiling on the characters of one call that the model reads (`results.clipChars`); none by default. */
   clipChars?: number;
   /** Where what failed around a tool is named: a rule that could not be asked, a whole that could not be kept. */
   log: Log;
@@ -163,7 +163,7 @@ export class TurnGate implements ToolGate {
   /**
    * What the model reads of one call, cut only where it is longer than the room the call that reads
    * it has (`room`: the model's window less the reserve and less the request as it stands, and the
-   * agent's prompt per call where it has one) or the owner's own ceiling (`results.clip`, where he set
+   * agent's prompt per call where it has one) or the owner's own ceiling (`results.clipChars`, where he set
    * one). It reads the answer's text, then its reports, one line each, then the texts that go after it
    * (the rules' texts), in that order, and the cut counts them all: no more than that of any call
    * reaches the model, the trace, the session file or a later request. Its whole is kept in the

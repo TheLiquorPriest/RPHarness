@@ -62,7 +62,7 @@ describe("the two-step form", () => {
     expect(kinds.indexOf("intent_began")).toBeLessThan(kinds.indexOf("tool_ended"));
   });
 
-  test("reply.forms and reply.streamAnyway from the chat's config reach the turn: whole at the end by default, streamed when named", async () => {
+  test("connections.<connection>.reply.form and reply.streamAnyway from the chat's config reach the turn: whole at the end by default, streamed when named", async () => {
     // A lead on a connection of its own name; the chat's config names that connection.
     const teller = "---\nname: teller\ndescription: Fixture lead on a connection that does not keep tags.\nmodel: slow-link\ntools: [todo]\ngiven: [prompt:*]\n---\nFixture teller: answer the player.\n";
     const shown = async (config: string): Promise<{ atHold: string[]; pieces: string[]; form: string | undefined }> => {
@@ -86,9 +86,9 @@ describe("the two-step form", () => {
       }
     };
 
-    const whole = await shown("reply:\n  forms:\n    slow-link: two-step\n");
+    const whole = await shown("connections:\n  slow-link:\n    reply:\n      form: two-step\n");
     expect(whole).toEqual({ atHold: [], pieces: ["Wren shakes her head. No boat, not in this sea."], form: "message" });
-    const streamed = await shown("reply:\n  forms:\n    slow-link: two-step\n  streamAnyway: [slow-link]\n");
+    const streamed = await shown("connections:\n  slow-link:\n    reply:\n      form: two-step\nreply:\n  streamAnyway: [slow-link]\n");
     expect(streamed).toEqual({ atHold: ["Wren shakes her head."], pieces: ["Wren shakes her head.", " No boat, not in this sea."], form: "message" });
   });
 });

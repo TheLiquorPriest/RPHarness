@@ -93,7 +93,7 @@ describe("a job an agent starts", () => {
   test("past the player's count at once a job waits for a place, and past the day's count none is started: both per connection", async () => {
     const first = gate();
     const s = (open = await stage({
-      config: "jobs:\n  atOnce: 5\n  connections:\n    fixture-line: { atOnce: 1, perDay: 2 }\n",
+      config: "jobs:\n  atOnce: 5\nconnections:\n  fixture-line:\n    jobs: { atOnce: 1, perDay: 2 }\n",
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER("fixture-line") },
       // Each start asks for a task of its own: the same call three times in a row ends the agent's work (`limits.repeats`).
       answers: routed([start("start-1", `${BRIEF} First.`), start("start-2", `${BRIEF} Second.`), start("start-3", `${BRIEF} Third.`), reply("The tower is quiet.")], [{ pieces: [{ hold: first }, { text: "First count: seven." }] }, { pieces: [{ text: "Second count: seven." }] }]),

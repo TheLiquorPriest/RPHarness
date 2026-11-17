@@ -32,7 +32,7 @@
 // with only what it is given, whatever was kept under its id before. A connection that signs in goes
 // to its provider's own address, as does one of a provider whose calls can't go through the layer's
 // own fetch (Google's, which would follow a redirect elsewhere and take the key with it); an address
-// holds no name or password. A save refuses a key shorter than `calls.secretFloor`, from which length
+// holds no name or password. A save refuses a key shorter than `calls.minSecretChars`, from which length
 // a secret is taken out of a server's words wherever it stands (words.ts); a header's value may be
 // any length.
 //
@@ -730,7 +730,7 @@ export class Book {
 
   /**
    * Sets the secret of a name for his tools and servers, or (null) takes it away, written at once. A
-   * value is `floor` characters at least (`calls.secretFloor`), as a key is: it is taken out of what
+   * value is `floor` characters at least (`calls.minSecretChars`), as a key is: it is taken out of what
    * an address answers by that floor.
    */
   setToolSecret(name: string, value: string | null, floor: number): Promise<void> {
@@ -754,7 +754,7 @@ export class Book {
    * values were given for, and gives none of them, keeps them where they were given, to wait for the
    * switch; one that gives a key or a header's value gives it for the new place, and lets go of what
    * it doesn't give again; what the old server reported goes. A new connection starts with only what
-   * it is given. A key is `floor` characters at least (`calls.secretFloor`). The first connection is
+   * it is given. A key is `floor` characters at least (`calls.minSecretChars`). The first connection is
    * the default. The document is read again first, and written as it was read with this change.
    */
   async save(input: ConnectionInput, key: string | null | undefined, id: string | (() => string), floor: number): Promise<Connection> {

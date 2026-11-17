@@ -18,7 +18,7 @@ export type Looked =
 /** Whether the rule's condition holds on it, and what its pattern matched; that its pattern ran out of time; or, for a question rule, what it would ask about. */
 export type Checked = { holds: boolean; matched?: string; timedOut?: true } | { question: string; text: string };
 
-/** Checks `rule` against `looked` under the user's `rules.patternTime` and `rules.window`. */
+/** Checks `rule` against `looked` under the user's `rules.patternMs` and `rules.windowChars`. */
 export function checkRule(rule: Rule, looked: Looked, terms: { patternTime: number; window?: number }): Checked {
   const when = rule.when;
   if (when.trigger === "always") return { holds: true };

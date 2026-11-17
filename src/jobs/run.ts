@@ -114,7 +114,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const { scope } = ask;
   // Each part rendered for the job's agents keeps the values it was rendered with, for the Prompts page's preview (C17).
   const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
-  const [settings, places, toolNotices, goOn] = await Promise.all([readSettings(guidance, env.files, scope, env.log), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule")]);
+  const [settings, places, toolNotices, goOn] = await Promise.all([readSettings(guidance, env, scope), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule")]);
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);
   const texts = runnerTexts(words, template(goOn), settings.schemaShown);
@@ -140,7 +140,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       const connection = await connectionOf(core.connections, scope, definition, env.log, settings);
       return interruptFor(settings, connection) === "stop";
     },
-    // A rule's command is asked under the user's `rules.commandTimeout`; one that failed shows in the trace and the log, never as a "no".
+    // A rule's command is asked under the user's `rules.commandTimeoutSeconds`; one that failed shows in the trace and the log, never as a "no".
     command: core.external.ruleCommands(scope.user, settings),
     commandFailed: (agent, rule, why) => {
       trace.event(agent, undefined, { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "command", detail: why });
@@ -156,7 +156,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const more = ask.goOn?.more ?? {};
   const used = ask.goOn?.used ?? emptyUsage();
   const plus = (max: number | undefined, extra: number | undefined, spent: number): number | undefined => (extra === undefined ? max : (max ?? spent) + extra);
-  const time = more.time !== undefined ? more.time * 1000 : limit(settings.jobs.run.time, given.time === undefined ? undefined : given.time * 1000);
+  const time = more.time !== undefined ? more.time * 1000 : limit(settings.jobs.run.timeMs, given.time === undefined ? undefined : given.time * 1000);
   const calls = plus(limit(settings.jobs.run.calls, given.calls), more.calls, used.calls);
   const tokensIn = plus(limit(settings.jobs.run.tokensIn, given.tokensIn), more.tokensIn, used.input);
   const tokensOut = plus(limit(settings.jobs.run.tokensOut, given.tokensOut), more.tokensOut, used.output);
@@ -212,7 +212,7 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     connections: core.connections,
     settings,
     budget,
-    // The Author's connection judges where neither the rule nor `rules.judge` names one: the definition the chat's config names its lead (`lead:`), else the asking agent's own.
+    // The Author's connection judges where neither the rule nor `rules.judge` names one: the definition the chat's config names its lead (`turn.lead`), else the asking agent's own.
     author: async (agent) => connectionOf(core.connections, scope, (await guidance.definition(settings.lead ?? agent.definition)) ?? {}, env.log, settings),
     track: (entry) => {
       working.add(entry);

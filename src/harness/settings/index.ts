@@ -13,13 +13,16 @@
 // value (`checkSettingValue`, which `rp-harness/helpers` gives a host). A value passed over is logged
 // once with its key, the file that set it and why, and never stops a turn: one a setting does not
 // take leaves its default; an item of a list that is not a name (not text, or blank) is dropped and the rest read; and a value
-// set in the file of a level the setting is not read from is not read, nor is a key in one of the
-// harness's own sections that names no setting, nor a key the harness once read and reads no longer.
+// set in the file of a level the setting is not read from is not read. The read of every group
+// (`readSettings`) logs too each key in one of the sections the harness's settings live in that names
+// none of them and none of the host's own (`Environment.settingKeys`: a host's keys share groups with
+// the harness's, `turn.lead` beside a host's `turn.*`), and each key the harness once read and reads
+// no longer; a read of some groups alone knows too few keys to say so.
 //
 // What has no chat in view (a connection's test, a sign-in, a request passed through) reads its
 // settings at the levels every chat shares, through a read that names only the user (`UserScope`).
 
-import type { Effort, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
+import type { Effort, Environment, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
 import type { AgentDefinition, DefinitionLimits, Guidance } from "../../files/api";
 import type { CallTerms } from "../../loop/types";
 import { AGENTS } from "./agents";
@@ -93,19 +96,19 @@ export type Settings = SettingsOf<typeof GROUPS>;
 /** The user's limits on sub-agents (§10.11: "sub-agent depth and count ... every one is a setting"). */
 export type AgentSettings = Settings["subAgents"];
 
-/** The user's limits on jobs (§13.5, §10.11), `time` in milliseconds; each absent is no limit. */
+/** The user's limits on jobs (§13.5, §10.11), `timeMs` in milliseconds; each absent is no limit. */
 export type JobSettings = Settings["jobs"];
 
 /** A day's and a moment's count of jobs on one connection; each absent is no limit. */
-export type JobCounts = JobSettings["connections"][string];
+export type JobCounts = JobSettings["byConnection"][string];
 
 export type ReplyFormSetting = (typeof REPLY.form.takes.values)[number];
 
 /** Which model calls have what they were sent kept in the turn's folder: each agent's first, every one, or none. */
 export type RequestsSetting = (typeof TRACE.requests.takes.values)[number];
 
-/** The model layer's settings (`calls.*`), times in milliseconds; an absent silent wait is no limit; with the characters per token its counts are made at (`tokens.charsPerToken`). */
-export type ModelSettings = Settings["calls"] & { charsPerToken: number };
+/** The model layer's settings (`calls.*`, `connections.<connection>.throttles.*`, `throttles.*`, `embedding.*`), times in milliseconds; an absent silent wait is no limit; with the characters per token its counts are made at (`tokens.charsPerToken`). */
+export type ModelSettings = Settings["model"] & { charsPerToken: number };
 
 /** Where a scope's levels come from: a chat's guidance, or, with no chat in view, the file port's levels for the user alone. */
 type LevelSource = Pick<Guidance, "layers">;
@@ -233,14 +236,16 @@ export class SettingsRead {
 
   /**
    * The names or ids a setting set per connection (or per definition) is set under, as the files
-   * write them. Where its key goes on past the name, only those holding a mapping: another value
-   * there is passed over.
+   * write them. Where its key goes on past the name, only those whose value holds the mappings down
+   * to the setting's own (`connections.<connection>.jobs` for `connections.<connection>.jobs.atOnce`):
+   * a name that holds none of them is another setting's, and another value on the way is passed over.
    */
   named(def: SettingEntry): string[] {
     this.#unread(def);
     const { levels, config } = this.#merged(def);
     const parts = def.key.split(".");
     const before = parts.slice(0, parts.findIndex(isNamed));
+    const down = parts.slice(before.length + 1, -1);
     const more = parts.length > before.length + 1;
     let at: JsonValue = config;
     for (const [i, part] of before.entries()) {
@@ -258,8 +263,18 @@ export class SettingsRead {
     }
     const named = at;
     return Object.keys(named).filter((name) => {
-      if (!more || isMapping(named[name])) return true;
-      this.#notMapping([...before, name], named[name]!, levels);
+      if (!more) return true;
+      let held: JsonValue = named[name]!;
+      const path = [...before, name];
+      for (const part of down) {
+        if (!isMapping(held)) break;
+        const next: JsonValue | undefined = held[part];
+        if (next === undefined) return false;
+        held = next;
+        path.push(part);
+      }
+      if (isMapping(held)) return true;
+      this.#notMapping(path, held, levels);
       return false;
     });
   }
@@ -309,12 +324,14 @@ export class SettingsRead {
   }
 
   /**
-   * Each key a file sets in a section the entries live in that names none of them (`limits.turn.cals`):
+   * Each key a file sets in a section the entries live in that names none of them (`limits.turn.cals`)
+   * and is none of the host's own keys, nor holds one (`hostKeys`, as `SettingDef.key` writes them):
    * passed over, and logged once with its file. A section holds its entries' keys and its
    * subsections; one whose keys are connections' names takes any name. A section no entry lives in
-   * (`limits` itself) is another reader's, and nothing in it is the harness's to name.
+   * is another reader's, and nothing in it is the harness's to name.
    */
-  unnamed(entries: readonly SettingEntry[]): void {
+  unnamed(entries: readonly SettingEntry[], hostKeys: readonly string[] = []): void {
+    const host = hostKeys.map((key) => key.split("."));
     const sections = new Map<string, Set<string>>();
     const anyName = new Set<string>();
     for (const entry of entries) {
@@ -333,8 +350,10 @@ export class SettingsRead {
         for (const { path, value } of valuesAt(level.config, section.split("."))) {
           if (!isMapping(value)) continue;
           for (const [name, held] of Object.entries(value)) {
-            if (keys.has(name)) continue;
-            const key = [...path, name].join(".");
+            const at = [...path, name];
+            // The host reads it, or keys under it: its `<connection>` or `<definition>` takes any name.
+            if (keys.has(name) || host.some((parts) => parts.length >= at.length && at.every((part, i) => parts[i] === part || isNamed(parts[i])))) continue;
+            const key = at.join(".");
             this.#pass(`unnamed\n${key}\n${level.path}`, "A key among the harness's settings names none of them; it is passed over.", { setting: key, value: held, file: level.path, why: `${key} is no setting the harness reads: ${path.join(".")} holds ${[...keys].join(", ")}.` });
           }
         }
@@ -342,7 +361,7 @@ export class SettingsRead {
     }
   }
 
-  /** Each key the harness once read and reads no longer (`effort.connections`), set in a file: passed over, and logged once with its file and what holds in its place. */
+  /** Each key the harness once read and reads no longer (`prompt.kept`), set in a file: passed over, and logged once with its file and what holds in its place. */
   gone(keys: Readonly<Record<string, string>>): void {
     for (const [gone, instead] of Object.entries(keys)) {
       for (const level of this.#levels) {
@@ -371,8 +390,14 @@ function own(holder: Record<string, unknown>, field: string, value: unknown): vo
   Object.defineProperty(holder, field, { value, enumerable: true, writable: true, configurable: true });
 }
 
-/** The settings some groups read from a scope's config files: each entry's value, read through it, where it lands; each key of `gone` a file still sets is logged. */
-function settingsFrom<const G extends readonly Group[]>(groups: G, levels: readonly LevelConfig[], log?: Log, gone: Readonly<Record<string, string>> = {}): SettingsOf<G> {
+/** What the read of every group judges besides each value: the keys the harness reads no longer (`gone`), and the host's own keys, which no line names (`hostKeys`). */
+interface Judged {
+  readonly gone: Readonly<Record<string, string>>;
+  readonly hostKeys: readonly string[];
+}
+
+/** The settings some groups read from a scope's config files: each entry's value, read through it, where it lands; with `judged`, each key a file sets that is none of theirs, nor the host's, in a section of theirs, and each key of `gone` a file still sets, is logged. */
+function settingsFrom<const G extends readonly Group[]>(groups: G, levels: readonly LevelConfig[], log?: Log, judged?: Judged): SettingsOf<G> {
   const read = new SettingsRead(levels, log);
   const out: Record<string, unknown> = {};
   /** The mapping at `path` of what is put together, made empty where it is not there yet, so a group of fields is there with none of its fields set. */
@@ -410,22 +435,27 @@ function settingsFrom<const G extends readonly Group[]>(groups: G, levels: reado
       }
     }
   }
-  read.unnamed(groups.flatMap((group) => Object.values(group)));
-  read.gone(gone);
+  if (judged !== undefined) {
+    read.unnamed(groups.flatMap((group) => Object.values(group)), judged.hostKeys);
+    read.gone(judged.gone);
+  }
   return out as SettingsOf<G>;
 }
 
 /** The defaults, where no level sets a value: the settings of no config file at all, so each default lives in its entry alone. */
 export const DEFAULT_SETTINGS: Settings = settingsFrom(GROUPS, []);
 
-/** The settings some groups read for a scope, as its config files set them over the entries' defaults. */
+/** The settings some groups read for a scope, as its config files set them over the entries' defaults. A key none of them reads is not judged: they are not every key the harness reads. */
 export async function readSettingsOf<const G extends readonly Group[]>(groups: G, source: LevelSource, files: FilesPort, scope: Scope | UserScope, log: Log): Promise<SettingsOf<G>> {
   return settingsFrom(groups, await levelConfigs(source, files, scope, log), log);
 }
 
-/** The settings of a scope, as its config files set them over the defaults; a key the harness reads no longer is logged. */
-export async function readSettings(guidance: Guidance, files: FilesPort, scope: Scope | UserScope, log: Log): Promise<Settings> {
-  return settingsFrom(GROUPS, await levelConfigs(guidance, files, scope, log), log, GONE);
+/** What a read of every setting needs of the host: its file port, its log, and its own setting keys, which share the harness's sections. */
+export type SettingsHost = Pick<Environment, "files" | "log" | "settingKeys">;
+
+/** The settings of a scope, as its config files set them over the defaults; a key the harness does not read, or reads no longer, in a section of its own is logged, but the host's own (`Environment.settingKeys`). */
+export async function readSettings(guidance: Guidance, host: SettingsHost, scope: Scope | UserScope): Promise<Settings> {
+  return settingsFrom(GROUPS, await levelConfigs(guidance, host.files, scope, host.log), host.log, { gone: GONE, hostKeys: host.settingKeys ?? [] });
 }
 
 /**
@@ -435,7 +465,7 @@ export async function readSettings(guidance: Guidance, files: FilesPort, scope: 
  */
 export async function readModelSettings(files: FilesPort, scope: Scope | UserScope, log: Log): Promise<ModelSettings> {
   const read = await readSettingsOf([MODELS, CALLS] as const, { layers: () => files.layers(scope) }, files, scope, log);
-  return { ...read.calls, charsPerToken: read.tokens.charsPerToken };
+  return { ...read.model, charsPerToken: read.tokens.charsPerToken };
 }
 
 /** The form a connection's reply takes, and whether a two-step connection streams anyway, by the connection's name or id. */
@@ -445,7 +475,7 @@ export function formFor(settings: Settings, connection: { id: string | null; nam
   return { form: named ?? settings.form, stream: keys.some((key) => settings.streamAnyway.includes(key)) };
 }
 
-/** Whether a stream rule that interrupts stops a call on this connection (`stop`) or reminds after it (`remind`), by the connection's id or name (`rules.interrupts`), else `rules.interrupt`. */
+/** Whether a stream rule that interrupts stops a call on this connection (`stop`) or reminds after it (`remind`), by the connection's id or name (`connections.<connection>.rules.interrupt`), else `rules.interrupt`. */
 export function interruptFor(settings: Settings, connection: { id: string | null; name: string | null }): "stop" | "remind" {
   const keys = [connection.id, connection.name].filter((key): key is string => key !== null);
   return keys.map((key) => (Object.hasOwn(settings.ruleInterrupts, key) ? settings.ruleInterrupts[key] : undefined)).find((mode) => mode !== undefined) ?? settings.ruleInterrupt;
@@ -474,8 +504,9 @@ export function callTerms(settings: Settings, definition?: string): CallTerms {
 
 /**
  * The limits an agent of a definition is held to (§2.1 point 5): each its header's `limits:` sets,
- * with each one a level sets for it (`agents.<definition>.limits.<limit>`) standing over the
- * header's, `~` lifting it. `time` and `callTime` in milliseconds. Undefined where none holds.
+ * with each one a level sets for it (`agents.<definition>.limits.<limit>`, `seconds` and
+ * `callSeconds` for the header's `time` and `callTime`) standing over the header's, `~` lifting it.
+ * `time` and `callTime` in milliseconds. Undefined where none holds.
  */
 export function agentLimits(settings: Pick<Settings, "agents">, definition: Pick<AgentDefinition, "name" | "limits">): DefinitionLimits | undefined {
   const out: Record<string, number> = { ...definition.limits };
@@ -489,7 +520,7 @@ export function agentLimits(settings: Pick<Settings, "agents">, definition: Pick
 
 /**
  * The effort an agent of a definition thinks at, as far as the settings and its header say
- * (§2.1 point 5; plan §20, `effort.connections`): a level's `agents.<definition>.effort` stands over
+ * (§2.1 point 5; plan §20, `connections.<connection>.effort`): a level's `agents.<definition>.effort` stands over
  * everything, its `~` leaving the agent to its connection's; else the effort set for the connection
  * it runs on, by the connection's id or name; else the header's `effort:`. Undefined: its connection's
  * own.
@@ -511,7 +542,7 @@ export interface ConnectionCounts {
 /** The user's counts for the jobs on a connection, each by the setting's key that names it. */
 export function jobCountsFor(settings: Settings, connection: { id: string | null; name: string | null }): ConnectionCounts[] {
   return [...new Set([connection.id, connection.name].filter((key): key is string => key !== null))].flatMap((key) => {
-    const counts = Object.hasOwn(settings.jobs.connections, key) ? settings.jobs.connections[key] : undefined;
+    const counts = Object.hasOwn(settings.jobs.byConnection, key) ? settings.jobs.byConnection[key] : undefined;
     return counts === undefined ? [] : [{ key, counts }];
   });
 }

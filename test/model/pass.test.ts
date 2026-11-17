@@ -210,9 +210,9 @@ describe("a request passed through", () => {
     expect(made.sent).toEqual([]);
   });
 
-  test("each size is its setting: a set calls.quoted changes how much of a media address the refusal quotes, from the next request", async () => {
+  test("each size is its setting: a set calls.quotedChars changes how much of a media address the refusal quotes, from the next request", async () => {
     const address = `https://images.example.com/${"reef-".repeat(30)}.png`;
-    const made = rig({ global: "calls:\n  quoted: 20\n" });
+    const made = rig({ global: "calls:\n  quotedChars: 20\n" });
     r = made;
     await made.layer.api.save(USER, { name: "Writer", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, ANTHROPIC_KEY);
     const body = { ...CARRIED, messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: address } }] }] as JsonObject[] };

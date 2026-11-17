@@ -222,7 +222,7 @@ describe("a stream that goes silent", () => {
 
   test("a model slow to begin is left to begin, a keep-alive counts as life, and the wait is the one its setting gives", async () => {
     const held = heldStream();
-    r = rig({ script: () => held.response, global: "calls:\n  silentAfter: 30\n" });
+    r = rig({ script: () => held.response, global: "calls:\n  silentAfterSeconds: 30\n" });
     const agent = await heldClaude(r);
     const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
     const events = stream[Symbol.asyncIterator]();
@@ -247,7 +247,7 @@ describe("a stream that goes silent", () => {
   });
 
   test("a wait of none sets no limit at all: set so in the global file, or in a chat's over a global wait, for that chat's agents", async () => {
-    for (const configs of [{ global: "calls:\n  silentAfter: ~\n" }, { global: "calls:\n  silentAfter: 30\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: ~\n" } }]) {
+    for (const configs of [{ global: "calls:\n  silentAfterSeconds: ~\n" }, { global: "calls:\n  silentAfterSeconds: 30\n", chats: { [QUAY.chat]: "calls:\n  silentAfterSeconds: ~\n" } }]) {
       const faux = fauxProvider({ provider: "groq", models: [{ id: "faux-1" }], tokenSize: { min: 1, max: 1 } });
       faux.setResponses([fauxAssistantMessage("The mill is closed.")]);
       const made = rig({ providers: [faux.provider], ...configs });
@@ -265,7 +265,7 @@ describe("a stream that goes silent", () => {
 
 describe("each wait is its setting", () => {
   test("set in the global file, a silent stream, a slow test call and an open sign-in end at the set time on the fake clock and not before; a chat's own silent wait holds for that chat's agents", async () => {
-    r = waitsRig({ global: "calls:\n  silentAfter: 40\n  providerWait: 20\n  signInOpen: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: 15\n" } });
+    r = waitsRig({ global: "calls:\n  silentAfterSeconds: 40\n  providerWaitSeconds: 20\n  signInOpenSeconds: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfterSeconds: 15\n" } });
     const shared = await waitsRunOut(r, { silent: 40_000, provider: 20_000, signIn: 70_000 });
     expect(shared).toEqual({
       silent: 'The model went silent: nothing came from its server for 40 seconds after its answer began, so the stream was ended. The setting "Silent answer ends after" on the Settings page says how long an answer may go silent.',
@@ -274,7 +274,7 @@ describe("each wait is its setting", () => {
     });
     await r.done();
     // A chat's file sets the silent wait for its own agents; the waits with no chat in view are the global file's still.
-    r = waitsRig({ global: "calls:\n  silentAfter: 40\n  providerWait: 20\n  signInOpen: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfter: 15\n  providerWait: 5\n" } });
+    r = waitsRig({ global: "calls:\n  silentAfterSeconds: 40\n  providerWaitSeconds: 20\n  signInOpenSeconds: 70\n", chats: { [QUAY.chat]: "calls:\n  silentAfterSeconds: 15\n  providerWaitSeconds: 5\n" } });
     const chat = await waitsRunOut(r, { silent: 15_000, provider: 20_000, signIn: 70_000 }, QUAY);
     expect(chat.silent).toStartWith("The model went silent: nothing came from its server for 15 seconds");
     // The chat's provider wait is read from no file of a chat's: it is passed over, and said so.
@@ -284,15 +284,15 @@ describe("each wait is its setting", () => {
   test("the words of each wait that ran out carry the name its setting has in the exported list", async () => {
     r = waitsRig();
     const words = await waitsRunOut(r, { silent: 5 * 60_000, provider: 60_000, signIn: 10 * 60_000 });
-    expect(words.silent).toContain(`The setting "${listedName("calls.silentAfter")}" on the Settings page`);
-    expect(words.provider).toContain(`The setting "${listedName("calls.providerWait")}" on the Settings page`);
-    expect(words.signIn).toContain(`The setting "${listedName("calls.signInOpen")}" on the Settings page`);
+    expect(words.silent).toContain(`The setting "${listedName("calls.silentAfterSeconds")}" on the Settings page`);
+    expect(words.provider).toContain(`The setting "${listedName("calls.providerWaitSeconds")}" on the Settings page`);
+    expect(words.signIn).toContain(`The setting "${listedName("calls.signInOpenSeconds")}" on the Settings page`);
   });
 });
 
 describe("a provider that never answers", () => {
   test("a connection's test says so after the provider wait, naming that setting", async () => {
-    r = rig({ script: () => new Promise<Response>(() => undefined), global: "calls:\n  providerWait: 90\n" });
+    r = rig({ script: () => new Promise<Response>(() => undefined), global: "calls:\n  providerWaitSeconds: 90\n" });
     const saved = await r.layer.api.save(USER, { name: "Claude", provider: "anthropic", auth: "key", model: "claude-sonnet-4-5" }, KEY);
     const testing = r.layer.api.test(USER, saved.id);
     await r.clock.idle();
@@ -320,10 +320,10 @@ describe("a secret in a provider's words", () => {
     const saved = await r.layer.api.save(USER, { name: "Gateway", provider: "openai-compatible", auth: "key", baseUrl: "https://gateway.example.com/v1", model: "served-model", headers: { "x-gateway-token": TOKEN } }, SERVER_KEY);
     const tested = await r.layer.api.test(USER, saved.id);
     expect(r.sent.map((s) => s.headers["x-gateway-token"])).toEqual([TOKEN]);
-    // Shorter than calls.secretFloor, it is taken out where it stands alone; a longer word it is part of is another word.
+    // Shorter than calls.minSecretChars, it is taken out where it stands alone; a longer word it is part of is another word.
     expect(tested).toMatchObject({ ok: false, error: `403: Gateway token [secret] is unknown (sent: "[secret]"); try x${TOKEN}y. (permission_error)` });
     // Set lower, the floor has a five-character secret looked for anywhere.
-    r.configs.global = "calls:\n  secretFloor: 5\n";
+    r.configs.global = "calls:\n  minSecretChars: 5\n";
     expect(await r.layer.api.test(USER, saved.id)).toMatchObject({ ok: false, error: `403: Gateway token [secret] is unknown (sent: "[secret]"); try x[secret]y. (permission_error)` });
   });
 });

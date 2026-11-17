@@ -26,7 +26,7 @@ export interface AgentRunDeps {
   places: Places;
   /** The guidance of the run: where each of RPH's own tools' descriptions comes from. */
   guidance: Pick<Guidance, "tool">;
-  /** The run's settings: which requests are kept (`trace.requests`) and the bound on one call (`results.clip`). */
+  /** The run's settings: which requests are kept (`trace.requests`) and the bound on one call (`results.clipChars`). */
   settings(): Pick<Settings, "requests" | "clipChars">;
   rules(): RuleRun;
   words: Words;

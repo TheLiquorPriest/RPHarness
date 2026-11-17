@@ -1,10 +1,10 @@
 // Hooks (§5.4 "Hooks", P6, P15; PlanHarnessCore-2): his commands, named in `hooks.yml` by the moment
 // they run at, run by the one command runner as his user outside RPH's process, with the moment's
-// JSON on stdin, each under its own timeout or `hooks.timeout`. Nothing runs that the host's switches
+// JSON on stdin, each under its own timeout or `hooks.timeoutSeconds`. Nothing runs that the host's switches
 // do not have on for him, asked by exactly the line written (§16). A hook answers with JSON on its
 // stdout: `decision: "block"` with a `reason` blocks, as does its exit code `hooks.blockExit` with its
 // stderr as the reason; `context` adds a text; `input` (before a tool) gives the call's arguments as
-// they are to be. Any other failure, an answer past `hooks.answerMax`, or a timeout blocks nothing and
+// they are to be. Any other failure, an answer past `hooks.maxAnswerBytes`, or a timeout blocks nothing and
 // is shown with its words. The hooks of one moment run one after another, the farthest level's
 // first; the first block ends the rest. Every run of a hook is traced (`hook`), with its reason or
 // what it added. With no hooks nothing runs and nothing waits (§17.5).

@@ -14,7 +14,7 @@ afterEach(async () => {
 const LAST_PROMPT = String(PROMPT.at(-1)!.content);
 const COMPACTION_WORDS = "Write what the lead must still have after the detail is gone";
 /** About 40 tokens of records past the first: the second record takes the carried records past the set size. */
-const FOLD = "compaction:\n  records: 50\n  keepTurns: 1\n";
+const FOLD = "compaction:\n  recordsTokens: 50\n  keepTurns: 1\n";
 const RECORD = (n: string) => `Record ${n}: ${"the lamp was trimmed and the log was kept. ".repeat(3)}\n`;
 
 const said = (text: string) => ({ pieces: [{ text }] });

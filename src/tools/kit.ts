@@ -96,9 +96,9 @@ function choicesOf(schema: JsonObject | undefined): string | undefined {
 /**
  * The fields of the tool answers' `invalid` line: the tool, what was sent, each argument that did
  * not fit, whether the call left it out and the choices its schema gives where it names them
- * (`misfits`, each an `argument`, `missing` and `choices`, shown whatever `tools.schemaShown` allows
+ * (`misfits`, each an `argument`, `missing` and `choices`, shown whatever `tools.schemaShownChars` allows
  * for the whole), the tool's whole schema (`parameters`) only where it is no longer than the user's
- * `tools.schemaShown`, and `unparsed` where the arguments were not JSON.
+ * `tools.schemaShownChars`, and `unparsed` where the arguments were not JSON.
  */
 export function invalidFields(call: InvalidCall, schemaShown: number): Fields {
   let schema: unknown;

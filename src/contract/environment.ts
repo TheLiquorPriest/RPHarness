@@ -54,6 +54,13 @@ export interface Environment {
   approvals?: ApprovalsPort;
   /** Whether each thing that runs a command or calls out is switched on from the host's own command line (§16). Without it, every such thing is off. */
   switches?: SwitchesPort;
+  /**
+   * The host's own setting keys, as its `SettingDef.key` writes them (`turn.passConnection`), read from
+   * the same config files as RPH's. A host's keys share groups with RPH's, so RPH, which logs each key
+   * in a section of its own that names none of its settings, passes these over. Without it, every key
+   * in RPH's sections that is not RPH's is logged.
+   */
+  readonly settingKeys?: readonly string[];
   clock: Clock;
   log: Log;
 }

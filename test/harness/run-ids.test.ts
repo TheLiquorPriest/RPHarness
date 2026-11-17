@@ -74,7 +74,7 @@ test("a turn's log lines name the turn and the run, each under its own name", as
   // The scripted model's window is 64,000 tokens. Past this reserve, the second turn's first call would not fit, and with the
   // newest three turns kept the session has no earlier turn to summarize: that is logged. The drafted author is given the session's carry.
   const answers = ["<intent>Intent one.</intent><reply>Reply one.</reply>", "<intent>Intent two.</intent><reply>Reply two.</reply>"].map((text) => ({ pieces: [{ text }] }));
-  const s = (open = await stage({ drafted: true, config: "compaction:\n  reserve: 63999\n", answers }));
+  const s = (open = await stage({ drafted: true, config: "compaction:\n  reserveTokens: 63999\n", answers }));
   expect((await s.turn(request("t1", { carry: "continuing" }))).outcome.status).toBe("released");
   expect((await s.turn(request("t2", { carry: "continuing", parent: "t1" }))).outcome.status).toBe("released");
   const run = s.trace.of("run_started").find((record) => record.scope.turn === "t2")!.run;

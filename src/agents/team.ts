@@ -93,7 +93,7 @@ export interface TeamDeps {
   /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); `save`, its save call's at the moment before compaction; none keeps nothing. */
   keep?(agent: AgentRef, kind?: "call" | "save"): KeepRequest | undefined;
   /** The run's compaction settings (§11): each agent the team makes is compacted at any call that would not fit, as the lead is. None: its requests go out as set. */
-  compaction?(): { reserve: number; overflowTries: number; keepRecent: number; saveCalls: number };
+  compaction?(): { reserveTokens: number; overflowTries: number; keepRecentTokens: number; saveCalls: number };
   /** An agent the team made is a session of its own (§13.4): a sub-agent (`agent`), or a job's first agent (`job`); `by` the call that started it, none for a job the owner started. None: no file is kept. */
   session?(agent: AgentRef, kind: "agent" | "job", by: ParentCall | undefined): void;
   /** A summary of such an agent's own older calls (§11), kept in its session's file as its run's compaction. */
@@ -366,7 +366,7 @@ export class Team implements TeamWork {
     if (window !== undefined && window > 0) {
       const ratio = options.terms.charsPerToken;
       const size = tokensOf(instructions, ratio) + tokensOf(joined([brief]), ratio) + tokensOf(JSON.stringify(held.tools.map(({ name, description, parameters }) => ({ name, description, parameters }))), ratio);
-      const room = window - (compaction?.reserve ?? 0);
+      const room = window - (compaction?.reserveTokens ?? 0);
       if (size > room) {
         d.env.log.info("A sub-agent was not started: what it starts with would not fit its model.", { agent: ref.id, size, room });
         return answer(loaded.words("too_large", { agent: definition.name, size, room, attachments: given.blocks.map((block) => ({ name: block.name, tokens: tokensOf(block.text, ratio) })) }), true);

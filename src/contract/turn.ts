@@ -170,16 +170,31 @@ export interface ReplyError {
 }
 
 /**
- * Where the reply goes as it is written. `progress` lines go to the chat's thinking block (§10.7:
- * short progress lines only); `content` is the reply's text. It ends with exactly one `finish`, at
- * release, or one `error`; nothing follows.
+ * Where the reply goes as it is written. `progress` lines go to the chat's thinking block (§10.7),
+ * and with them, where the host takes it, the agents' thinking as the setting `progress.thinking`
+ * lets it go there (`thinking`); `content` is the reply's text. It ends with exactly one `finish`,
+ * at release, or one `error`; nothing follows.
  */
 export interface ReplySink {
   progress(line: string): void;
+  /**
+   * A piece of an agent's thinking as its model writes it, in order with the progress lines, one stretch at a time: one agent's
+   * call, whose pieces never come inside another's (a call that thinks while another's stretch is shown is held, then given whole
+   * once that stretch ends). Absent: the host shows no thinking, and none is sent.
+   */
+  thinking?(piece: ThinkingPiece): void;
   content(delta: string): void;
   /** The reply is complete; `usage` is the turn's so far. The lead's run may go on after it (§10.9). */
   finish(usage: Usage): void;
   error(e: ReplyError): void;
+}
+
+/** A piece of an agent's thinking for the chat's thinking block: whose it is, its text, and whether it begins a stretch, which the host heads with its agent's name. */
+export interface ThinkingPiece {
+  agent: AgentRef;
+  text: string;
+  /** The first piece of a stretch, or the first after a progress line came between two of its pieces. */
+  first: boolean;
 }
 
 /** How a run ended: its reply released; no reply; stopped by the signal; a limit; or a failure. */

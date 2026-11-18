@@ -174,6 +174,7 @@ words say after "`~`:".
 |---|---|---|---|---|
 | `progress.show` | all \\| least | all | all | **Progress lines.** All the progress lines in the chat's thinking block, or the least: only the line that keeps a silent turn alive. |
 | `progress.silenceSeconds` | whole ≥ 1 | 60 | all | **Silence before a progress line.** Seconds of nothing shown before a progress line goes to the chat's thinking block. Above 540: Lumiverse ends a generation that has shown nothing for ten minutes: past nine, a silent turn may be cut off before its progress line comes. |
+| `progress.thinking` | lines \\| lead \\| all | all | all | **Thinking in the chat.** Whose thinking goes to the chat's thinking block as the model writes it, between the progress lines: lines, the progress lines alone; lead, the lead agent's; all, every agent's of the turn, each stretch under its agent's name. An agent's thinking can hold what the story has not shown yet, and the chat application keeps it with the message. The host is given it a stretch at a time (`ReplySink.thinking`), and a stretch shown keeps the silence's line back. |
 
 ## `results`
 

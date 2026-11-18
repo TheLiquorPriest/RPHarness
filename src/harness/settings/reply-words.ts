@@ -9,4 +9,5 @@ export const REPLY_WORDS = {
   "reply.leadSampling": { name: "The lead's sampling", about: "Whether the lead samples as its own model does, or as the chat's preset says." },
   "progress.show": { name: "Progress lines", about: "All the progress lines in the chat's thinking block, or the least: only the line that keeps a silent turn alive." },
   "progress.silenceSeconds": { name: "Silence before a progress line", about: "Seconds of nothing shown before a progress line goes to the chat's thinking block.", above: "Lumiverse ends a generation that has shown nothing for ten minutes: past nine, a silent turn may be cut off before its progress line comes." },
+  "progress.thinking": { name: "Thinking in the chat", about: "Whose thinking goes to the chat's thinking block as the model writes it, between the progress lines: lines, the progress lines alone; lead, the lead agent's; all, every agent's of the turn, each stretch under its agent's name. An agent's thinking can hold what the story has not shown yet, and the chat application keeps it with the message." },
 };

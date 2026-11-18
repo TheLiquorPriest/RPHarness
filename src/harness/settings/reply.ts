@@ -27,6 +27,8 @@ export const REPLY = worded(
     // text for ten minutes is ended, so a line should come inside them; past nine minutes the page
     // says so, and the value is taken (§2.1 point 5: no hard cap).
     silence: { key: "progress.silenceSeconds", takes: { type: "whole", least: 1 }, advise: { above: 540 }, default: 60, perConnection: false, at: "silenceMs", ms: true },
+    // The owner's word of 18 Nov (nothing runs silent): every agent's thinking goes to the thinking block as it is written, unless he says less.
+    thinking: { key: "progress.thinking", takes: { type: "oneOf", values: ["lines", "lead", "all"] }, default: "all", perConnection: false, at: "thinking" },
   },
   REPLY_WORDS,
 );

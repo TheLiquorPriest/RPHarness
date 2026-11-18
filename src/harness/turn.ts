@@ -26,7 +26,7 @@ import { factFields, factsNamed } from "../files/facts";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
 import type { AgentModel, ModelSource } from "../model/source";
-import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, TagReply } from "../reply";
+import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, TagReply, ThinkingFeed } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
 import type { ReleaseCheck } from "../reply/release";
 import { SilentReply } from "../reply/silent";
@@ -138,6 +138,8 @@ export class Turn {
   #earlier: { usage: Usage; ms: number } | undefined;
   #settings: Settings = DEFAULT_SETTINGS;
   #keep: KeepAlive | undefined;
+  /** The agents' thinking on its way to the chat's thinking block, where the sink takes it (`progress.thinking`). */
+  #thinking: ThinkingFeed | undefined;
   #progress: LinesPart | undefined;
   #words: Words = () => undefined;
   #texts: RunnerTexts = { continueAfterRule: () => "" };
@@ -203,6 +205,7 @@ export class Turn {
     this.scope = req.scope;
     this.#trace = new RunTrace(core.hub.tee(core.env.trace, req.scope, () => this.#settings.liveBacklog), req.scope, this.run, core.env.clock, core.hub.hold(this.run));
     this.#trace.watch((record) => this.#watch(record));
+    this.#trace.watchThinking((agent, call, thinking) => this.#thinking?.piece(agent, call, thinking));
     this.#lead = { id: core.ids(), definition: req.lead };
     const files = core.env.files;
     this.#env = {
@@ -358,7 +361,11 @@ export class Turn {
       silenceMs: settings.silenceMs,
       still: (fields) => this.#progress?.line("still", fields),
       ...(kept !== undefined ? { missing: () => this.#trace.event(this.#lead, undefined, { kind: "progress_missing", time: kept }) } : {}),
+      lined: () => this.#thinking?.lined(),
     });
+    const shows = this.#keep.sink;
+    // The agents' thinking goes to the chat as it is written, where the sink takes it, as the setting says whose; none once the reply has begun to go out.
+    this.#thinking = shows.thinking === undefined ? undefined : new ThinkingFeed({ sink: { thinking: (piece) => shows.thinking?.(piece) }, shown: settings.thinking, lead: this.#lead.id, open: () => !this.#desk.released });
     this.#keep.start();
     this.#say("started");
     // A turn's counts run across its runs (N-22): a continue, or a run that settles, goes on from what
@@ -1321,10 +1328,13 @@ export class Turn {
         this.#say("rule", { rule: event.firing.rule });
         return;
       case "call_failed":
+        // The failed try's thinking is over; a try made again thinks under its own heading.
+        this.#thinking?.ended(record.agent, event.call);
         // A call made again: said in the progress file's words, with what broke it, the wait and the try it goes on to.
         if (event.retried) this.#say("retrying", { failure: event.failure, is: { [event.failure]: true }, seconds: Math.ceil((event.wait ?? 0) / 1000), next: event.tries + 1, most: event.retries + 1 });
         return;
       case "call_ended": {
+        this.#thinking?.ended(record.agent, event.call);
         // A call cut by a rule, or broken off, did nothing a rule's firing waits to hear of: no tool runs from it.
         if (event.stop === "cut" || event.stop === "error") return;
         if (agent === this.#lead.id && event.error === undefined) {
@@ -1341,6 +1351,7 @@ export class Turn {
         this.#then(agent, (firing) => (this.#calls.get(agent) ?? 0) > firing.call, { did: "released" });
         return;
       case "agent_ended":
+        this.#thinking?.agentEnded(record.agent);
         this.#then(agent, () => true, { did: "ended" });
         return;
       default:

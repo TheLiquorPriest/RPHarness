@@ -21,10 +21,12 @@ export interface KeepAliveOptions {
   still(fields: { elapsed: string }): string | undefined;
   /** The silence came and the file has no line to send: once in the turn. */
   missing?(): void;
+  /** A progress line went out, one of the turn's or the silence's: the thinking shown after it begins a stretch again. */
+  lined?(): void;
 }
 
 export class KeepAlive {
-  /** What the reply writes to: the turn's sink, with the silence clock started over by every piece that reaches it. */
+  /** What the reply writes to: the turn's sink, with the silence clock started over by every piece that reaches it, thinking among them where the sink takes it. */
   readonly sink: ReplySink;
   readonly #o: KeepAliveOptions;
   #startedAt = 0;
@@ -39,8 +41,19 @@ export class KeepAlive {
     this.sink = {
       progress: (line) => {
         outer.progress(line);
+        this.#o.lined?.();
         this.#shown();
       },
+      // Thinking the chat shows is no silence: the chat application's own clock counts it too.
+      ...(outer.thinking === undefined
+        ? {}
+        : {
+            thinking: (piece) => {
+              if (piece.text === "") return;
+              outer.thinking?.(piece);
+              this.#shown();
+            },
+          }),
       content: (delta) => {
         // An empty piece is not text: it would not reset the chat application's clock either.
         if (delta === "") return;

@@ -18,6 +18,7 @@ export class RunTrace {
   /** The owner's hand on the run, which every agent of it asks before each request. */
   readonly hold: RunHold | undefined;
   readonly #watchers: ((record: AgentRecord) => void)[] = [];
+  readonly #thinkers: ((agent: AgentRef, call: number, thinking: string) => void)[] = [];
   #seq = 0;
 
   constructor(port: TracePort, scope: RunScope, run: string, clock: LoopClock, hold?: RunHold) {
@@ -33,6 +34,11 @@ export class RunTrace {
     this.#watchers.push(watcher);
   }
 
+  /** Also gives every piece of an agent's thinking to `watcher`, after the port, as it streams: the chat's thinking block follows it. */
+  watchThinking(watcher: (agent: AgentRef, call: number, thinking: string) => void): void {
+    this.#thinkers.push(watcher);
+  }
+
   event(agent: AgentRef, parent: ParentCall | undefined, event: TraceEvent): void {
     this.#seq += 1;
     const record: AgentRecord = { seq: this.#seq, run: this.run, scope: this.scope, at: this.clock.now(), agent, ...(parent ? { parent } : {}), event };
@@ -42,5 +48,6 @@ export class RunTrace {
 
   delta(agent: AgentRef, call: number, piece: { text: string } | { thinking: string }): void {
     this.port.delta({ run: this.run, agent: agent.id, call, ...piece, at: this.clock.now() });
+    if ("thinking" in piece) for (const watcher of this.#thinkers) watcher(agent, call, piece.thinking);
   }
 }

@@ -379,6 +379,8 @@ export type RuleTrigger = "always" | "pattern" | "question" | "moment" | "comman
 /** A rule as the Rules page lists it. */
 export interface RuleView {
   name: string;
+  /** What it is called in a person's words, its header's `title:`; absent where its file gives none. */
+  title?: string;
   path: string;
   level: LayerLevel;
   /** Its header's description; empty for a `broken` rule whose header does not give one. */

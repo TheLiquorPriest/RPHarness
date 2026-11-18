@@ -12,7 +12,7 @@ import { checkRule, createFacts, loadGuidance, type Looked } from "../files";
 import { createRuleRun } from "../files/engine";
 import { CONFIG_KEYS, CONFIG_SECTION } from "../files/api";
 import { isMapping, nameList, normalized, parseYaml } from "../files/header";
-import type { Rule } from "../files/rules";
+import { firedRule, type Rule } from "../files/rules";
 import { itemKey, writtenKey } from "../files/tree";
 import { Budget, RunTrace } from "../loop";
 import type { ModelSource } from "../model/source";
@@ -170,7 +170,7 @@ export async function testRule(d: RuleTestDeps, scope: Scope, name: string, turn
   const leadRef = agents.find((r) => r.agent.definition === lead)?.agent ?? { id: lead, definition: lead };
   const firings: RuleFiring[] = [];
   const fire = (agent: AgentRef, moment: RuleMoment, extra: Partial<RuleFiring>): void => {
-    firings.push({ rule: rule.name, path: rule.path, level: rule.level, moment, agent, action: actionOf(rule, moment), ...extra });
+    firings.push({ ...firedRule(rule), moment, agent, action: actionOf(rule, moment), ...extra });
   };
   const terms = { patternTime: settings.patternTime, ...(settings.ruleWindow !== undefined ? { window: settings.ruleWindow } : {}) };
   const when = rule.when;

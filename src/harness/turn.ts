@@ -1368,7 +1368,8 @@ export class Turn {
         return;
       case "rule_fired":
         this.#firings.push({ firing: event.firing, call: this.#calls.get(agent) ?? 0 });
-        this.#say("rule", { rule: event.firing.rule });
+        // Said by what a person calls it (its title, its name where it has none), and whether it is one shipped with the application or one of the person's own.
+        this.#say("rule", { rule: event.firing.rule, ...(event.firing.title !== undefined ? { title: event.firing.title } : {}), ...(event.firing.level === "shipped" ? { shipped: true } : {}) });
         return;
       case "call_failed":
         // The failed try's thinking is over; a try made again thinks under its own heading.

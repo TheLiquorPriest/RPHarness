@@ -685,6 +685,7 @@ class TreeGuidance implements Guidance {
       const state = runs === undefined ? undefined : switches === undefined ? "off" : await switches.state(user, { kind: "rule-command", name: f.ref.name, target: runs });
       return {
         name: f.ref.name,
+        ...(f.item?.title !== undefined ? { title: f.item.title } : {}),
         path: f.ref.path,
         level: f.ref.level,
         description: f.item?.description ?? "",

@@ -117,6 +117,8 @@ export type RuleThen = { did: "called"; tools: string[] } | { did: "wrote" } | {
 export interface RuleFiring {
   /** The rule's name: its file's name without `.md`. */
   rule: string;
+  /** What it is called in a person's words, its header's `title:`; absent where its file gives none, and it goes by its name. */
+  title?: string;
   /** Its file, as a path in the agents' view, and the level it came from. */
   path: string;
   level: LayerLevel;

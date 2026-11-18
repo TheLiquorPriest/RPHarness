@@ -106,6 +106,8 @@ A header and a body, the text the rule puts in front of an agent. `.rules/exampl
 (shipped) shows every field; a rule under `examples/` is listed and never in force.
 
 - `description:`, and `agents:` (`all`, or a list of definitions: it must be there).
+- `title:` what the rule is called in a person's words, a short phrase with no full stop: the thinking
+  block's line for a rule that fired shows it, the rule's name where there is none.
 - `needs:` names the rule is in force only while each is: a rule, an instruction file, or `<kind>/<name>`.
 - With no trigger the rule is **always on**: its text joins the stack of the agents it names. `turns:`
   hands it over only in the briefings of those kinds of turn instead.

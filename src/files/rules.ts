@@ -48,6 +48,8 @@ export interface Rule {
   /** Its file's name, without `.md`. */
   name: string;
   description: string;
+  /** What it is called in a person's words (`title:`), where its header gives it: the progress line and a page that lists rules show it, by its name. */
+  title?: string;
   /** Who it is for: every agent, or the definitions it names. */
   agents: "all" | string[];
   /** Files it is in force only while they are: a rule's name, or an instruction file's (`TURN`). */
@@ -70,13 +72,20 @@ export interface Rule {
 export interface ReadRule {
   rule?: Rule;
   description: string;
+  title?: string;
   agents: "all" | string[];
   trigger?: RuleTrigger;
   problems: Problem[];
 }
 
+/** A rule as its firing names it: its name, its title where its header gives one, its file and the level the file came from. */
+export function firedRule(rule: Rule): { rule: string; title?: string; path: string; level: Rule["level"] } {
+  return { rule: rule.name, ...(rule.title !== undefined ? { title: rule.title } : {}), path: rule.path, level: rule.level };
+}
+
 const SCOPE_FORM = "`scope:` says where to look: text, thinking, reply, arguments or result, and for a tool's `arguments:<tool>` or `result:<tool>` (`result:*` for any tool)";
 const REPEAT_FORM = "`repeat:` is `once per turn` (what it is when left out), `once per session`, `after 6 turns` or `always`";
+const TITLE_FORM = "`title:` is what the rule is called in a person's words, a short phrase with no full stop, as a list of rules shows it: `title: Perceptions missing for someone who was on stage`";
 
 function parseScope(value: unknown, allowed: readonly RuleScope["watch"][]): RuleScope[] | undefined {
   const items = nameList(value);
@@ -127,6 +136,12 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
 
   if (typeof h.description === "string") read.description = h.description.trim();
   else if (h.description !== undefined) problem("description", "`description:` is one line of text.");
+
+  // What a person calls the rule: a short phrase, read as written; a title that is no text, or ends a sentence, is reported.
+  if (typeof h.title === "string" && h.title.trim() !== "") {
+    read.title = h.title.trim();
+    if (read.title.endsWith(".")) problem("title", `${TITLE_FORM}.`);
+  } else if (h.title !== undefined && h.title !== null) problem("title", `${TITLE_FORM}.`);
 
   const listed = h.agents === "all" ? "all" : nameList(h.agents);
   const agents = Array.isArray(listed) && listed.includes("all") ? "all" : listed;
@@ -218,6 +233,7 @@ export function parseRule(file: FileText, name: string, replaces: Replaced[]): R
   read.rule = {
     name,
     description: read.description,
+    ...(read.title !== undefined ? { title: read.title } : {}),
     agents,
     needs,
     ...(trigger === undefined && turns !== undefined && turns.length > 0 ? { turns } : {}),

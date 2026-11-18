@@ -333,7 +333,7 @@ export interface FileChange {
 // ---------------------------------------------------------------- rules
 
 /** The header fields of a rule. Anything else in its header is reported. */
-export const RULE_FIELDS = ["description", "agents", "needs", "turns", "condition", "case", "scope", "question", "judge", "at", "fact", "command", "every", "repeat", "interrupt", "hold"] as const;
+export const RULE_FIELDS = ["description", "title", "agents", "needs", "turns", "condition", "case", "scope", "question", "judge", "at", "fact", "command", "every", "repeat", "interrupt", "hold"] as const;
 
 // ---------------------------------------------------------------- facts
 

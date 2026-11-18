@@ -14,7 +14,7 @@ import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../l
 import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Question, RuleCommandAnswer, RuleMemory, RuleRun, RuleRunOptions, ToolCallFired, ToolCallSeen } from "./api";
 import type { FactTest } from "./facts";
 import { factFields, factsNamed, holds } from "./facts";
-import type { Rule, RuleScope } from "./rules";
+import { firedRule, type Rule, type RuleScope } from "./rules";
 import { runPattern } from "./pattern";
 
 export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandFailed" | "commandWaiting"> {
@@ -282,7 +282,7 @@ class Run implements RuleRun {
       if (!this.#may(rule, agent)) continue;
       this.#mark(rule, agent);
       out.push({
-        firing: { rule: rule.name, path: rule.path, level: rule.level, moment, ...(test !== undefined && value !== undefined ? { fact: { name: test.name, value } } : {}), ...(command !== undefined ? { matched: "yes" } : {}) },
+        firing: { ...firedRule(rule), moment, ...(test !== undefined && value !== undefined ? { fact: { name: test.name, value } } : {}), ...(command !== undefined ? { matched: "yes" } : {}) },
         text: rule.text.render(factFields(values, test)).text,
       });
     }
@@ -373,7 +373,7 @@ class Run implements RuleRun {
         // On a connection set to remind, a rule that would stop the call fires as `interrupt: never` does, and says why.
         const reminded = rule.when.interrupt && !stops;
         return {
-          firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "stream", watched: scope.watch, matched, ...(reminded ? { reminded: "connection" as const } : {}) },
+          firing: { ...firedRule(rule), moment: "stream", watched: scope.watch, matched, ...(reminded ? { reminded: "connection" as const } : {}) },
           text: rule.text.render({ matched }).text,
           interrupt: rule.when.interrupt && stops,
         };
@@ -402,7 +402,7 @@ class Run implements RuleRun {
     const fired: { fired: Fired; hold: boolean }[] = [];
     for (const { rule, matched, hold } of matches) {
       const text = await this.#fill(rule, agent, { matched, tool: call.tool });
-      fired.push({ fired: { firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "tool-call", watched: "arguments", callId: call.id, tool: call.tool, matched }, text }, hold });
+      fired.push({ fired: { firing: { ...firedRule(rule), moment: "tool-call", watched: "arguments", callId: call.id, tool: call.tool, matched }, text }, hold });
     }
     const holding = fired.find((f) => f.hold);
     return { ...(holding !== undefined ? { hold: holding.fired } : {}), remind: fired.filter((f) => f !== holding).map((f) => f.fired) };
@@ -415,7 +415,7 @@ class Run implements RuleRun {
     const out: Fired[] = [];
     for (const { rule, matched } of matches) {
       const text = await this.#fill(rule, agent, { matched, tool: call.tool });
-      out.push({ firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "tool-result", watched: "result", callId: call.id, tool: call.tool, matched }, text });
+      out.push({ firing: { ...firedRule(rule), moment: "tool-result", watched: "result", callId: call.id, tool: call.tool, matched }, text });
     }
     return out;
   }
@@ -454,7 +454,7 @@ class Run implements RuleRun {
     this.#mark(rule, question.agent);
     const text = await this.#fill(rule, question.agent, {});
     // The judging model's answer is what a question rule "matched" (`RuleFiring.matched`).
-    const fired: Fired = { firing: { rule: rule.name, path: rule.path, level: rule.level, moment: "after-message", watched: question.watched, matched: "yes" }, text };
+    const fired: Fired = { firing: { ...firedRule(rule), moment: "after-message", watched: question.watched, matched: "yes" }, text };
     if (question.watched !== "reply") return { fired, deliver: "now" };
     this.#memory.held.push({ agent: question.agent.definition, firing: fired.firing, text });
     return { fired, deliver: "briefing" };

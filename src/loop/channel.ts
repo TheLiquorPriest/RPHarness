@@ -29,9 +29,12 @@ export interface TextChannel {
   end(message: AssistantMessage): void;
   /** The reply so far, shown and held: what a rule on the reply looks at. */
   readonly reply: string;
+  /** All of the reply the player has been shown. */
+  readonly shown: string;
   /**
-   * The end of what has been shown, for the line an agent goes on under after a rule stopped it.
-   * What the agent writes next is joined to all that was shown, any repeat of its end taken off.
+   * The end of what has been shown, for the line an agent goes on under after a rule stopped it or
+   * its call broke off; empty once the reply was released, being whole. What the agent writes next
+   * is joined to all that was shown, any repeat of its end taken off.
    */
   tail(): string;
   /**

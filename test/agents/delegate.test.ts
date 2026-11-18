@@ -221,7 +221,7 @@ describe("delegate", () => {
     const files = { ".agents/lead.md": LEAD, ".agents/gm.md": gm };
     const lead = { "lead-model": [{ pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule." }, id: "d-1" }] }, { pieces: [{ text: "Settled." }] }] };
 
-    const model = (open = await stage({ files, models: { ...lead, "gm-model": [{ pieces: [{ text: "Half a ru" }], end: { error: "Fixture provider error: overloaded." } }] } }));
+    const model = (open = await stage({ files, models: { ...lead, "gm-model": [{ pieces: [{ text: "Half a ru" }], end: { error: "400: Fixture provider error: a bad request." } }] } }));
     await (await model.play(PLAYER)).done;
     expect(toolResults(model.models["lead-model"]!.requests[1]!.messages)).toEqual(["gm-1 could not go on: a call to its model failed."]);
     await model.close();

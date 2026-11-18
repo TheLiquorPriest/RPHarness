@@ -77,7 +77,7 @@ test("on the fake clock the requests and tokens per minute hold across the agent
   expect((await waiting).errorMessage).toBeUndefined();
   expect([asked(made.sent), heard[2]]).toEqual([["the first run", "the second run", "the job"], [minuteWait(), minuteWait(60_000)]]);
 
-  // A call bigger than the connection's whole minute is not made, and its run is told the limit on the connection.
+  // A call bigger than the connection's whole minute is not made, and its run is told the limit on the connection, and that the call was never made.
   made.clock.advance(60_000);
   made.configs.global = throttled("      tokensPerMinute: 1\n");
   const refused: LayerEvent[] = [];
@@ -85,7 +85,10 @@ test("on the fake clock the requests and tokens per minute hold across the agent
   const hit = refused[0];
   if (hit?.kind !== "limit") throw new Error(`a limit was to be heard, not ${JSON.stringify(refused)}`);
   const estimate = hit.hit.value;
-  expect(refused).toEqual([{ kind: "limit", hit: { limit: "tokensPerMinute", per: "connection", max: 1, value: estimate, connection: "Writer" } }]);
+  expect(refused).toEqual([
+    { kind: "limit", hit: { limit: "tokensPerMinute", per: "connection", max: 1, value: estimate, connection: "Writer" } },
+    { kind: "call_failed", facts: { unmade: true } },
+  ]);
   expect(big.errorMessage).toBe(`This call comes to about ${estimate} tokens, more than the 1 a minute the connection "Writer" takes, so it was not made. The setting "Tokens a minute on a connection" on the Settings page says how many it takes.`);
   expect(made.sent).toHaveLength(3);
 

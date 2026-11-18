@@ -2,6 +2,7 @@
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
 import type { AgentRef, AgentStatus, CallPermission, CallRefusal, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
+import type { RetryTerms } from "../model/failure";
 import type { Fired } from "./rules";
 
 /** What the loop needs of the host's clock: the time, and timers. */
@@ -140,6 +141,8 @@ export interface CallTerms {
   repeats?: number;
   /** Its definition's sampling (`agents.<definition>.sampling`), on each call whose settings give none. */
   sampling?: Sampling;
+  /** How a call that failed is made again (`calls.retries` and the settings beside it); absent, never. */
+  retry?: RetryTerms;
 }
 
 /** Which call is about to be made, for deciding its settings. */

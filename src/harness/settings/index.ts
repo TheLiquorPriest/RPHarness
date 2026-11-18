@@ -25,6 +25,7 @@
 import type { Effort, Environment, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
 import type { AgentDefinition, DefinitionLimits, Guidance } from "../../files/api";
 import type { CallTerms } from "../../loop/types";
+import { RETRIED_KINDS } from "../../model/failure";
 import { AGENTS } from "./agents";
 import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
@@ -485,10 +486,10 @@ export function interruptFor(settings: Settings, connection: { id: string | null
  * How each model call of an agent is measured and sampled (§10.2 l.1165; Appendix D.1 l.2419,
  * l.2421): the characters per token every estimate before a provider counts is made at, the least
  * room an answer is given, the weight of a token read again from the cache, the tool calls an answer
- * runs at once where the definition sets none, the loop's count of the same call in a row, and, for
- * an agent of a definition, that definition's own sampling, on each call whose own settings give
- * none. An agent of no definition (a judging call, the writer of a narrator's reply, which takes the
- * preset's) has no sampling of its own.
+ * runs at once where the definition sets none, the loop's count of the same call in a row, how a
+ * call that failed is made again, and, for an agent of a definition, that definition's own sampling,
+ * on each call whose own settings give none. An agent of no definition (a judging call, the writer of
+ * a narrator's reply, which takes the preset's) has no sampling of its own.
  */
 export function callTerms(settings: Settings, definition?: string): CallTerms {
   const own = definition !== undefined && Object.hasOwn(settings.sampling, definition) ? settings.sampling[definition] : undefined;
@@ -499,6 +500,7 @@ export function callTerms(settings: Settings, definition?: string): CallTerms {
     toolsAtOnce: settings.toolsAtOnce,
     ...(settings.repeats !== undefined ? { repeats: settings.repeats } : {}),
     ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}),
+    retry: { retries: settings.model.retries, wait: settings.model.retryWait, growth: 2, most: Number.POSITIVE_INFINITY, asked: false, kinds: RETRIED_KINDS },
   };
 }
 

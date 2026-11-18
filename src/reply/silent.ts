@@ -38,7 +38,11 @@ export class SilentReply implements TextChannel {
     // The draft is the writer's last message, which its work's outcome carries.
   }
 
-  /** Nothing of a draft was shown. */
+  /** Nothing of a draft is shown. */
+  get shown(): string {
+    return "";
+  }
+
   tail(): string {
     return "";
   }

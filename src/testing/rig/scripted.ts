@@ -39,8 +39,12 @@ export function gate(): Gate {
   };
 }
 
-/** One step of an answer: a piece of text or of thinking (each one delta, split as the script splits it), a tool call, a wait on the rig's clock, or a hold at a gate. */
-export type Piece = { text: string } | { thinking: string; signature?: string } | { call: string; args?: JsonObject; id?: string } | { wait: number } | { hold: Gate };
+/**
+ * One step of an answer: a piece of text or of thinking (each one delta, split as the script splits
+ * it), a tool call, a tool call begun whose arguments are written only so far (`callBegun`, `written`:
+ * for a stream that breaks in the middle of one), a wait on the rig's clock, or a hold at a gate.
+ */
+export type Piece = { text: string } | { thinking: string; signature?: string } | { call: string; args?: JsonObject; id?: string } | { callBegun: string; written: string; id?: string } | { wait: number } | { hold: Gate };
 
 /** The answer's tokens, as a provider reports them: `input` without what was read from the cache or written to it, `output` with the reasoning. */
 export interface ReplyUsage {
@@ -257,6 +261,16 @@ export function scriptedModel(answers: readonly Answer[], options: ScriptedOptio
           if (piece.signature !== undefined) block.thinkingSignature = piece.signature;
           pushed("thinking", piece.thinking);
           out.push({ type: "thinking_delta", contentIndex: at, delta: piece.thinking, partial: message });
+        } else if ("callBegun" in piece) {
+          // A call whose arguments break off: begun, written so far, never ended.
+          close();
+          calls += 1;
+          const call: ToolCall = { type: "toolCall", id: piece.id ?? `call_${request.index + 1}_${calls}`, name: piece.callBegun, arguments: {} };
+          message.content.push(call);
+          const at = message.content.length - 1;
+          out.push({ type: "toolcall_start", contentIndex: at, partial: message });
+          out.push({ type: "toolcall_delta", contentIndex: at, delta: piece.written, partial: message });
+          pushed("call", piece.written);
         } else {
           close();
           calls += 1;

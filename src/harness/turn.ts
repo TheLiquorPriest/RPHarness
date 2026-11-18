@@ -287,7 +287,7 @@ export class Turn {
     const scope = this.scope;
     const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
     this.#guidance = guidance;
-    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, roleNote, file] = await Promise.all([
+    const [settings, places, definition, progress, notices, toolNotices, frame, contract, briefing, carried, goOn, broke, roleNote, file] = await Promise.all([
       readSettings(guidance, env, scope),
       env.files.places(scope),
       guidance.definition(req.lead),
@@ -299,6 +299,7 @@ export class Turn {
       guidance.part("briefing"),
       guidance.part("carried"),
       guidance.part("continue-after-rule"),
+      guidance.part("continue-after-break"),
       guidance.part("role-note"),
       (this.#holding = this.#c.book.hold(scope)).then((held) => held.file),
     ]);
@@ -478,7 +479,7 @@ export class Turn {
     }
     session.openings.set(req.lead, opening);
     this.#opening = opening;
-    this.#texts = runnerTexts(this.#words, template(goOn), settings.schemaShown);
+    this.#texts = runnerTexts(this.#words, template(goOn), template(broke), settings.schemaShown);
 
     let model: AgentModel;
     try {

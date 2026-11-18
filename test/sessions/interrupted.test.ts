@@ -14,7 +14,7 @@ afterEach(async () => {
 const KEEP_TWO = "compaction:\n  keepTurns: 2\n";
 
 test("a summary call that fails writes no summary: the turn goes on with its turns carried as they were, and the compaction asked for waits for the next turn", async () => {
-  const s = (open = await stage({ config: KEEP_TWO, answers: [played(1), played(2), played(3), { pieces: [], end: { error: "Fixture: the provider is down." } }, played(4), said("Fixture summary."), played(5)] }));
+  const s = (open = await stage({ config: KEEP_TWO, answers: [played(1), played(2), played(3), { pieces: [], end: { error: "400: Fixture: the provider refused the request." } }, played(4), said("Fixture summary."), played(5)] }));
   const sessions = s.harness.sessions!;
   await play(s, ["t1", "t2", "t3"]);
   await sessions.compact(S1);

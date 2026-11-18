@@ -6,6 +6,7 @@
 import type { StreamFn, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Model, ModelThinkingLevel } from "@earendil-works/pi-ai";
 import type { ModelLimits, RunScope, ToolsAs, TraceEvent } from "../contract";
+import type { FailureFacts } from "./failure";
 
 /**
  * How hard an agent's model reasons: `inherit` and `auto` leave it to the connection's own effort
@@ -49,13 +50,16 @@ export interface AgentModel {
  * What the layer tells the run an agent's call is made in, beside the call's answer (§13.2): a wait
  * for its connection's throttle, a stand-in connection, a thinking level its provider refused and the
  * level sent instead, or the limit a call cannot be made within (bigger than its connection's whole
- * minute), at which the work ends.
+ * minute), at which the work ends; and, just before a call's answer ends in a failure, what the layer
+ * knew of it (`call_failed`), by which the run sorts it and decides whether to make it again.
  */
-export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "effort_lowered" | "limit" }>;
+export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "effort_lowered" | "limit" }> | { kind: "call_failed"; facts: FailureFacts };
 
-/** What the runner hands an agent's stream function besides pi-ai's options: where the layer tells the agent's run of each such event. Absent: nobody is told. */
+/** What the runner hands an agent's stream function besides pi-ai's options: where the layer tells the agent's run of each such event (absent: nobody is told), and how many times the layer makes a call that failed before any of its answer came again. */
 export interface LayerOptions {
   heard?(event: LayerEvent): void;
+  /** Absent: its connection's own count, else `calls.retries`. A run that makes its failed calls again itself, each a call of its own, says 0. */
+  retries?: number;
 }
 
 export interface ModelSource {

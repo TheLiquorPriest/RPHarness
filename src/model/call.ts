@@ -8,10 +8,13 @@
 // A stream function's contract holds here: nothing throws. A call that can't be made, a failed one
 // and a stopped one each end the stream with an error event, in words: a failure in the provider's
 // own words with its status first, a stop with the reason "aborted", and never a secret the layer
-// holds. A call that failed before any piece of its answer came (its server couldn't be reached, or
-// answered 429 or 5xx) is made again, as many times as its connection says (`calls.retries` where it
-// says nothing), after a wait that starts at `calls.retryWaitSeconds` and doubles each time; one that failed
-// after something came never is. pi-ai's own retries stay off, so these are the only ones.
+// holds. A call that failed before any piece of its answer came is made again here, as many times
+// as its connection says (`calls.retries` where it says nothing), after a wait that starts at
+// `calls.retryWaitSeconds` and doubles each time, unless its caller says it makes it again itself:
+// an agent's run (the runner) does, counting each try as a call against its limits and going on
+// from what of the reply was shown, whenever in the call it broke. For it the layer makes the call
+// once and tells the run what it knew of the failure (`call_failed`: the status, that no server was
+// reached, that its answer went silent, that it was never sent). pi-ai's own retries stay off.
 //
 // Every request carries everything it is about, so that what an agent was sent can be read back
 // whole: Anthropic's message threads, where pi-ai sends a later request only what is new and the
@@ -64,6 +67,7 @@ import { limitsOf } from "./limits";
 import type { Refusals } from "./refusals";
 import type { AgentChoice, LayerEvent, LayerOptions, ModelEffort, UserChoice } from "./source";
 import type { Hold, Throttle, Throttles } from "./throttle";
+import type { FailureFacts } from "./failure";
 import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
@@ -143,7 +147,7 @@ export interface CallAsk {
   sessionId?: string;
   /** How the agent's tools are offered; absent: `auto`. */
   toolsAs?: ToolsAs;
-  /** How many times a call that failed before any piece of its answer came is made again; absent: the connection's own count, else `calls.retries`. */
+  /** How many times a call that failed before any piece of its answer came is made again here; absent: the connection's own count, else `calls.retries`. An agent's run that makes it again itself sets 0. */
   retries?: number;
   /** What the loop's options carry to pi-ai as they are. */
   carried: Pick<SimpleStreamOptions, "identity" | "transport" | "maxRetryDelayMs" | "timeoutMs" | "metadata" | "onResponse" | "onProviderStreamEvent" | "onPayload">;
@@ -461,6 +465,21 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     if (quiet.signal.aborted) return { ...message, content: [...message.content], stopReason: "error", errorMessage: errorWords(quiet.signal.reason) };
     return { ...message, content: [...message.content], stopReason: "error", errorMessage: redact(failedWith(message, kind), await secrets(), settings) };
   };
+  /** What its latest request met; and whether a request went out at all, so a failure before one is a call never made. */
+  const wire: Wire = {};
+  let sending = false;
+  /** Just before its answer ends in a failure, the run is told what the layer knew of it (`call_failed`), so it can sort it and decide whether to make it again. */
+  const report = (ending: AssistantMessage): void => {
+    if (ending.stopReason !== "error") return;
+    const facts: FailureFacts = {
+      ...(wire.status !== undefined ? { status: wire.status } : {}),
+      ...(wire.unreached === true ? { unreached: true } : {}),
+      ...(quiet.signal.aborted ? { silent: true } : {}),
+      ...(!sending ? { unmade: true } : {}),
+      ...(connection.retries !== undefined ? { retries: connection.retries } : {}),
+    };
+    ask.heard?.({ kind: "call_failed", facts });
+  };
   try {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
     const { apiKey, headers } = await signingOf(deps.book, connection, kind);
@@ -522,7 +541,6 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     watch = watching;
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
     const theirs = ask.carried.onPayload;
-    const wire: Wire = {};
     const options: SimpleStreamOptions = {
       ...ask.carried,
       signal: ended,
@@ -579,6 +597,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     const close = (ending: AssistantMessage): void => {
       watching.stop();
       spending(ending);
+      report(ending);
       endWith(out, ending);
     };
     /** One go at the call: `out` ended, or the failure of a go that received nothing, which may be made again. */
@@ -642,6 +661,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     };
 
     const retries = ask.retries ?? connection.retries ?? settings.retries;
+    sending = true;
     for (let tried = 0; ; tried += 1) {
       delete wire.status;
       delete wire.unreached;
@@ -663,7 +683,11 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
         tried -= 1;
         continue;
       }
-      if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) return endWith(out, await failure(failed));
+      if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) {
+        const ending = await failure(failed);
+        report(ending);
+        return endWith(out, ending);
+      }
       const { promise: waited, resolve: wake } = Promise.withResolvers<void>();
       const timer = deps.setTimeout(wake, settings.retryWait * 2 ** tried);
       const woke = await Promise.race([waited, stopped]);
@@ -673,7 +697,9 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   } catch (error) {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
     // Whatever words leave here, no key, token or header's value the layer holds is in them; a connection that broke is said in plain words.
-    endWith(out, emptyAnswer(model, "error", redact(networkWords(errorWords(error)), await secrets(), settings), deps.now()));
+    const ending = emptyAnswer(model, "error", redact(networkWords(errorWords(error)), await secrets(), settings), deps.now());
+    report(ending);
+    endWith(out, ending);
   } finally {
     watch?.stop();
     hold?.settle(spent);
@@ -709,6 +735,7 @@ function askOf(options: SimpleStreamOptions & LayerOptions, choice: UserChoice, 
     ...(options.sessionId !== undefined ? { sessionId: options.sessionId } : {}),
     ...(choice.toolsAs !== undefined ? { toolsAs: choice.toolsAs } : {}),
     ...(options.heard !== undefined ? { heard: options.heard } : {}),
+    ...(options.retries !== undefined ? { retries: options.retries } : {}),
     carried,
   };
 }

@@ -65,6 +65,27 @@ export interface CallPermission {
  */
 export type AgentStatus = "done" | "asked" | "limit" | "stopped" | "failed";
 
+/**
+ * What broke a model call that failed (§13.2), by whether making it again can help. Made again as
+ * the settings say: `connection` (reset, refused, cut, its name not resolved, the stream ended
+ * before the answer did), `timeout` (the answer went silent past `calls.silentAfterSeconds`, the
+ * request timed out), `overloaded` (the provider is busy or asks to slow down), `server` (a fault of
+ * the provider's server), `other` (a failure nothing here names). Never made again, since trying
+ * again cannot help or is not the engine's to decide: `credit` (no credit or quota left), `key` (a
+ * key or sign-in refused), `invalid` (a request the provider calls invalid), `too-long` (a prompt
+ * past the model's window: the run's point makes room instead), `unmade` (the call was never sent:
+ * no key, a switch not on, bigger than the connection's minute).
+ */
+export type CallFailureKind = "connection" | "timeout" | "overloaded" | "server" | "other" | "credit" | "key" | "invalid" | "too-long" | "unmade";
+
+/**
+ * Where in a model call it broke: before any of its answer came (`before`); while it thought
+ * (`thinking`); while it wrote a tool call's arguments (`tool-call`); while it wrote text, the reply
+ * or its working text, none of the reply shown in this call (`text`); after some of the reply was
+ * shown to the player in this call (`shown`).
+ */
+export type CallBreakPoint = "before" | "thinking" | "tool-call" | "text" | "shown";
+
 /** The moments a hook can run at (§5.4 "Hooks"). */
 export type HookEvent =
   | "turn-start"

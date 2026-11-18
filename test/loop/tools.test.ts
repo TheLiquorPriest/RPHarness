@@ -78,14 +78,14 @@ describe("around a tool call", () => {
 });
 
 describe("a model that fails", () => {
-  test("its error ends the work as failed, in the provider's words, and the failed message leaves the transcript", async () => {
-    const { runner, recorder, clock } = rigAgent(author, [{ pieces: [{ text: "Half a thou" }], end: { error: "Fixture provider error: overloaded." } }]);
+  test("an error no try can help ends the work as failed, in the provider's words, and the failed message leaves the transcript", async () => {
+    const { runner, recorder, clock } = rigAgent(author, [{ pieces: [{ text: "Half a thou" }], end: { error: "400: Fixture provider error: a bad request." } }]);
 
     const outcome = await clock.settle(runner.start({ messages: [user("Speak.")] }).done);
 
     expect(outcome.status).toBe("failed");
-    expect(outcome.error).toBe("Fixture provider error: overloaded.");
-    expect(recorder.of("call_ended")[0]!.event).toMatchObject({ stop: "error", error: "Fixture provider error: overloaded.", text: "Half a thou" });
+    expect(outcome.error).toBe("400: Fixture provider error: a bad request.");
+    expect(recorder.of("call_ended")[0]!.event).toMatchObject({ stop: "error", error: "400: Fixture provider error: a bad request.", text: "Half a thou" });
     expect(recorder.of("agent_ended")[0]!.event.status).toBe("failed");
     expect(runner.transcript.at(-1)?.role).toBe("user");
   });

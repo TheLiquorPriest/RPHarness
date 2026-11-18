@@ -83,7 +83,7 @@ export class MessageReply implements TextChannel {
   }
 
   tail(): string {
-    return lastSentences(this.#release.shown, this.#o.tailSentences);
+    return this.#state === "released" ? "" : lastSentences(this.#release.shown, this.#o.tailSentences);
   }
 
   begin(): void {

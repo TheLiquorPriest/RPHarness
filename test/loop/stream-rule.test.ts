@@ -44,6 +44,9 @@ function watched(reply: TagReply): { channel: TextChannel; held: string[] } {
     get reply() {
       return reply.reply;
     },
+    get shown() {
+      return reply.shown;
+    },
     tail: () => reply.tail(),
   };
   return { channel, held };

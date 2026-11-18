@@ -16,7 +16,9 @@
 // nor on the gate. Per message: the text to the reply as it streams, rules on what is written (stop
 // the call, drop what was not shown, go on), the moment each tool call began to be written, and at
 // the moment the work would end, the rules due then as follow-ups. A message that makes no tool call
-// ends the work, unless a rule is due then. Every event goes to the
+// ends the work, unless a rule is due then. A call that failed is made again where trying again can
+// help, as the settings say: what the broken call produced leaves the transcript, and the next try
+// goes on from the end of what the player was shown. Every event goes to the
 // run's trace with the agent and the run it belongs to, and every time the runner writes is the
 // host's clock's; after a stop, nothing but the agent's end.
 //
@@ -28,6 +30,7 @@
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, CallPermission, CallRefusal, Effort, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import { failureOf, retried, retryWait, type FailureFacts } from "../model/failure";
 import type { LayerOptions } from "../model/source";
 import { estimateOf, type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, countLimit, emptyUsage, type Left, type Room } from "./budget";
@@ -47,6 +50,12 @@ export interface RunnerTexts {
    * just before it.
    */
   continueAfterRule(fields: { shown: string } & Partial<ChannelMarks>): string;
+  /**
+   * `.prompts/continue-after-break.md`, filled as `continueAfterRule` is: the line an agent goes on
+   * under when a call to its model broke off once the player had been shown some of the reply, and
+   * the call is made again. Absent or empty, the call is made again as it was.
+   */
+  continueAfterBreak?(fields: { shown: string } & Partial<ChannelMarks>): string;
   /** The answer to a call of a tool the agent does not hold. */
   notFound?(fields: { tool: string }): string | undefined;
   /**
@@ -239,6 +248,12 @@ interface Stint {
   readonly stopped: AbortController;
   /** How many calls in a row the provider refused as too long and went out again. */
   resent: number;
+  /** How many times in a row a call that failed was made again: an answer that ends whole ends the row. */
+  retried: number;
+  /** What the model layer knew of the call under way's failure (`call_failed`), until the run sorts it. */
+  facts?: FailureFacts;
+  /** How much of the reply had been shown when the call under way began. */
+  shownAt: number;
   /** Its hooks at the work's end were asked this stretch. */
   hooked: boolean;
   /**
@@ -400,6 +415,8 @@ export class AgentRunner {
       halted: Promise.withResolvers<void>(),
       stopped: new AbortController(),
       resent: 0,
+      retried: 0,
+      shownAt: 0,
       hooked: false,
     };
     this.#stint = stint;
@@ -448,7 +465,7 @@ export class AgentRunner {
       const cut = stint.cut;
       if (cut === undefined) {
         try {
-          if (failure === undefined && stint.halt === undefined) next = await this.#resend(stint);
+          if (failure === undefined && stint.halt === undefined) next = (await this.#retry(stint)) ?? (await this.#resend(stint));
         } catch (error) {
           failure = error instanceof Error ? error.message : String(error);
         }
@@ -506,13 +523,13 @@ export class AgentRunner {
 
   /**
    * What a call spent, as its provider counted it. A call stopped part-way (a rule's cut, a stop, a
-   * limit) most often has no count from its provider, which sends one at the answer's end: where
+   * limit) or broken off by its provider most often has no count from its provider, which sends one at the answer's end: where
    * something of its answer came back, what it was sent and what it wrote are estimated as every
    * request's tokens are, so the run, its limits and the user's day book what it spent.
    */
   #spent(stint: Stint, message: AssistantMessage): Usage {
     const used = usageOf(message);
-    if (message.stopReason !== "aborted" || message.content.length === 0) return used;
+    if ((message.stopReason !== "aborted" && message.stopReason !== "error") || message.content.length === 0) return used;
     const ratio = this.#o.terms.charsPerToken;
     if (used.input === 0) used.input = requestTokens(stint.callSent, ratio, this.#counted);
     if (used.output === 0) {
@@ -643,6 +660,48 @@ export class AgentRunner {
   }
 
   /**
+   * After a call failed (§13.2), where trying again can help (its kind's switch on, a try left):
+   * what the broken call produced leaves the transcript (its thinking, its text, a tool call it had
+   * not finished, so no tool runs from a call that did not end whole), and after the wait the call goes
+   * out again, a call like any other against every limit. Where some of the reply had been shown, it
+   * goes on from where that ends, under the line that says so, and what it writes is joined to it as
+   * after a rule's cut; else it goes out as it was. A prompt too long for the model is the run's
+   * point's to make room for (`#resend`). Gives the work that sends it again.
+   */
+  async #retry(stint: Stint): Promise<(() => Promise<void>) | undefined> {
+    const terms = this.#o.terms.retry;
+    const last = stint.last;
+    const facts = stint.facts ?? {};
+    stint.facts = undefined;
+    if (terms === undefined || last?.stopReason !== "error" || isContextOverflow(last)) return undefined;
+    const failure = failureOf(last.errorMessage ?? "", facts);
+    if (!retried(terms, failure, stint.retried, facts.retries)) return undefined;
+    const wait = retryWait(terms, stint.retried, failure.asked);
+    stint.retried += 1;
+    this.#pi.state.messages = this.#pi.state.messages.slice(0, stint.callFrom);
+    if (!(await this.#pause(stint, wait))) return undefined;
+    const shown = this.#o.channel?.tail() ?? "";
+    const goOn = shown === "" ? "" : (this.#o.texts.continueAfterBreak?.({ shown, ...this.#o.channel?.marks }) ?? "");
+    if (goOn !== "") {
+      const message = this.#message([goOn]);
+      return () => this.#pi.prompt(message);
+    }
+    // A first call has nothing of the agent's own to go on from.
+    return this.#pi.state.messages.length === 0 ? () => this.#pi.prompt([]) : () => this.#pi.continue();
+  }
+
+  /** Waits `ms` on the host's clock, or until the work stops or reaches a limit: whether it may go on. */
+  async #pause(stint: Stint, ms: number): Promise<boolean> {
+    if (ms > 0 && stint.halt === undefined) {
+      const { promise: waited, resolve } = Promise.withResolvers<void>();
+      const timer = this.#clock.setTimeout(resolve, ms);
+      await Promise.race([waited, stint.halted.promise]);
+      this.#clock.clearTimeout(timer);
+    }
+    return stint.halt === undefined;
+  }
+
+  /**
    * After the provider refused a call as too long (§11): the refused answer leaves the transcript,
    * and the run's point is asked about the request again, with the provider's words. Where it puts
    * something in place, the call goes out again on it, as many times in a row as the run's setting
@@ -699,6 +758,8 @@ export class AgentRunner {
     stint.callThinking = "";
     stint.callStartedAt = now();
     stint.callSent = context.messages;
+    stint.facts = undefined;
+    stint.shownAt = this.#o.channel?.shown.length ?? 0;
     const callTime = this.#o.limits?.callTime;
     if (callTime !== undefined) stint.callTimer = this.#clock.setTimeout(() => this.#halt(stint, { status: "limit", hit: { limit: "callTime", per: "agent", max: callTime, value: this.#clock.now() - stint.callStartedAt, agent: this.agent } }), callTime);
     stint.callFrom = this.#pi.state.messages.length;
@@ -722,7 +783,17 @@ export class AgentRunner {
     });
     let source: Promise<AssistantMessageEventStream>;
     try {
-      const layered: SimpleStreamOptions & LayerOptions = { ...options, ...streamSettings(settings), heard: (event) => (event.kind === "limit" ? this.#halt(stint, { status: "limit", hit: event.hit }) : this.#emit(stint, event)) };
+      const layered: SimpleStreamOptions & LayerOptions = {
+        ...options,
+        ...streamSettings(settings),
+        heard: (event) => {
+          if (event.kind === "call_failed") stint.facts = event.facts;
+          else if (event.kind === "limit") this.#halt(stint, { status: "limit", hit: event.hit });
+          else this.#emit(stint, event);
+        },
+        // The run makes a failed call again itself, each try a call of its own (`#retry`).
+        ...(this.#o.terms.retry !== undefined ? { retries: 0 } : {}),
+      };
       source = Promise.resolve(this.#o.streamFn(model, context, layered));
     } catch (error) {
       source = Promise.reject(error);
@@ -772,8 +843,11 @@ export class AgentRunner {
         if (stint.halt !== undefined) return;
         if (stint.cut === undefined) {
           stint.last = message;
-          // Only refusals one after another are counted against the run's setting: an answer ends the row.
-          if (message.stopReason !== "error") stint.resent = 0;
+          // Only refusals one after another are counted against the run's setting, and only failures one after another against the retries: an answer ends the row.
+          if (message.stopReason !== "error") {
+            stint.resent = 0;
+            stint.retried = 0;
+          }
           // A message the provider failed in the middle of did not end whole: what of it was held back
           // is dropped, as at a cut, and no reply is released on it (§10.7).
           if (message.stopReason === "error" || message.stopReason === "aborted") this.#o.channel?.cut();

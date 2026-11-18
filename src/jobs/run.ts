@@ -115,10 +115,10 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
   const { scope } = ask;
   // Each part rendered for the job's agents keeps the values it was rendered with, for the Prompts page's preview (C17).
   const guidance = loadGuidance(env.files, scope, { rendered: partFields(env.store, scope, env.log) });
-  const [settings, places, toolNotices, goOn] = await Promise.all([readSettings(guidance, env, scope), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule")]);
+  const [settings, places, toolNotices, goOn, broke] = await Promise.all([readSettings(guidance, env, scope), env.files.places(scope), guidance.part("tool-notices"), guidance.part("continue-after-rule"), guidance.part("continue-after-break")]);
   const answers = lines(toolNotices);
   const words: Words = (name, fields) => answers?.line(name, fields);
-  const texts = runnerTexts(words, template(goOn), settings.schemaShown);
+  const texts = runnerTexts(words, template(goOn), template(broke), settings.schemaShown);
   const trace = new RunTrace(core.hub.tee(env.trace, scope, () => settings.liveBacklog), scope, ask.id, env.clock, core.hub.hold(ask.id));
   const todos = new TodoLists();
   const rules = await guidance.ruleRun({

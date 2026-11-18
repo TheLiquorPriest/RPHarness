@@ -216,7 +216,7 @@ describe("the narrator", () => {
       drafted: true,
       answers: [
         { pieces: [{ call: "write_reply", args: { brief: BRIEF } }] },
-        { pieces: [{ text: "The boat" }], end: { error: "Fixture: the connection dropped." } },
+        { pieces: [{ text: "The boat" }], end: { error: "400: Fixture: the request was refused." } },
         { pieces: [{ text: "<reply>No boat tonight.</reply>" }] },
       ],
     }));
@@ -229,8 +229,8 @@ describe("the narrator", () => {
     const line = notices?.format === "lines" ? notices.line("not_written", { writer: "narrator", failed: true }) : undefined;
     expect(line).toBeDefined();
     expect(lastToolResult(s.model.requests[2]!.messages)).toBe(line!);
-    expect(line).not.toContain("Fixture: the connection dropped.");
-    expect(s.logged).toContainEqual(expect.objectContaining({ level: "warn", fields: expect.objectContaining({ writer: "narrator", error: "Fixture: the connection dropped." }) }));
+    expect(line).not.toContain("Fixture: the request was refused.");
+    expect(s.logged).toContainEqual(expect.objectContaining({ level: "warn", fields: expect.objectContaining({ writer: "narrator", error: "400: Fixture: the request was refused." }) }));
   });
 
   test("live: the narrator's words reach the player as they are written, and a closing hand-over ends the turn; two calls", async () => {

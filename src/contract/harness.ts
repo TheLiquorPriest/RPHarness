@@ -573,6 +573,8 @@ export interface DefinitionRun {
   model: string | null;
   /** The effort it thinks at: the settings' for its definition, else the settings' for its connection (`connections.<connection>.effort`), else its definition's, else its connection's own; null for its provider's own default. */
   effort: Effort | null;
+  /** The level its model is sent for `effort`: the same, or the nearest the model has where it has none so high (a model with no `max` is sent `high`); null where the provider's own default stands, or no connection resolves. */
+  sent: Effort | null;
   /** The limits it is held to: its header's, each one the settings set for it standing over it (`~` lifting it); absent where none holds. */
   limits?: DefinitionLimitsView;
 }

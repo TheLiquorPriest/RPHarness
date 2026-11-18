@@ -28,6 +28,7 @@ test("definitions.list gives each definition's resolved connection, model and ef
       ".agents/scribe.md": definition("scribe", ""),
       ".agents/keeper.md": definition("keeper", "model: Floor\n"),
       ".agents/drifter.md": definition("drifter", "model: Gone\neffort: high\n"),
+      ".agents/climber.md": definition("climber", "effort: max\n"),
     },
     answers: [],
   }));
@@ -35,12 +36,14 @@ test("definitions.list gives each definition's resolved connection, model and ef
   const harbour = await s.harness.models.save(USER, { name: "Harbour", provider: "deepseek", auth: "key", model: "harbour-model", effort: "high" }, "sk-harbour-0123456789");
   const floor = await s.harness.models.save(USER, { name: "Floor", provider: "deepseek", auth: "key", model: "floor-model", effort: "medium" }, "sk-floor-0123456789");
   const listed = await s.harness.definitions.list(request("t1").scope);
-  const runsOn = Object.fromEntries(listed.filter((d) => ["lead", "scribe", "keeper", "drifter"].includes(d.name)).map((d) => [d.name, d.runsOn]));
+  const runsOn = Object.fromEntries(listed.filter((d) => ["lead", "scribe", "keeper", "drifter", "climber"].includes(d.name)).map((d) => [d.name, d.runsOn]));
   expect(runsOn).toEqual({
-    lead: { connection: { id: floor.id, name: "Floor" }, model: "floor-model", effort: "low" },
-    scribe: { connection: { id: harbour.id, name: "Harbour" }, model: "harbour-model", effort: "high" },
-    keeper: { connection: { id: floor.id, name: "Floor" }, model: "floor-model", effort: "medium" },
-    drifter: { connection: null, model: null, effort: "high" },
+    lead: { connection: { id: floor.id, name: "Floor" }, model: "floor-model", effort: "low", sent: "low" },
+    scribe: { connection: { id: harbour.id, name: "Harbour" }, model: "harbour-model", effort: "high", sent: "high" },
+    keeper: { connection: { id: floor.id, name: "Floor" }, model: "floor-model", effort: "medium", sent: "medium" },
+    drifter: { connection: null, model: null, effort: "high", sent: null },
+    // Set to max, on a model with no level so high: it is sent the nearest it has.
+    climber: { connection: { id: harbour.id, name: "Harbour" }, model: "harbour-model", effort: "max", sent: "high" },
   });
   // Every definition listed says what it runs on.
   for (const d of listed) expect({ name: d.name, runsOn: d.runsOn !== undefined }).toEqual({ name: d.name, runsOn: true });

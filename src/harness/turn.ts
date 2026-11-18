@@ -657,6 +657,7 @@ export class Turn {
       connection: connection.label,
       session: scope.session,
       thinkingLevel: model.thinkingLevel,
+      ...(model.asked !== undefined ? { effortSet: model.asked } : {}),
       terms: callTerms(settings, this.#lead.definition),
       instructions: opening.text,
       context: messages,
@@ -1181,6 +1182,7 @@ export class Turn {
       connection: connection.label,
       session,
       thinkingLevel: model.thinkingLevel,
+      ...(model.asked !== undefined ? { effortSet: model.asked } : {}),
       // The preset's sampling comes by its settings; a writer has none of its own.
       terms: callTerms(this.#settings),
       tools: held.tools,

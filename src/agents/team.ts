@@ -342,6 +342,7 @@ export class Team implements TeamWork {
       connection: connection.label,
       session,
       thinkingLevel: model.thinkingLevel,
+      ...(model.asked !== undefined ? { effortSet: model.asked } : {}),
       terms: d.terms(definition.name),
       ...(instructions !== "" ? { instructions } : {}),
       // Its brief and what it was given go with each of its requests from pi's request hook, after its opening block (§10.2).

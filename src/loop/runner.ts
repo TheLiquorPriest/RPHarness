@@ -27,7 +27,7 @@
 // files. A text the file does not have leaves the answer empty.
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
-import type { AgentRef, CallPermission, CallRefusal, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import type { AgentRef, CallPermission, CallRefusal, Effort, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import type { LayerOptions } from "../model/source";
 import { estimateOf, type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, countLimit, emptyUsage, type Left, type Room } from "./budget";
@@ -89,6 +89,8 @@ export interface RunnerOptions {
   session: string;
   /** The effort each request is made with, where its settings give none. */
   thinkingLevel?: ThinkingLevel;
+  /** The level its effort is set to (its definition's, a setting's or its connection's), which its model is sent, or the nearest it has (`thinkingLevel`) where it has none so high: for the record. */
+  effortSet?: Effort;
   /** Its instructions, as its definition and the files it reads give them: with its tools, the opening block every request carries first. */
   instructions?: string;
   /**
@@ -402,7 +404,7 @@ export class AgentRunner {
     };
     this.#stint = stint;
     const effort = this.#pi.state.thinkingLevel;
-    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, session: this.#o.session, given: options.given ?? [], ...(this.#o.listSize !== undefined ? { tools: this.#o.listSize } : {}), ...(this.#o.judges !== undefined ? { judges: this.#o.judges } : {}) });
+    this.#emit(stint, { kind: "agent_started", definition: this.agent.definition, connection: this.#o.connection, model: this.#pi.state.model.id, effort, ...(this.#o.effortSet !== undefined ? { set: this.#o.effortSet } : {}), session: this.#o.session, given: options.given ?? [], ...(this.#o.listSize !== undefined ? { tools: this.#o.listSize } : {}), ...(this.#o.judges !== undefined ? { judges: this.#o.judges } : {}) });
     const time = this.#o.limits?.time;
     if (time !== undefined) {
       stint.timer = this.#clock.setTimeout(() => {

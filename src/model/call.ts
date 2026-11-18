@@ -119,6 +119,8 @@ export interface CallShape {
   limits: ModelLimits;
   /** The level the model is asked to think at; undefined where it is asked not to think, or left to its provider. */
   reasoning: ThinkingLevel | undefined;
+  /** The level the choice set (its effort, or the connection's own), before it was fitted to the levels the model has; absent where the provider's own default stands. */
+  asked?: ModelThinkingLevel;
   /** The effort is the provider's own default: no switch is sent, and its model may think. */
   providerDefault: boolean;
   /** The connection the agent named is no longer there, and the call goes on the default connection (`used`, by name) with that one's own model. */
@@ -227,7 +229,7 @@ export async function shapeOf(deps: Pick<CallDeps, "pi" | "book">, choice: Agent
     return { connection, kind, model: { ...model, thinkingLevelMap: { ...model.thinkingLevelMap, off: null } }, limits, reasoning: undefined, providerDefault: true };
   }
   const level = clampThinkingLevel(model, asked);
-  return { connection, kind, model, limits, reasoning: level === "off" ? undefined : level, providerDefault: false };
+  return { connection, kind, model, limits, reasoning: level === "off" ? undefined : level, asked, providerDefault: false };
 }
 
 /**

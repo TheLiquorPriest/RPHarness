@@ -12,8 +12,8 @@ export function connectionNamed(list: ConnectionList, model: string | undefined)
   return list.connections.find((c) => c.name === model || c.id === model);
 }
 
-/** What a definition runs on, resolved among the user's connections. */
-export function runOf(list: ConnectionList, definition: { model?: string; effort?: Effort }): DefinitionRun {
+/** What a definition runs on, resolved among the user's connections; the level its model is sent (`sent`) is the model layer's to say (`ModelLayer.sentEffort`). */
+export function runOf(list: ConnectionList, definition: { model?: string; effort?: Effort }): Omit<DefinitionRun, "sent"> {
   const connection = connectionNamed(list, definition.model);
   return {
     connection: connection === undefined ? null : { id: connection.id, name: connection.name },

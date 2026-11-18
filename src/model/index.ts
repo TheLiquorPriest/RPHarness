@@ -31,7 +31,7 @@ import type { Api, Model, Provider } from "@earendil-works/pi-ai";
 import { cleanupSessionResources, createAssistantMessageEventStream, normalizeContext } from "@earendil-works/pi-ai";
 import { registerLazyOAuthFlows } from "@earendil-works/pi-ai/lazy-oauth";
 import { createModels } from "@earendil-works/pi-ai/models";
-import type { ConnectionView, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, Switchable, SwitchesPort, UserScope } from "../contract";
+import type { ConnectionView, Effort, ModelChoice, ModelLimitsEntry, ModelsApi, ModelsPort, Scope, SignInApi, Switchable, SwitchesPort, UserScope } from "../contract";
 import type { ModelSettings } from "../harness/settings";
 import { MODELS } from "../harness/settings/models";
 import { promptMessages } from "../harness/prompt";
@@ -94,6 +94,12 @@ export interface ModelLayerDeps {
 export interface ModelLayer extends ModelSource {
   /** The host's way to the layer. */
   api: ModelsApi;
+  /**
+   * The level an agent of `choice` is sent: the effort it is set to, fitted to the levels its model
+   * has (the nearest it has where it has none so high); null where the provider's own default stands,
+   * or the choice's connection cannot be used.
+   */
+  sentEffort(choice: UserChoice): Promise<Effort | null>;
   /** One of the user's agent sessions ended: what pi-ai keeps for its prompt cache (Anthropic's message threads) under that session of his is let go, and no other user's. */
   ended(user: string, sessionId: string): void;
   /**
@@ -370,7 +376,11 @@ export function createModelLayer(deps: ModelLayerDeps): ModelLayer {
       // A model of the agent's own: its user's stream function knows the agent's choice by it.
       const model: Model<Api> = { ...shape.model };
       made.set(model, { ...choice });
-      return { model, thinkingLevel: shape.reasoning ?? "off", streamFn: desk.streamFn, limits: shape.limits };
+      return { model, thinkingLevel: shape.reasoning ?? "off", ...(shape.asked !== undefined ? { asked: shape.asked } : {}), streamFn: desk.streamFn, limits: shape.limits };
+    },
+    async sentEffort(choice) {
+      const shape = await shapeOf(deskOf(choice.user).calls, choice).catch(() => undefined);
+      return shape === undefined || shape.providerDefault ? null : (shape.reasoning ?? "off");
     },
     api,
     ended(user, sessionId) {

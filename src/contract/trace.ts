@@ -89,14 +89,16 @@ export type TraceEvent =
   /** A run began: a turn, a job's run, or a talk with an agent; `lead` is the definition it started with. */
   | { kind: "run_started"; run: "turn" | "job" | "talk"; turn?: TurnKind; lead: string }
   /**
-   * An agent began work, on its model, in its own session, with what it was given by name. `tools`:
-   * the size of the fixed list its requests declare, in tokens as the model layer counts a call's
-   * tools, and the user's `tools.fixedTokens`; it is over where `tokens` passes `most`, and nothing is
-   * refused for that (a lead's). `judges`: the call is a judging model's (§5.4), answering the
-   * question rule `rule` about a message of the agent `agent` (its handle), so the live view shows a
-   * judge, not another author.
+   * An agent began work, on its model, in its own session, with what it was given by name. `effort`:
+   * the level its model is sent; `set`: the level it is set to (by its definition, a setting or its
+   * connection), which differs where the model has no level so high and is sent the nearest it has,
+   * and is absent where the provider's own default stands. `tools`: the size of the fixed list its requests
+   * declare, in tokens as the model layer counts a call's tools, and the user's `tools.fixedTokens`;
+   * it is over where `tokens` passes `most`, and nothing is refused for that (a lead's). `judges`: the
+   * call is a judging model's (§5.4), answering the question rule `rule` about a message of the agent
+   * `agent` (its handle), so the live view shows a judge, not another author.
    */
-  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } }
+  | { kind: "agent_started"; definition: string; connection: string; model: string; effort?: Effort; set?: Effort; session: string; given: string[]; tools?: { tokens: number; most: number }; judges?: { rule: string; agent: string } }
   /**
    * A tool an agent's list names is not held (§6.8), told once a session and definition: its
    * definition lists a name nobody registered (`unregistered`); a host's tool takes a name of RPH's

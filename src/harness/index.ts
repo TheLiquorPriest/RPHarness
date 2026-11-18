@@ -216,7 +216,9 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
             const on = connectionNamed(connections, view.model);
             const effort = agentEffort(settings, view, on === undefined ? undefined : { id: on.id, name: on.name });
             const run = runOf(connections, { ...(view.model !== undefined ? { model: view.model } : {}), ...(effort !== undefined ? { effort } : {}) });
-            return { ...view, runsOn: { ...run, ...(limits !== undefined ? { limits: limitsWritten(limits) } : {}) } };
+            // The level its model is really sent: the nearest it has where it has none as high as the one set.
+            const sent = run.connection === null || run.effort === null ? null : await layer.sentEffort({ user: scope.user, scope, connectionId: run.connection.id, model: null, effort: run.effort });
+            return { ...view, runsOn: { ...run, sent, ...(limits !== undefined ? { limits: limitsWritten(limits) } : {}) } };
           }),
         );
       },

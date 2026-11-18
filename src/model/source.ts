@@ -38,6 +38,8 @@ export interface AgentModel {
   model: Model<Api>;
   /** `initialState.thinkingLevel`. */
   thinkingLevel: ThinkingLevel;
+  /** The level its choice set (its definition's, a setting's or its connection's), before it was fitted to the levels the model has (`thinkingLevel` is what it is sent); absent where the provider's own default stands. */
+  asked?: ModelThinkingLevel;
   /** The agent's `streamFn`. */
   streamFn: StreamFn;
   limits: ModelLimits;

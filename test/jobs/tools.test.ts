@@ -205,7 +205,7 @@ describe("a start that is refused", () => {
   });
 
   test("past the day's tokens it is the refusal with max and value", async () => {
-    const s = (open = await stage({ config: "jobs:\n  tokensPerDay: 300\n", files: FILES, answers: [{ pieces: [{ text: "Counted seven." }], usage: { input: 250, output: 100 } }] }));
+    const s = (open = await stage({ config: "jobs:\n  tokensPerDay: 300\nlimits:\n  minAnswerTokens: 1\n", files: FILES, answers: [{ pieces: [{ text: "Counted seven." }], usage: { input: 250, output: 100 } }] }));
     const first = jobOf(await s.harness.jobs.start(request("t1").scope, { agent: "keeper", brief: BRIEF }));
     await s.trace.seen((record) => record.event.kind === "job" && record.event.job.id === first.id && record.event.job.state === "done");
 

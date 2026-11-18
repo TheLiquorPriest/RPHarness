@@ -98,10 +98,10 @@ describe("a job cut off by a restart", () => {
     const held = gate();
     const slow = { ...NOTE, run: async () => (await held.opened, said("Noted the count.")) };
     const s = (open = await stage({
-      config: "jobs:\n  tokensPerDay: 300\n",
+      config: "jobs:\n  tokensPerDay: 400\nlimits:\n  minAnswerTokens: 1\n",
       files: { ".agents/keeper.md": KEEPER },
       tools: { note: slow },
-      answers: [{ pieces: [{ text: "Counted three so far." }, { call: "note" }], usage: { input: 250, output: 100 } }],
+      answers: [{ pieces: [{ text: "Counted three so far." }, { call: "note" }], usage: { input: 350, output: 100 } }, { pieces: [{ text: "Counted four." }] }],
     }));
     await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF });
     // Its first call has ended and its tool is under way: the job has not ended, and the day already holds the call.
@@ -109,7 +109,7 @@ describe("a job cut off by a restart", () => {
 
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
-      expect(await again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).toEqual({ refused: "day-tokens", max: 300, value: 350 });
+      expect(await again.jobs!.start(request("t2").scope, { agent: "keeper", brief: BRIEF })).toEqual({ refused: "day-tokens", max: 400, value: 450 });
     } finally {
       held.open();
       await again.close();

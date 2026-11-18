@@ -33,7 +33,7 @@ the user and its session.
 | `searchers` (`Searcher[]`) | `name`, `search` | What `gap_check` searches besides the chat and lore (a host's records); none is a fine answer. |
 | `stores` (`StoresPort`, optional) | `list`, `search`, `read` | Other stores `archive_search` reads: databanks, memory, summaries. |
 | `web` (`WebSearchPort`, optional) | `enabled`, `search` | The web searcher; `web_search` says it is off until `enabled` is true. |
-| `facts` (`FactsPort`) | `defs`, `read` | Named facts of the moment the rules test and the briefing shows, read as of the scope's turn. |
+| `facts` (`FactsPort`) | `defs`, `read` | Named facts of the moment the rules test and the briefing shows, read as of the scope's turn and for the agent they are read for (a rule due for it, the lead's briefing), so a fact of what an agent can put right counts that agent's own. |
 | `models` (`ModelsPort`) | `loadConnections`, `saveConnections`, `loadSecrets`, `saveSecrets` | Storage for each user's connections document and secrets document, whole, never another user's. Keys are never in the connections, never in the file tree, a transcript or a page. |
 | `store` (`StorePort`) | `get`, `set`, `update`, `delete`, `list`, `jobs` | Small durable JSON per user under keys, and the job records (`jobs`: `get`, `set`, `list` a page at a time, `prune`). |
 | `trace` (`TracePort`) | `event`, `delta`, `flush` | Everything RPH does, as records in order; streamed text as deltas; `flush` waits for them to be written. |

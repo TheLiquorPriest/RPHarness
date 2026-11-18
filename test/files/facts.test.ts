@@ -62,4 +62,11 @@ describe("the registry", () => {
     expect(await facts.read(scope, author, ["todo.open", "reply.released", "stage.unperceived", "no.such"])).toEqual({ "todo.open": { count: 2 }, "stage.unperceived": { count: 3 } });
     expect(asked).toEqual([["stage.unperceived"]]);
   });
+
+  test("tells the host whom they are read for, so a fact of what an agent can put right counts that agent's own", async () => {
+    const asked: (string | undefined)[] = [];
+    const facts = createFacts({ ...host, read: async (s, names, agent) => (asked.push(agent?.id), host.read(s, names)) }, () => ({}));
+    await facts.read(scope, author, ["stage.unperceived"]);
+    expect(asked).toEqual([author.id]);
+  });
 });

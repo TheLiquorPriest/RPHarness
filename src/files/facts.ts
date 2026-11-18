@@ -31,7 +31,8 @@ export const createFacts: CreateFacts = (host, own) => {
       const declared = new Set(hostDefs().map((d) => d.name));
       const theirs = wanted.filter((n) => declared.has(n));
       const empty: Record<string, FactValue | undefined> = {};
-      const [ownValues, hostValues] = await Promise.all([mine.length > 0 ? own(scope, agent) : empty, theirs.length > 0 ? host.read(scope, theirs) : empty]);
+      // The host is told whom they are read for, so a fact of what an agent can put right counts that agent's own.
+      const [ownValues, hostValues] = await Promise.all([mine.length > 0 ? own(scope, agent) : empty, theirs.length > 0 ? host.read(scope, theirs, agent) : empty]);
       const out: Record<string, FactValue> = {};
       for (const n of mine) {
         const v = (ownValues as Record<string, FactValue | undefined>)[n];

@@ -1,7 +1,8 @@
 // Claims b and h (§18.1 row 0.2, §13.3, §5.4): a rule due at a run's end puts its text in as a
-// follow-up and the agent gets exactly one more call. After the reply went out, a second reply gets
-// the same plain line in every form (§10.7): a reply tag, or in the two-step form a message of text
-// with no work left, is answered once in the generation, never in a loop.
+// follow-up and the agent gets exactly one more call. After the reply went out, a reply tag gets the
+// plain line (§10.7), once in the generation, never in a loop; plain text after the reply is working
+// text in every form, as text after the tag form's closing tag is: never shown, answered with nothing,
+// and the message it ends ends the run, so it costs no call.
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import type { Fired, RunEndRules } from "../../src/loop";
@@ -61,34 +62,34 @@ describe("after the reply went out", () => {
     return rules;
   }
 
-  /** The two-step form, with the second-reply line, which it says as the tag form says it. */
+  /** The two-step form: it is given no second-reply line, since plain text is all it reads and plain text is never a second reply. */
   function twoStep(sink: SinkRecorder, stream: boolean, claim?: () => boolean): MessageReply {
-    const options = { sink, stream, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, second: SECOND, ...(claim !== undefined ? { claim } : {}) };
+    const options = { sink, stream, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, ...(claim !== undefined ? { claim } : {}) };
     return new MessageReply(options);
   }
 
-  for (const stream of [false, true]) {
-    const form = stream ? "the two-step form, streamed" : "the two-step form";
-
-    test(`in ${form}, a message of text alone after the reply is a second reply: shown to nobody, and answered with the plain line once, as in the tag form, after the rules due at the run's end`, async () => {
+  for (const form of ["tags", "two-step", "two-step, streamed"] as const) {
+    test(`in the ${form} form, the text alone that answers a rule due after the reply is working text: shown to nobody, answered with nothing, and the run ends on it`, async () => {
       const sink = new SinkRecorder();
-      const reply = twoStep(sink, stream);
+      const reply = form === "tags" ? new TagReply({ tags, sink, heldSentences: 0, tailSentences: DEFAULT_SETTINGS.tailSentences, second: SECOND }) : twoStep(sink, form !== "two-step");
       const rules = onceAtEnd();
-      const { runner, scripted, clock } = rigAgent(author, [{ pieces: [{ text: "The lamp flares." }] }, { pieces: [{ text: "The oil runs low; nothing else changed." }] }, { pieces: [{ text: "Understood." }] }], { channel: reply, runEnd: rules });
+      const first = form === "tags" ? "<reply>The lamp flares.</reply>" : "The lamp flares.";
+      const { runner, scripted, clock } = rigAgent(author, [{ pieces: [{ text: first }] }, { pieces: [{ text: "The oil runs low; nothing else changed." }] }, { pieces: [{ text: "Understood." }] }], { channel: reply, runEnd: rules });
 
       const outcome = await clock.settle(runner.start({ messages: [user("Light the lamp.")] }).done);
 
       expect(outcome.status).toBe("done");
       expect(rules.fired).toBe(1);
-      expect(scripted.requests).toHaveLength(3);
-      // The rule due at the run's end went in after the reply's message; the text alone after it was a second reply, answered with the line, and the run ended on the next.
+      // The rule due at the run's end went in after the reply's message; the text that answered it was the run's last call.
+      expect(scripted.requests).toHaveLength(2);
       expect(scripted.requests[1]!.messages.filter((message) => message.role === "user").map(textOf)).toEqual(["Light the lamp.", AFTER]);
-      expect(scripted.requests[2]!.messages.filter((message) => message.role === "user").map(textOf)).toEqual(["Light the lamp.", AFTER, SECOND]);
       expect(sink.text).toBe("The lamp flares.");
       expect(reply.released).toBe(true);
     });
+  }
 
-    test(`in ${form}, text alone after the reply went out another way (a file released) is answered the same way`, async () => {
+  for (const stream of [false, true]) {
+    test(`in the two-step form${stream ? ", streamed" : ""}, text alone after the reply went out another way (a file released) is working text: the run ends on it`, async () => {
       const desk = new ReplyDesk();
       desk.claim("file");
       desk.out();
@@ -99,8 +100,7 @@ describe("after the reply went out", () => {
       const outcome = await clock.settle(runner.start({ messages: [user("Light the lamp.")] }).done);
 
       expect(outcome.status).toBe("done");
-      expect(scripted.requests).toHaveLength(2);
-      expect(textOf(scripted.requests[1]!.messages.at(-1)!)).toBe(SECOND);
+      expect(scripted.requests).toHaveLength(1);
       expect(sink.text).toBe("");
       expect(reply.released).toBe(false);
     });

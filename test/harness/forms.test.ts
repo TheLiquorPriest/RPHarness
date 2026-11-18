@@ -302,12 +302,12 @@ describe("one reply per generation", () => {
     expect(textOf(told)).toBe(SECOND);
   });
 
-  test("two-step: a second reply in one generation gets the plain line", async () => {
+  test("two-step: text with no call after the reply went out is working text, as after a tagged reply's closing tag: never shown, and the run ends on it", async () => {
     const s = (open = await stage({
       config: "reply:\n  form: two-step\n",
       files: { "chats/wren-hale/lighthouse/persistent-workspace/draft.md": "Wren shakes her head.\n" },
       answers: [
-        // The reply goes out as a file; the message after it, text with no call, is a second reply.
+        // The reply goes out as a file; the message after it, text with no call, is the lead's working text.
         { pieces: [{ call: "reply_release", args: { path: "persistent-workspace/draft.md" } }] },
         { pieces: [{ text: "On second thought, a boat." }] },
         { pieces: [{ text: "Understood." }] },
@@ -318,9 +318,6 @@ describe("one reply per generation", () => {
 
     expect(outcome).toMatchObject({ status: "released", form: "file", reply: "Wren shakes her head.\n" });
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["Wren shakes her head.\n"]);
-    expect(s.model.requests).toHaveLength(3);
-    const told = s.model.requests[2]!.messages.at(-1)!;
-    expect(told.role).toBe("user");
-    expect(textOf(told)).toBe(SECOND);
+    expect(s.model.requests).toHaveLength(2);
   });
 });

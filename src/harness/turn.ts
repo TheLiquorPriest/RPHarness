@@ -652,7 +652,6 @@ export class Turn {
             heldSentences: holdBack,
             tailSentences: settings.tailSentences,
             claim: () => this.#desk.claim("message"),
-            ...(second !== undefined ? { second } : {}),
             onBegin: () => this.#say("writing"),
             onReleased: (text) => this.#release(text, "message", this.#lead),
             ...(check !== undefined ? { beforeRelease: check } : {}),
@@ -1163,7 +1162,6 @@ export class Turn {
     if (givesPrompt && req.prefill !== undefined && req.prefill !== "") messages.push(placed(assistantMessage(req.prefill, model.model, at), "prompt"));
     const rules = this.#rulesRun();
     const streamRules = rules.stream(ref);
-    const second = words("second_reply");
     const check = live ? await this.#releaseCheck(ref, "narrator-live") : undefined;
     const shown = live
       ? new MessageReply({
@@ -1172,7 +1170,6 @@ export class Turn {
           heldSentences: heldSentences(streamRules, this.#settings.heldSentences),
           tailSentences: this.#settings.tailSentences,
           claim: () => this.#desk.claim("narrator-live"),
-          ...(second !== undefined ? { second } : {}),
           onBegin: () => this.#say("writing"),
           onReleased: (text) => this.#release(text, "narrator-live", ref),
           ...(check !== undefined ? { beforeRelease: check } : {}),

@@ -7,10 +7,10 @@
 // stream anyway): the text goes out as it is written, held back by sentences while a rule that
 // interrupts covers it, as the tag form does, and the message's end releases it.
 //
-// Once the reply went out, this way or another, a message's text is never shown. A message that
-// would have been the reply (its text, with no work left after it) is an attempt at a second reply:
-// the agent is told so after the message, in a file's words, once in the generation, as in the tag
-// form, so a second reply never buys it call after call. Any other message's text is working text.
+// Once the reply went out, this way or another, a message's text is never shown: it is working text,
+// kept in the trace, as the tag form keeps text after its reply's closing tag, and nothing answers it,
+// so it costs no call. A message of text with no call after the reply ends the run as any such
+// message does; a second reply is refused only where one is asked for, by a call that releases one.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ReplySink } from "../contract";
 import type { ChannelMarks, TextChannel } from "../loop/channel";
@@ -29,12 +29,9 @@ export interface MessageReplyOptions {
   /**
    * Asked just before the reply's first text is shown, never sooner (a reply cut before anything of
    * it showed takes nothing): false when the reply is another form's, or went out already; none of
-   * this message is then shown, and if it would have been the reply, the agent is told so.
-   * Absent: always this form's.
+   * this message is then shown, and its text is working text. Absent: always this form's.
    */
   claim?(): boolean;
-  /** The line, from a file, that answers a reply that was not shown because one was already given. Absent: nothing is said. */
-  second?: string;
   /** The reply begins to show: its first text is about to go out. */
   onBegin?(): void;
   /** The reply is complete and was sent on: once. */
@@ -54,8 +51,6 @@ export class MessageReply implements TextChannel {
   #message = "";
   /** This message's text is not the reply's to show: the reply went out another way, or another way has it. */
   #unshown = false;
-  /** A reply was attempted that could not be shown: the agent is told after the message, once in the generation. */
-  #second: "unsaid" | "due" | "said" = "unsaid";
   /** Each check by his before-release hooks, numbered: one a cut took back since answers nothing. */
   #checks = 0;
   #checking: Promise<void> | undefined;
@@ -114,20 +109,16 @@ export class MessageReply implements TextChannel {
   }
 
   end(message: AssistantMessage): void {
-    // The message's text with no work left after it (no tool call): the reply, or an attempt at a second one.
-    const replies = this.#message.trim() !== "" && message.content.every((part) => part.type !== "toolCall");
-    if (this.#state === "released" || this.#state === "checking" || this.#unshown) {
-      if (replies) this.#notShown();
-      return;
-    }
+    if (this.#state === "released" || this.#state === "checking" || this.#unshown) return;
     if (this.#o.stream) {
       if (this.#state !== "open") return;
     } else {
-      if (!replies) return;
+      // The message's text with no work left after it (no tool call) is the reply; any other message's is working text.
+      if (this.#message.trim() === "" || message.content.some((part) => part.type === "toolCall")) return;
       this.#release.hold(this.#message);
     }
-    if (this.#o.beforeRelease !== undefined) this.#check(this.#o.beforeRelease, replies);
-    else this.#out(replies);
+    if (this.#o.beforeRelease !== undefined) this.#check(this.#o.beforeRelease);
+    else this.#out();
   }
 
   settled(): Promise<void> {
@@ -135,20 +126,16 @@ export class MessageReply implements TextChannel {
   }
 
   answers(): string[] {
-    const kept = this.#kept.splice(0);
-    if (this.#second !== "due") return kept;
-    this.#second = "said";
-    return this.#o.second !== undefined ? [...kept, this.#o.second] : kept;
+    return this.#kept.splice(0);
   }
 
-  /** Sends the reply on whole, and it is released; not this form's, it is not shown, and a message that would have been the reply is told so. */
-  #out(replies: boolean): void {
+  /** Sends the reply on whole, and it is released; not this form's, none of it is shown. */
+  #out(): void {
     if (this.#flush(true)) this.#finish();
-    else if (replies) this.#notShown();
   }
 
   /** His before-release hooks read the whole reply: it goes out once they let it; a block drops it, and the agent is told why. */
-  #check(hooks: ReleaseCheck, replies: boolean): void {
+  #check(hooks: ReleaseCheck): void {
     this.#state = "checking";
     const at = ++this.#checks;
     hooks.waits();
@@ -159,18 +146,13 @@ export class MessageReply implements TextChannel {
         if (at !== this.#checks || this.#state !== "checking") return;
         if (reason === undefined) {
           this.#state = "open";
-          this.#out(replies);
+          this.#out();
           return;
         }
         this.#release.drop();
         this.#state = "none";
         this.#kept.push(reason);
       });
-  }
-
-  /** A reply this form does not show: the agent is told after the message, once in the generation. */
-  #notShown(): void {
-    if (this.#second === "unsaid") this.#second = "due";
   }
 
   /** Sends on what may be shown. False when the reply was not this form's as its first text was to go out: none of this message is shown. */

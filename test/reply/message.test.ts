@@ -3,7 +3,6 @@ import { describe, expect, test } from "bun:test";
 import { MessageReply, ReplyDesk } from "../../src/reply";
 
 const anyMessage = { content: [] } as unknown as AssistantMessage;
-const SECOND = "Fixture line: the reply already went out.";
 
 describe("the reply as a message's text", () => {
   test("streamed, the reply is taken only as its first text goes out: one cut before anything of it showed leaves it free for another way", () => {
@@ -33,11 +32,11 @@ describe("the reply as a message's text", () => {
     expect(channel.released).toBe(true);
   });
 
-  test("after release, a second message of plain text with no calls gets the second_reply line and nothing reaches the sink", () => {
+  test("after release, a message of plain text with no calls is working text, as text after a reply's closing tag is: nothing reaches the sink, and nothing answers it", () => {
     const desk = new ReplyDesk();
     const sent: string[] = [];
     const released: string[] = [];
-    const channel = new MessageReply({ sink: { content: (text) => sent.push(text) }, stream: false, heldSentences: 0, tailSentences: 2, claim: () => desk.claim("message"), second: SECOND, onReleased: (text) => released.push(text) });
+    const channel = new MessageReply({ sink: { content: (text) => sent.push(text) }, stream: false, heldSentences: 0, tailSentences: 2, claim: () => desk.claim("message"), onReleased: (text) => released.push(text) });
     const message = (text: string): void => {
       channel.begin();
       channel.write(text);
@@ -48,13 +47,9 @@ describe("the reply as a message's text", () => {
     expect(sent).toEqual(["Wren shakes her head."]);
     expect(channel.answers()).toEqual([]);
     desk.out();
-    message("On second thought, a boat.");
-    expect(sent).toEqual(["Wren shakes her head."]);
-    expect(released).toEqual(["Wren shakes her head."]);
-    expect(channel.answers()).toEqual([SECOND]);
-    // Told once in the generation: a third attempt buys no further call.
-    message("A boat after all.");
-    expect(channel.answers()).toEqual([]);
-    expect(sent).toEqual(["Wren shakes her head."]);
+    for (const text of ["The tide turned; nothing else changed.", "A boat after all."]) {
+      message(text);
+      expect({ sent, released, answers: channel.answers() }).toEqual({ sent: ["Wren shakes her head."], released: ["Wren shakes her head."], answers: [] });
+    }
   });
 });

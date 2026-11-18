@@ -1,15 +1,19 @@
 // What a turn does with its prompt at its start (§4.8 "What code does every turn"), and what a
-// chat's turns' prompts held, kept through the host's store under the chat's scope so that the next
-// turn, or a swipe of one, is compared with the turn it follows, and a page or a job started from a
-// turn reads it back. RPH keeps no count of turns and reads no retention setting: what it kept of a
-// turn's prompt is read only while the host still keeps the turn's folder, and is let go once that
-// folder is gone, whatever the host prunes its folders by. RPH never makes a turn folder's path
-// itself: when it keeps a turn it asks the host for the turn's place (`FilesPort.places`), in the
-// session the turn played in, and it looks there.
-import type { AgentRef, Environment, FilesPort, JsonObject, JsonValue, LocatedSlices, PromptMap, PromptMessage, Scope, StorePort } from "../contract";
+// chat's turns' prompts held, so that the next turn, or a swipe of one, is compared with the turn it
+// follows, and a page or a job started from a turn reads it back. Each turn's prompt is kept in a file
+// of RPH's own at the top of the turn's folder (`KEPT_FILE`), where the host placed the folder
+// (`FilesPort.places`): it lasts as long as the host keeps that part of the turn's folder, and goes
+// with the snapshots a host prunes from older turn folders (RPE by its `retention.turnFolders`). RPH
+// keeps no count of turns, reads no retention setting and never makes a turn folder's path itself. The
+// host's store keeps only the chat's list of kept turns, each with the session it played in and its
+// folder, the newest last; a turn whose file is gone is let go of the list.
+import type { AgentRef, Environment, FileMissing, FilesPort, FileText, JsonObject, JsonValue, LocatedSlices, PromptMap, PromptMessage, Scope, StorePort } from "../contract";
 import { TurnPrompt } from "./prompt";
 import { locatedOf, type PromptRecord, recordOf } from "./shape";
 import { messageText, textHash } from "./text";
+
+/** RPH's file at the top of a turn's folder that keeps the turn's prompt: each message's role, name and text, where its slices were found, and what it held. */
+const KEPT_FILE = "kept-prompt.json";
 
 /** The store key of a chat's kept turns. */
 function keyOf(scope: Scope): string {
@@ -34,46 +38,52 @@ function keptOf(value: JsonValue | undefined): KeptTurn[] {
   });
 }
 
-/** What is kept of one turn's prompt: its messages as text, where its slices were found, and what it held for the comparison of the turn after. */
+/** What a turn's file keeps of its prompt: its messages as text, where its slices were found, and what it held for the comparison of the turn after. */
 interface Held {
   messages: PromptMessage[];
   located: LocatedSlices;
   record: PromptRecord;
 }
 
-function heldOf(value: JsonValue | undefined): Held | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
-  return Array.isArray(value["messages"]) && typeof value["record"] === "object" && value["record"] !== null ? (value as unknown as Held) : undefined;
+/** A turn's file read as what it keeps; undefined where it does not read as that. */
+function heldOf(text: string): Held | undefined {
+  try {
+    const value = JSON.parse(text) as unknown;
+    if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+    const { messages, record } = value as Record<string, unknown>;
+    return Array.isArray(messages) && typeof record === "object" && record !== null ? (value as Held) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
-/** What a chat's turns' prompts held, kept through the host's store for as long as the host keeps each turn's folder. */
+/** What a chat's turns' prompts held, each kept in its turn's folder for as long as the host keeps it there. */
 export class PromptMemory {
   readonly #store: StorePort;
-  readonly #files: Pick<FilesPort, "places" | "read">;
+  readonly #files: Pick<FilesPort, "places" | "read" | "write">;
 
-  constructor(store: StorePort, files: Pick<FilesPort, "places" | "read">) {
+  constructor(store: StorePort, files: Pick<FilesPort, "places" | "read" | "write">) {
     this.#store = store;
     this.#files = files;
   }
 
-  /** Whether the host still keeps a kept turn's folder, looked at where the host placed it, in the session the turn played in; undefined where the host could not say, so nothing is let go on it. */
-  async #folderKept(scope: Scope, kept: KeptTurn): Promise<boolean | undefined> {
+  /** A kept turn's file, looked at in the folder the host placed the turn in, in the session the turn played in; undefined where the host could not say. */
+  async #file(scope: Scope, kept: KeptTurn): Promise<FileText | FileMissing | undefined> {
     const at: Scope = { user: scope.user, chat: scope.chat, session: kept.session, turn: kept.turn };
-    const looked = await this.#files.read(at, kept.folder).catch(() => undefined);
-    if (looked === undefined || looked.status === "refused") return undefined;
-    return looked.status === "missing" && looked.folder === true;
+    const file = await this.#files.read(at, `${kept.folder}${KEPT_FILE}`).catch(() => undefined);
+    return file?.status === "refused" ? undefined : file;
   }
 
-  /** The kept turn `turn` (`undefined`: the chat's newest kept) and what is kept of its prompt, while the host keeps its folder. */
+  /** The kept turn `turn` (`undefined`: the chat's newest kept) and what its file keeps, while the host keeps the file. */
   async #found(scope: Scope, turn: string | undefined): Promise<{ kept: KeptTurn; held: Held } | undefined> {
     const all = keptOf(await this.#store.get(scope, keyOf(scope)));
     const kept = turn === undefined ? all.at(-1) : all.find((k) => k.turn === turn);
-    if (kept === undefined || (await this.#folderKept(scope, kept)) !== true) return undefined;
-    const held = heldOf(await this.#store.get(scope, heldKey(scope, kept.turn)));
-    return held === undefined ? undefined : { kept, held };
+    const file = kept === undefined ? undefined : await this.#file(scope, kept);
+    const held = file?.status === "read" ? heldOf(file.text) : undefined;
+    return kept === undefined || held === undefined ? undefined : { kept, held };
   }
 
-  /** What the turn `parent` held: the one a turn follows (`undefined`: the chat's newest kept turn; `null`: it follows none), while the host keeps its folder. */
+  /** What the turn `parent` held: the one a turn follows (`undefined`: the chat's newest kept turn; `null`: it follows none), while the host keeps its file. */
   async before(scope: Scope, parent: string | null | undefined): Promise<PromptRecord | undefined> {
     if (parent === null) return undefined;
     return (await this.#found(scope, parent))?.held.record;
@@ -81,25 +91,25 @@ export class PromptMemory {
 
   /**
    * Keeps the turn `scope.turn`'s prompt (each message's role, name and text), where its slices were
-   * found and what it held, so the turn after is compared with it and a page or a job started from
-   * the turn reads it back (`held`). The turn becomes the chat's newest kept, named with its session
-   * and its folder as the host places it; a turn the host gives no folder is not kept, as it could
-   * never be looked for. The kept turns whose folders the host no longer keeps are let go.
+   * found and what it held, in its file in the turn's folder, so the turn after is compared with it and
+   * a page or a job started from the turn reads it back (`held`). The turn becomes the chat's newest
+   * kept, named with its session and its folder as the host places it; a turn the host gives no folder
+   * is not kept. The kept turns whose files the host no longer keeps are let go of the list.
    */
   async keep(scope: Scope, record: PromptRecord, messages: readonly PromptMessage[], located: LocatedSlices): Promise<void> {
     const turn = scope.turn;
     if (turn === undefined) return;
     const [folder, earlier] = await Promise.all([this.#files.places(scope).then((places) => places.turn), this.#store.get(scope, keyOf(scope)).then(keptOf)]);
     if (folder === undefined) return;
-    const looked = await Promise.all(earlier.map(async (k) => (k.turn !== turn && (await this.#folderKept(scope, k)) === false ? [k.turn] : [])));
+    const looked = await Promise.all(earlier.map(async (k) => (k.turn !== turn && (await this.#file(scope, k))?.status === "missing" ? [k.turn] : [])));
     const gone = new Set(looked.flat());
     const texts = messages.map((m) => ({ role: m.role, content: messageText(m), ...(m.name !== undefined ? { name: m.name } : {}) }));
-    await this.#store.set(scope, heldKey(scope, turn), { messages: texts, located, record } as unknown as JsonValue);
+    const written = await this.#files.write(scope, `${folder}${KEPT_FILE}`, { op: "write", text: JSON.stringify({ messages: texts, located, record }) }, "harness");
+    if (written.status !== "written") throw new Error(`The host did not let RPH write ${folder}${KEPT_FILE} (${written.status}).`);
     await this.#store.update(scope, keyOf(scope), (current) => ({ turns: [...keptOf(current).filter((k) => k.turn !== turn && !gone.has(k.turn)), { turn, session: scope.session, folder }] }) as unknown as JsonValue);
-    await Promise.all([...gone].map((old) => this.#store.delete(scope, heldKey(scope, old))));
   }
 
-  /** A turn's prompt as kept (`turn` absent: the chat's newest kept turn), while the host keeps the turn's folder; undefined where none is. */
+  /** A turn's prompt as kept (`turn` absent: the chat's newest kept turn), while the host keeps its file; undefined where none is. */
   async held(scope: Scope, turn?: string): Promise<HeldPrompt | undefined> {
     const found = await this.#found(scope, turn);
     if (found === undefined) return undefined;
@@ -113,11 +123,6 @@ export interface HeldPrompt {
   session: string;
   messages: PromptMessage[];
   located: LocatedSlices;
-}
-
-/** The store key of one turn's prompt. */
-function heldKey(scope: Scope, turn: string): string {
-  return `${keyOf(scope)}/${textHash(turn)}`;
 }
 
 /** What a turn starts with for its prompt. */

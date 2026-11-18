@@ -17,15 +17,22 @@ async function play(host: MemoryHost, turn: string, session: string, parent: str
   return built;
 }
 
-test("a kept prompt is read back where the host placed its turn's folder, the newest with no turn named, and let go once its folder is gone", async () => {
+test("a kept prompt is read back where the host placed its turn's folder, the newest with no turn named, and let go once the folder is pruned", async () => {
   const host = memoryHost();
   const memory = new PromptMemory(host.env.store, host.env.files);
   const at: Scope = { user: SCOPE.user, chat: SCOPE.chat, session: "s-2" };
-  const kept = async () => (await host.env.store.list(at, "prompt/turns/")).length;
+  // The chat's list of kept turns, as the host's store holds it.
+  const listed = async () => {
+    const keys = await host.env.store.list(at, "prompt/turns/");
+    expect(keys).toHaveLength(1);
+    return JSON.stringify(await host.env.store.get(at, keys[0] ?? ""));
+  };
 
   const first = await play(host, FIRST, "s-1", null);
   await play(host, SECOND, "s-2", FIRST);
-  // The second turn was compared with the first, played in the session before: the same prompt, so its whole front held.
+  // The first turn's prompt is in its folder as the host named it, in the session it played in.
+  expect((await host.env.files.read(at, "sessions/s-1/turns/turn-1-6c2f62d6/kept-prompt.json")).status).toBe("read");
+  // The second turn was compared with the first: the same prompt, so its whole front held.
   expect(host.located[1]?.front.brokenBy).toBeUndefined();
   expect(host.located[1]?.front.length).toBeGreaterThan(0);
 
@@ -36,12 +43,12 @@ test("a kept prompt is read back where the host placed its turn's folder, the ne
   // With no turn named, the chat's newest kept.
   expect((await memory.held(at))?.turn).toBe(SECOND);
 
-  // The host takes the first turn's folder away: its prompt is no longer read, and the next turn kept lets it go.
-  host.removeFolder(FIRST);
+  // The host prunes the first turn's folder: its prompt is no longer read, and the next turn kept lets it go of the list.
+  host.pruneFolder(FIRST);
   expect(await memory.held(at, FIRST)).toBeUndefined();
-  expect(await kept()).toBe(3);
+  expect(await listed()).toContain(FIRST);
   await play(host, THIRD, "s-2", SECOND);
-  expect(await kept()).toBe(3);
+  expect(await listed()).not.toContain(FIRST);
   expect((await memory.held(at, SECOND))?.turn).toBe(SECOND);
   expect((await memory.held(at))?.turn).toBe(THIRD);
 });

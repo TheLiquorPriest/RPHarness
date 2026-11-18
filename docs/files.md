@@ -207,7 +207,9 @@ before-tool:
 Each scene of a chat is a session; so is each sub-agent's run, each job's and each talk. A session is
 a file of entries, `sessions/<session>/<session>.jsonl` in the chat's folder, one line an entry,
 written by RPH alone, with each turn's folder beside it (`sessions/<session>/turns/<turn>/`: the
-agents' `queries/`, `scratch/`, `output/` and `cache/`, and RPH's transcripts and kept requests).
+agents' `queries/`, `scratch/`, `output/` and `cache/`, and RPH's transcripts, kept requests and
+`kept-prompt.json`, the turn's prompt as RPH keeps it for the next turn's comparison, the Prompt page
+and a job started from the turn; it lasts as long as the host keeps that part of the turn's folder).
 What a turn carries from the turns before it is the request's `carry`: `continuing` (what was done, as
 text), `records` (its record of each turn) or `nothing`. A session is compacted only when a call would
 not fit, or when you ask (`sessions compact`); the turns a summary stands for are kept, and the summary

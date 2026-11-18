@@ -113,7 +113,7 @@ test("every call carries the tokens of its tool list as sent and of its opening 
   const none = await played("trace:\n  requests: none\n");
   expect(none.started.map((record) => record.event.request)).toEqual([undefined, undefined]);
   expect(none.started.map((record) => record.event.toolTokens)).toEqual([tools, tools]);
-  expect((await none.s.files()).some((text) => text.includes('"messages":['))).toBe(false);
+  expect((await none.s.files()).filter((text) => text.startsWith('{"sent":'))).toHaveLength(0);
 });
 
 test("the lead's second call begins with the whole of his first call's request, the prompt in it once, whole and in order, after the opening block and its frame; then his own work", async () => {

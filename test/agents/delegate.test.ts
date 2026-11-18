@@ -149,8 +149,8 @@ describe("delegate", () => {
 
     expect(outcome.status).toBe("done");
     expect(s.models["keeper-model"]!.requests).toHaveLength(0);
-    expect(toolResults(s.models["gm-model"]!.requests[1]!.messages)).toEqual(["keeper was not started: it would stand 2 deep, and the player allows 1."]);
-    expect(toolResults(s.models["lead-model"]!.requests[2]!.messages).at(-1)).toBe("keeper was not started: this turn has started 1 agents, and the player allows 1.");
+    expect(toolResults(s.models["gm-model"]!.requests[1]!.messages)).toEqual(["keeper was not started: it would stand 2 deep, and 1 is the most allowed."]);
+    expect(toolResults(s.models["lead-model"]!.requests[2]!.messages).at(-1)).toBe("keeper was not started: this turn has started 1 agents, and 1 is the most allowed.");
     expect(s.trace.of("limit").map((record) => [record.agent?.id, record.event.hit])).toEqual([
       ["gm-1", { limit: "depth", per: "turn", max: 1, value: 2 }],
       [expect.any(String), { limit: "agents", per: "turn", max: 1, value: 1 }],
@@ -207,7 +207,7 @@ describe("delegate", () => {
 
     expect(outcome.status).toBe("done");
     expect(s.models["keeper-model"]!.requests).toHaveLength(2);
-    expect(toolResults(s.models["lead-model"]!.requests[1]!.messages).sort()).toEqual(["keeper was not started: this turn has started 2 agents, and the player allows 2.", "keeper-1 answered:\n\nNoted.", "keeper-2 answered:\n\nNoted."]);
+    expect(toolResults(s.models["lead-model"]!.requests[1]!.messages).sort()).toEqual(["keeper was not started: this turn has started 2 agents, and 2 is the most allowed.", "keeper-1 answered:\n\nNoted.", "keeper-2 answered:\n\nNoted."]);
   });
 
   test("a stretch of the chat an agent is given is whole however long, read in pages of what one call may take, oldest first, the newest included", async () => {

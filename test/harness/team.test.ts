@@ -140,7 +140,7 @@ test("a sub-agent stopped at its time limit while a tool ran: when the lead's me
 const SCRIBE = "---\nname: scribe\ndescription: Fixture lead that hands the reply to a writer.\nmodel: default\ntools: [write_reply, reply_release, agent_message]\ngiven: [prompt:*]\nwriter: narrator\n---\nFixture scribe: you run the turn.\n";
 const NARRATOR = "---\nname: narrator\ndescription: Fixture writer.\nmodel: default\ntools: [delegate, ask_author]\n---\nFixture narrator: tell what you are briefed to tell.\n";
 
-test("the writer stands in the team as a sub-agent does: what it starts is held to the depth the player allows, and its question comes back to the agent that called write_reply, which answers it", async () => {
+test("the writer stands in the team as a sub-agent does: what it starts is held to the depth allowed, and its question comes back to the agent that called write_reply, which answers it", async () => {
   const s = (open = await stage({
     config: "limits:\n  turn:\n    depth: 1\n",
     files: { ...FILES, ".agents/scribe.md": SCRIBE, ".agents/narrator.md": NARRATOR },
@@ -161,7 +161,7 @@ test("the writer stands in the team as a sub-agent does: what it starts is held 
   expect(sink.text).toBe("She falls short of the far ledge.");
   // What the writer started would stand two deep, past the one the player allows.
   expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "depth", per: "turn", max: 1, value: 2 }]);
-  expect(answerTo(s, "d-1")).toBe("gm was not started: it would stand 2 deep, and the player allows 1.");
+  expect(answerTo(s, "d-1")).toBe("gm was not started: it would stand 2 deep, and 1 is the most allowed.");
   expect(s.trace.of("agent_started").map((record) => record.agent?.definition)).toEqual(["scribe", "narrator", "narrator"]);
   // Its question came back as write_reply's answer, marked, and the scribe's message went on with it.
   expect(answerTo(s, "w-1")).toContain("Does she make the far ledge?");

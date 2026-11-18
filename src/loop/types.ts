@@ -260,7 +260,7 @@ export interface AgentOutcome {
   failure?: "model" | "harness";
   /** For a `failed` model: what broke its last call, and how many times that call was made, its retries among them. */
   broke?: { failure: CallFailureKind; tries: number };
-  /** The text of its last message: a sub-agent's answer. Empty when it stopped first. */
+  /** The text of its last message: a sub-agent's answer. Empty when it stopped first, or when its last call broke off. */
   text: string;
   /** For `limit` and `stopped`: what it had done by then: how many of its tool calls had finished, and the text of its last whole message (empty where it wrote none). */
   worked?: { tools: number; wrote: string };

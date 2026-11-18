@@ -496,9 +496,10 @@ export class AgentRunner {
     const last = stint.last;
     const failed = stint.halt === undefined && (failure !== undefined || last === undefined || last.stopReason === "error");
     if (stint.halt !== undefined || failed) this.#settle(stint);
-    const base = { agent: this.agent, usage: stint.usage, text: last !== undefined && stint.halt === undefined ? textOf(last) : "" };
+    // A message its provider broke off in the middle of is no answer: none of it is the outcome's text.
+    const base = { agent: this.agent, usage: stint.usage, text: last !== undefined && stint.halt === undefined && last.stopReason !== "error" ? textOf(last) : "" };
     let outcome: AgentOutcome;
-    const worked = { tools: stint.finished.size, wrote: last !== undefined ? textOf(last) : "" };
+    const worked = { tools: stint.finished.size, wrote: last !== undefined && last.stopReason !== "error" ? textOf(last) : "" };
     if (stint.halt?.status === "limit") outcome = { ...base, status: "limit", limit: stint.halt.hit, worked };
     else if (stint.halt !== undefined) outcome = { ...base, status: "stopped", worked };
     else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "", failure: failure !== undefined ? "harness" : "model", ...(failure === undefined && stint.broke !== undefined ? { broke: stint.broke } : {}) };

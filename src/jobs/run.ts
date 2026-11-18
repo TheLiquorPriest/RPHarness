@@ -350,7 +350,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         if (event.kind !== "call_ended") return;
         // What every agent of the run has spent, as of the call that ended.
         hearing.spent({ ...budget.used });
-        if (record.agent?.id === ref.id && event.text.trim() !== "") hearing.text(event.text);
+        // What a call that broke off wrote is no text of the job's: the call is made again, or the job ends failed on it.
+        if (record.agent?.id === ref.id && event.stop !== "error" && event.text.trim() !== "") hearing.text(event.text);
       });
       trace.event(ref, ask.parent, { kind: "run_started", run: "job", lead: ref.definition });
       let hit: LimitHit | undefined;

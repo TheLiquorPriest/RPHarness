@@ -3,9 +3,11 @@
 // as it is written, so a rule that interrupts stops the draft at its match, before the lead ever
 // reads it.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { TextChannel } from "../loop/channel";
+import type { ChannelMarks, TextChannel } from "../loop/channel";
 
 export class SilentReply implements TextChannel {
+  /** A draft is the plain text of the writer's message. */
+  readonly marks: ChannelMarks = { form: { two_step: true } };
   /** The text of the message under way: the draft as far as it is written. */
   #message = "";
 

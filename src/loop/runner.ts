@@ -29,10 +29,10 @@ import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
 import type { AgentRef, CallPermission, CallRefusal, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import type { LayerOptions } from "../model/source";
-import { type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
+import { estimateOf, type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
 import { addUsage, Budget, countLimit, emptyUsage, type Left, type Room } from "./budget";
 import { PlaceLine } from "./line";
-import type { TextChannel } from "./channel";
+import type { ChannelMarks, TextChannel } from "./channel";
 import type { Fired, Judged, Judgment, QuestionRules, RunEndRules, StreamFired, StreamRules } from "./rules";
 import { fit, type Misfit } from "./fit";
 import type { ParentCall, RunTrace } from "./trace";
@@ -41,10 +41,12 @@ import type { AgentLimits, AgentOutcome, Bounded, CallRequest, CallSettings, Cal
 /** Texts the runner sends a model. Each comes from a file; one that gives undefined leaves its answer empty. */
 export interface RunnerTexts {
   /**
-   * `.prompts/continue-after-rule.md`, filled with what the player was shown: the line an agent
-   * goes on under after a rule stopped its call. The rule's own text comes just before it.
+   * `.prompts/continue-after-rule.md`, filled with what the player was shown (`shown`, empty where
+   * nothing was) and how the reply is marked on the agent's connection (`form`, and in the tag form
+   * `tags`): the line an agent goes on under after a rule stopped its call. The rule's own text comes
+   * just before it.
    */
-  continueAfterRule(fields: { shown: string }): string;
+  continueAfterRule(fields: { shown: string } & Partial<ChannelMarks>): string;
   /** The answer to a call of a tool the agent does not hold. */
   notFound?(fields: { tool: string }): string | undefined;
   /**
@@ -457,7 +459,7 @@ export class AgentRunner {
       if (stint.halt !== undefined || failure !== undefined) continue;
       // The agent goes on under the rule's text and the line that says where the player's view ends (§5.4).
       const shown = this.#o.channel?.tail() ?? "";
-      const goOn = this.#o.texts.continueAfterRule({ shown });
+      const goOn = this.#o.texts.continueAfterRule({ shown, ...this.#o.channel?.marks });
       const message = this.#message(goOn === "" ? [cut.text] : [cut.text, goOn]);
       next = () => this.#pi.prompt(message);
     }
@@ -497,6 +499,25 @@ export class AgentRunner {
     if (halt.status === "limit") this.#emit(stint, { kind: "limit", hit: halt.hit });
     this.#o.channel?.cut();
     this.#pi.abort();
+  }
+
+  /**
+   * What a call spent, as its provider counted it. A call stopped part-way (a rule's cut, a stop, a
+   * limit) most often has no count from its provider, which sends one at the answer's end: where
+   * something of its answer came back, what it was sent and what it wrote are estimated as every
+   * request's tokens are, so the run, its limits and the user's day book what it spent.
+   */
+  #spent(stint: Stint, message: AssistantMessage): Usage {
+    const used = usageOf(message);
+    if (message.stopReason !== "aborted" || message.content.length === 0) return used;
+    const ratio = this.#o.terms.charsPerToken;
+    if (used.input === 0) used.input = requestTokens(stint.callSent, ratio, this.#counted);
+    if (used.output === 0) {
+      const written = estimateOf([], message, ratio);
+      used.output = written.out + written.reasoningOut;
+      if (written.reasoningOut > 0) used.reasoning = written.reasoningOut;
+    }
+    return used;
   }
 
   /**
@@ -735,7 +756,7 @@ export class AgentRunner {
           this.#clock.clearTimeout(stint.callTimer);
           stint.callTimer = undefined;
         }
-        const used = usageOf(message);
+        const used = this.#spent(stint, message);
         addUsage(stint.usage, used);
         this.#budget.count(used);
         // An answer that calls tools is a tool round, the agent's and every budget's above it.

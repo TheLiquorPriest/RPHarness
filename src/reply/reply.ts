@@ -4,7 +4,7 @@
 // opened once a reply was given is not shown, and the agent is told so, in a file's words.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ReplySink } from "../contract";
-import type { TextChannel } from "../loop/channel";
+import type { ChannelMarks, TextChannel } from "../loop/channel";
 import type { StreamRules } from "../loop/rules";
 import { HELD_WHOLE, Release, type ReleaseCheck } from "./release";
 import { lastSentences } from "./sentences";
@@ -45,6 +45,8 @@ export interface TagReplyOptions {
 }
 
 export class TagReply implements TextChannel {
+  /** The reply goes between the reply contract's tags, and goes on between them after a cut. */
+  readonly marks: ChannelMarks;
   readonly #o: TagReplyOptions;
   readonly #parser: TagParser;
   readonly #release: Release;
@@ -73,6 +75,7 @@ export class TagReply implements TextChannel {
 
   constructor(options: TagReplyOptions) {
     this.#o = options;
+    this.marks = { form: { tags: true }, tags: options.tags };
     this.#parser = new TagParser(options.tags);
     this.#release = new Release((text) => options.sink.content(text), options.beforeRelease !== undefined ? HELD_WHOLE : options.heldSentences, () => this.#claim());
   }

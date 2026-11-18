@@ -6,7 +6,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { describe, expect, test } from "bun:test";
 import { DEFAULT_SETTINGS } from "../../src/harness/settings";
 import type { StreamRules, TextChannel, Written } from "../../src/loop";
-import { heldSentences, sentenceEnds, TagReply } from "../../src/reply";
+import { heldSentences, MessageReply, sentenceEnds, TagReply } from "../../src/reply";
 import { fired, type Reply, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
 const author = { id: "author", definition: "author" };
@@ -32,6 +32,7 @@ function bannedPhrase(inForce: boolean): StreamRules & { fired: number } {
 function watched(reply: TagReply): { channel: TextChannel; held: string[] } {
   const held: string[] = [];
   const channel: TextChannel = {
+    marks: reply.marks,
     begin: () => reply.begin(),
     write: (piece) => reply.write(piece),
     release: () => {
@@ -171,5 +172,44 @@ describe("a rule on the stream", () => {
     expect(scripted.requests[1]!.messages.filter((message) => message.role !== "system").map(textOf)).toEqual(["She enters the hall.", `${RULE}${goOn}`]);
     expect(recorder.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.action])).toEqual([["banned-phrases", "cut"]]);
     expect(sink.text).toBe("Something moves; the cold reaches her first. She runs.");
+  });
+});
+
+describe("a reply a rule cut once some of it was shown", () => {
+  const repeated: Reply = { pieces: [{ text: "<reply>The hall is dark. Her candle gutters. " }, { wait: 10 }, { text: "Something moves; the cold reaches her first. She runs.</reply>" }] };
+
+  test("in the tag form, gone on with from its start, is one reply with nothing twice, released, and the cut call is booked", async () => {
+    const sink = new SinkRecorder();
+    const rules = bannedPhrase(true);
+    const reply = new TagReply({ tags, sink, heldSentences: heldSentences(rules, DEFAULT_SETTINGS.heldSentences), tailSentences: DEFAULT_SETTINGS.tailSentences });
+    const missing = replyMissing(() => reply.released, "Fixture rule: the turn is ending with no reply. Write it now.");
+    const lines: unknown[] = [];
+    const texts = { continueAfterRule: (fields: object) => (lines.push(fields), "[Go on]") };
+    const { runner, recorder, clock } = rigAgent(author, [firstCall, repeated], { channel: reply, stream: rules, runEnd: missing, texts });
+
+    await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
+
+    expect(lines).toEqual([{ shown: "The hall is dark. Her candle gutters. ", form: { tags: true }, tags }]);
+    expect(sink.text).toBe("The hall is dark. Her candle gutters. Something moves; the cold reaches her first. She runs.");
+    expect(reply.released).toBe(true);
+    expect(missing.fired).toBe(0);
+    const [cut] = recorder.of("call_ended").map((record) => record.event);
+    expect(cut?.stop).toBe("cut");
+    expect(cut?.usage.input).toBeGreaterThan(0);
+    expect(cut?.usage.output).toBeGreaterThan(0);
+  });
+
+  test("as a message's streamed text, gone on with from its last sentence, is joined with nothing twice", async () => {
+    const sink = new SinkRecorder();
+    const rules = bannedPhrase(true);
+    const reply = new MessageReply({ sink, stream: true, heldSentences: heldSentences(rules, DEFAULT_SETTINGS.heldSentences), tailSentences: DEFAULT_SETTINGS.tailSentences });
+    const first: Reply = { pieces: [{ text: "The hall is dark. Her candle gutters. " }, { wait: 10 }, { text: "Something moves, and a shiver ran down her spine. " }] };
+    const again: Reply = { pieces: [{ text: "Her candle gutters.\nSomething moves; the cold reaches her first." }] };
+    const { runner, clock } = rigAgent(author, [first, again], { channel: reply, stream: rules });
+
+    await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
+
+    expect(sink.text).toBe("The hall is dark. Her candle gutters. Something moves; the cold reaches her first.");
+    expect(reply.released).toBe(true);
   });
 });

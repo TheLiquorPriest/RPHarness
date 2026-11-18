@@ -13,7 +13,7 @@
 // form, so a second reply never buys it call after call. Any other message's text is working text.
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ReplySink } from "../contract";
-import type { TextChannel } from "../loop/channel";
+import type { ChannelMarks, TextChannel } from "../loop/channel";
 import { HELD_WHOLE, Release, type ReleaseCheck } from "./release";
 import { lastSentences } from "./sentences";
 
@@ -44,6 +44,8 @@ export interface MessageReplyOptions {
 }
 
 export class MessageReply implements TextChannel {
+  /** The reply is the plain text of a message; streamed, a message's text after a cut goes on with it. */
+  readonly marks: ChannelMarks = { form: { two_step: true } };
   readonly #o: MessageReplyOptions;
   readonly #release: Release;
   /** `checking`: the reply is complete, and his before-release hooks are reading it. */

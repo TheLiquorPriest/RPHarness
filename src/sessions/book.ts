@@ -2,10 +2,12 @@
 // and held in memory only while something does: once its lines are written and nothing holds it,
 // it is let go, and the next to ask reads it again, so the file on disk is what counts. It is
 // written through the host's files port as the writer "harness", into the session's folder: one
-// whole line per entry, in the order the entries are made. A write that fails is logged and its
-// lines are not lost: they go out again, before anything newer, with the next append, and the file
-// is kept in memory until they are on disk. So no entry on disk ever names a parent the file
-// lacks, and the turns after a failed write still find the session whole. The turn it records goes on.
+// whole line per entry, in the order the entries are made. A write that fails is said once while it
+// lasts (at its first failure, and again when a write lands), and its lines are not lost: they go
+// out again, before anything newer, with the next append, and the file is kept in memory until they
+// are on disk. So no entry on disk ever names a parent the file lacks, and the turns after a failed
+// write still find the session whole. What is held is bounded by the user's `sessions.unwrittenMiB`:
+// past it, a run whose own file cannot be written ends failed (`over`), and what it held stays held.
 import type { FileRead, FilesPort, JsonValue, Log, RunScope } from "../contract";
 import { lineOf, parseSession, type SessionEntry, type SessionHeader, SessionLog } from "./file";
 
@@ -37,6 +39,14 @@ export interface BookDeps {
   changed?(file: SessionFile): void;
 }
 
+/** What a file is made with: the book's, and where it tells the book of the bytes it holds and lets go. */
+interface FileDeps extends BookDeps {
+  held(bytes: number): void;
+}
+
+/** Mebibytes, as `sessions.unwrittenMiB` counts them, in bytes. */
+export const MIB = 1024 * 1024;
+
 /** One session's file: its tree in memory, and its lines on disk. */
 export class SessionFile {
   /** The session's own scope: whose, which chat, which session. */
@@ -45,7 +55,7 @@ export class SessionFile {
   readonly path: string;
   readonly log: SessionLog;
   header: SessionHeader | undefined;
-  readonly #d: BookDeps;
+  readonly #d: FileDeps;
   /** Whether the file has its first line on disk, or holds something that is not to be written over. */
   #begun: boolean;
   /** Whether what is on disk may end part-way through a line (a write cut off, a file that could not be read): the next line then starts a line of its own. */
@@ -56,6 +66,8 @@ export class SessionFile {
   #writing: Promise<void> | undefined;
   /** Whether something was written to it since `takeChanged` was last asked. */
   #changed = false;
+  /** The host's reason, or the error's words, while its writes fail: set at the first failure, said once then, and cleared when a write lands. */
+  #failure: string | undefined;
   /**
    * Why the file could not be read, where it could not: refused or failed as a whole (`reason`, the
    * host's or the error's words), or lines that do not parse (`lines`, from 1). The turn is told, and
@@ -63,7 +75,7 @@ export class SessionFile {
    */
   readonly unreadable: Unreadable | undefined;
 
-  constructor(d: BookDeps, scope: RunScope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean, unreadable?: Unreadable) {
+  constructor(d: FileDeps, scope: RunScope, path: string, header: SessionHeader | undefined, entries: readonly SessionEntry[], begun: boolean, cut: boolean, unreadable?: Unreadable) {
     this.#d = d;
     this.scope = scope;
     this.path = path;
@@ -115,6 +127,11 @@ export class SessionFile {
     return this.#queued !== "" || this.#writing !== undefined;
   }
 
+  /** Why its writes fail, while they do: the host's reason (a refusal's, an unapplied change's) or the error's words. */
+  get failure(): string | undefined {
+    return this.#failure;
+  }
+
   /** Whether something was written to it since this was last asked: asking clears it. */
   takeChanged(): boolean {
     const was = this.#changed;
@@ -131,10 +148,15 @@ export class SessionFile {
   #write(text: string): void {
     this.#changed = true;
     this.#queued += text;
+    this.#d.held(Buffer.byteLength(text, "utf8"));
     this.#writing ??= this.#drain();
   }
 
-  /** Appends what is queued, one append at a time, until nothing is, or until one fails: its lines then wait, first in the queue, for the next. */
+  /**
+   * Appends what is queued, one append at a time, until nothing is, or until one fails: its lines then
+   * wait, first in the queue, for the next. A failure is said at the first (warn, with the file and the
+   * reason), not again while it lasts, and once more when a write lands (info, with how many lines went out late).
+   */
   async #drain(): Promise<void> {
     const { files, log } = this.#d;
     try {
@@ -144,23 +166,41 @@ export class SessionFile {
         // After a line cut off part-way, a new line first: the cut one is passed over when the file is read, and these stay whole.
         const text = this.#cut ? `\n${lines}` : lines;
         let failed: Record<string, JsonValue> | undefined;
+        let reason = "";
         try {
           const done = await files.write(this.scope, this.path, { op: "append", text }, "harness");
-          if (done.status !== "written") failed = { status: done.status, reason: done.reason };
+          if (done.status !== "written") {
+            reason = done.reason;
+            failed = { status: done.status, reason };
+          }
         } catch (error) {
-          failed = { error: error instanceof Error ? error.message : String(error) };
+          reason = error instanceof Error ? error.message : String(error);
+          failed = { error: reason };
         }
         this.#cut = failed !== undefined;
-        if (failed === undefined) continue;
+        if (failed === undefined) {
+          this.#d.held(-Buffer.byteLength(lines, "utf8"));
+          if (this.#failure !== undefined) log.info("The session file is written again; the lines it held went out late.", { session: this.scope.session, path: this.path, lines: lineCount(lines) });
+          this.#failure = undefined;
+          continue;
+        }
         // Some of them may be on disk already, cut off or whole: a line read twice is the same entry, and the reader keeps it once.
         this.#queued = lines + this.#queued;
-        log.error("The session file could not be written; its lines are kept, and go out again with the next.", { session: this.scope.session, path: this.path, ...failed });
+        if (this.#failure === undefined) log.warn("The session file could not be written; its lines are held, and go out with the next write that lands.", { session: this.scope.session, path: this.path, ...failed });
+        this.#failure = reason;
         return;
       }
     } finally {
       this.#writing = undefined;
     }
   }
+}
+
+/** How many lines a text of whole lines holds. */
+function lineCount(text: string): number {
+  let count = 0;
+  for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) count += 1;
+  return count;
 }
 
 /** A session's file while something works on it. */
@@ -179,18 +219,36 @@ interface Kept {
  * The session files something is working on, by user, chat and session, and the ones used last
  * kept read between their turns (`held`, the user's `sessions.held`): a session's next turn reads
  * nothing again, and past that many the one used least recently is let go, to be read whole when
- * next asked for. A file that could not be read is never kept: the next to ask reads it again.
+ * next asked for. A file that could not be read is never kept: the next to ask reads it again. The
+ * lines its files hold that are not on disk yet are counted, every file's, against `heldMost`.
  */
 export class SessionBook {
   readonly #d: BookDeps;
+  /** What each file is made with: the book's, and the count of what it holds. */
+  readonly #fileDeps: FileDeps;
   readonly #files = new Map<string, Kept>();
   /** The files nothing holds now that are kept read, by key, the one used least recently first. */
   readonly #idle = new Set<string>();
   /** How many files nothing holds are kept read between their turns (`sessions.held`), as the latest turn read the setting. */
   held = 8;
+  /** The bytes of lines given to every file and not on disk yet. */
+  #heldBytes = 0;
+  /** The most of them held while files cannot be written (`sessions.unwrittenMiB`), in bytes, as the latest run read the setting. */
+  heldMost = 64 * MIB;
 
   constructor(d: BookDeps) {
     this.#d = d;
+    this.#fileDeps = {
+      ...d,
+      held: (bytes) => {
+        this.#heldBytes += bytes;
+      },
+    };
+  }
+
+  /** Whether the lines held are past `heldMost`: a run whose own file cannot be written then stops, and ends failed. Its lines stay held. */
+  get over(): boolean {
+    return this.#heldBytes > this.heldMost;
   }
 
   /** The file of the session a scope names, held until released: read from disk when nothing holds it, and the same file for all that hold it at once. */
@@ -284,15 +342,15 @@ export class SessionBook {
       // Nothing of it can be known: the session goes on from nothing, the turn is told, and what is added is put after whatever the file holds, on a line of its own.
       const reason = error instanceof Error ? error.message : String(error);
       log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, error: reason });
-      return new SessionFile(this.#d, scope, path, undefined, [], true, true, { reason });
+      return new SessionFile(this.#fileDeps, scope, path, undefined, [], true, true, { reason });
     }
-    if (read.status === "missing") return new SessionFile(this.#d, scope, path, undefined, [], false, false);
+    if (read.status === "missing") return new SessionFile(this.#fileDeps, scope, path, undefined, [], false, false);
     if (read.status === "refused") {
       log.error("The session file could not be read; nothing of its earlier turns is known.", { session: scope.session, path, reason: read.reason });
-      return new SessionFile(this.#d, scope, path, undefined, [], true, true, { reason: read.reason });
+      return new SessionFile(this.#fileDeps, scope, path, undefined, [], true, true, { reason: read.reason });
     }
     const parsed = parseSession(read.text);
     if (parsed.unread.length > 0) log.warn("Lines of the session file could not be read and are passed over.", { session: scope.session, path, lines: parsed.unread });
-    return new SessionFile(this.#d, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"), parsed.unread.length > 0 ? { lines: parsed.unread } : undefined);
+    return new SessionFile(this.#fileDeps, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"), parsed.unread.length > 0 ? { lines: parsed.unread } : undefined);
   }
 }

@@ -12,8 +12,8 @@
 // turn's folder, and what a hook adds goes after the answer. Every word the model is told comes
 // from the tool answers' file, or from his hooks. A tool's own answer stands whatever fails around
 // it: a rule on its result that could not be asked, or a whole that could not be kept, is a line
-// beside it, and the log
-// names what failed. Every refusal says why, as a fact, for the call's end record. Every read and
+// beside it, and the log names what failed, said once while the place it is kept at goes on failing
+// (`FailingWrites`). Every refusal says why, as a fact, for the call's end record. Every read and
 // search a call makes is saved whole in the turn's `queries/` (the session's, for a run with no turn).
 import type { AgentRef, ApprovalsPort, CallPermission, Clock, FilesPort, Log, Places, RunScope, SwitchesPort, ToolContent } from "../contract";
 import { agentJson, type Hooks, scopeJson } from "../external/hooks";
@@ -23,6 +23,7 @@ import type { ParentCall, RunTrace } from "../loop/trace";
 import type { Bounded, GateAfter, GateBefore, GateCall, LoopToolResult, ToolGate } from "../loop/types";
 import type { HeldTool } from "../tools/registry";
 import { answer, type Words } from "../tools/kit";
+import { FailingWrites } from "./failing";
 import { agentFileName } from "./requests";
 
 /** Where a clipped result's whole is kept, inside the turn's own `cache/` folder, or the session's. */
@@ -53,6 +54,8 @@ export interface GateDeps {
   clipChars?: number;
   /** Where what failed around a tool is named: a rule that could not be asked, a whole that could not be kept. */
   log: Log;
+  /** The places the run's saves fail at now, shared by every gate of the run, so each is said once while it lasts; none: this gate's own. */
+  failing?: FailingWrites;
   /** His hooks before and after a tool; none runs none. */
   hooks?: Hooks;
 }
@@ -61,9 +64,11 @@ export class TurnGate implements ToolGate {
   readonly #d: GateDeps;
   /** What a hook before a call added, by its id: it comes back with the call's result. */
   readonly #added = new Map<string, string[]>();
+  readonly #failing: FailingWrites;
 
   constructor(deps: GateDeps) {
     this.#d = deps;
+    this.#failing = deps.failing ?? new FailingWrites(deps.log);
   }
 
   async before(call: GateCall, signal: AbortSignal): Promise<GateBefore> {
@@ -150,13 +155,16 @@ export class TurnGate implements ToolGate {
   async #saveRead(call: GateCall, result: LoopToolResult): Promise<void> {
     const d = this.#d;
     const name = `${agentFileName(d.agent)}.${call.callId}.${call.tool}`.replace(/[^A-Za-z0-9._-]/g, "_");
-    const at = `${d.places.turn ?? d.places.session}${QUERIES}${name}.md`;
+    const folder = `${d.places.turn ?? d.places.session}${QUERIES}`;
+    const at = `${folder}${name}.md`;
     const text = [...result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])), ...(result.reports ?? [])].join("\n");
+    const failed = "A read's result could not be saved in queries/.";
     try {
       const written = await d.files.write(d.scope, at, { op: "write", text }, "harness");
-      if (written.status !== "written") d.log.warn("A read's result could not be saved in queries/.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status });
+      if (written.status === "written") this.#failing.landed(folder, "Reads' results are saved in queries/ again; those that failed before are not there.", { agent: d.agent.id, folder });
+      else this.#failing.failed(folder, failed, { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status, reason: written.reason });
     } catch (error) {
-      d.log.warn("A read's result could not be saved in queries/.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
+      this.#failing.failed(folder, failed, { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
     }
   }
 
@@ -224,13 +232,18 @@ export class TurnGate implements ToolGate {
   /** Keeps a clipped answer's whole in the turn's `cache/results/`, or the session's for a run with no turn (§11); where it went, or undefined, logged, when it could not be kept. */
   async #keep(call: GateCall, text: string): Promise<string | undefined> {
     const d = this.#d;
-    const at = `${d.places.turn ?? d.places.session}${KEPT_RESULTS}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`;
+    const folder = `${d.places.turn ?? d.places.session}${KEPT_RESULTS}`;
+    const at = `${folder}${call.callId.replace(/[^A-Za-z0-9._-]/g, "_")}.md`;
+    const failed = "A clipped tool answer's whole could not be kept.";
     try {
       const written = await d.files.write(d.scope, at, { op: "write", text }, "harness");
-      if (written.status === "written") return written.path;
-      d.log.warn("A clipped tool answer's whole could not be kept.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status });
+      if (written.status === "written") {
+        this.#failing.landed(folder, "Clipped tool answers' wholes are kept again; those that failed before are not.", { agent: d.agent.id, folder });
+        return written.path;
+      }
+      this.#failing.failed(folder, failed, { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, status: written.status, reason: written.reason });
     } catch (error) {
-      d.log.warn("A clipped tool answer's whole could not be kept.", { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
+      this.#failing.failed(folder, failed, { agent: d.agent.id, tool: call.tool, callId: call.callId, path: at, error: errorText(error) });
     }
     return undefined;
   }

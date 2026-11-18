@@ -10,6 +10,7 @@ import type { ParentCall, RunTrace } from "../loop/trace";
 import type { GateCall, KeepRequest, LoopToolResult, ToolGate } from "../loop/types";
 import type { HeldTool } from "../tools/registry";
 import type { Words } from "../tools/kit";
+import { FailingWrites } from "./failing";
 import { TurnGate } from "./gate";
 import { type PointedFile, pointerForm, requestPath, sentMessages } from "./requests";
 import type { Settings } from "./settings";
@@ -51,9 +52,12 @@ export class AgentRuns {
   #writes = 0;
   /** The sessions of the run's agents that are sessions of their own. */
   readonly #sessions: RunSessions | undefined;
+  /** The places the run's gates save at that fail now, each said once while it lasts. */
+  readonly #failing: FailingWrites;
 
   constructor(deps: AgentRunDeps) {
     this.#d = deps;
+    this.#failing = new FailingWrites(deps.env.log);
     const { env, scope, places } = deps;
     new Transcripts({ files: env.files, scope, folder: places.turn ?? places.session, log: env.log, tell: (written) => deps.tell(written) }).follow(deps.trace);
     if (deps.book !== undefined) {
@@ -96,6 +100,7 @@ export class AgentRuns {
       clock: env.clock,
       files: env.files,
       log: env.log,
+      failing: this.#failing,
       ...(env.approvals !== undefined ? { approvals: env.approvals } : {}),
       ...(env.switches !== undefined ? { switches: env.switches } : {}),
       places: d.places,

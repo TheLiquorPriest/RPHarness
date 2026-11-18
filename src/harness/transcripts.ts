@@ -3,9 +3,11 @@
 // through the host's file port whatever the host's trace keeps. Every agent of a turn writes one in
 // the turn's folder (the lead, each sub-agent, the writer, a judging call, a compaction's summary
 // call); a job's agents under the turn that started the job, or in the job's own session folder
-// when the owner started it. Each line is JSON: `{"at":…,"type":"message"|"call"|"result",…}`.
+// when the owner started it. Each line is JSON: `{"at":…,"type":"message"|"call"|"result",…}`. A
+// line that cannot be written is said once while its file goes on failing (`FailingWrites`).
 import type { AgentRef, FilesPort, JsonObject, Log, RunScope, TraceEvent } from "../contract";
 import type { AgentRecord, RunTrace } from "../loop/trace";
+import { FailingWrites } from "./failing";
 import { agentFileName, TRANSCRIPTS } from "./requests";
 
 export interface TranscriptsDeps {
@@ -42,9 +44,12 @@ export class Transcripts {
   readonly #d: TranscriptsDeps;
   /** Each file's last append, so its lines land in the order they were made. */
   readonly #last = new Map<string, Promise<unknown>>();
+  /** The files whose lines fail now, each said once while it lasts. */
+  readonly #failing: FailingWrites;
 
   constructor(deps: TranscriptsDeps) {
     this.#d = deps;
+    this.#failing = new FailingWrites(deps.log);
   }
 
   /** Follows a run's trace from now on. */
@@ -58,13 +63,15 @@ export class Transcripts {
     const d = this.#d;
     const path = transcriptPath(d.folder, record.agent);
     const text = `${JSON.stringify({ at: record.at, ...line })}\n`;
+    const failed = "A line of an agent's transcript could not be written.";
     const appended = (this.#last.get(path) ?? Promise.resolve())
       .then(() => d.files.write(d.scope, path, { op: "append", text }, "harness"))
       .then(
         (done) => {
-          if (done.status !== "written") d.log.warn("A line of an agent's transcript could not be written.", { agent: record.agent.id, path, status: done.status });
+          if (done.status === "written") this.#failing.landed(path, "An agent's transcript is written again; the lines that failed before are not in it.", { agent: record.agent.id, path });
+          else this.#failing.failed(path, failed, { agent: record.agent.id, path, status: done.status, reason: done.reason });
         },
-        (error: unknown) => d.log.warn("A line of an agent's transcript could not be written.", { agent: record.agent.id, path, error: error instanceof Error ? error.message : String(error) }),
+        (error: unknown) => this.#failing.failed(path, failed, { agent: record.agent.id, path, error: error instanceof Error ? error.message : String(error) }),
       );
     this.#last.set(path, appended);
     d.tell(appended);

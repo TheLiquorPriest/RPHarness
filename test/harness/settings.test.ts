@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { checkSettingValue, mergedConfig, SETTINGS } from "rp-harness/helpers";
 import type { FilesPort, GapQuery, JsonObject, JsonValue, Layer, Log, Scope, Searcher, SettingDef } from "../../src/contract";
 import { loadGuidance } from "../../src/files";
-import { DEFAULT_SETTINGS, formFor, GROUPS, jobCountsFor, listOf, readSettings, readSettingsOf, type Settings, SettingsRead } from "../../src/harness/settings";
+import { callTerms, DEFAULT_SETTINGS, formFor, GROUPS, jobCountsFor, listOf, readSettings, readSettingsOf, type Settings, SettingsRead } from "../../src/harness/settings";
 import { type Group, type SettingEntry, type SettingWords, worded } from "../../src/harness/settings/entry";
 import { MODELS } from "../../src/harness/settings/models";
 import type { BaseToolsDeps } from "../../src/tools/base";
@@ -615,4 +615,11 @@ test("a chat's `limits.turn.tokensIn: ~` over a global 50,000 leaves that chat's
 
 test("the exported check and readSettings take and refuse the same values for every entry, on a sample of good and bad values", async () => {
   await holdsAgreement(GROUPS);
+});
+
+test("how a failed call is made again is read from the files into its terms: how many times, the wait, its growth, the longest, the provider's asked wait, each kind's switch", async () => {
+  const read = await settingsOf({ global: { calls: { retries: 4, retryWaitSeconds: 2, retryWaitGrowth: 3, maxRetryWaitSeconds: 10, retryWaitAsAsked: false, retryOn: { connection: false, other: false } } } });
+  expect(read.logged).toEqual([]);
+  expect(callTerms(read.settings).retry).toEqual({ retries: 4, wait: 2_000, growth: 3, most: 10_000, asked: false, kinds: ["timeout", "overloaded", "server"] });
+  expect(callTerms(DEFAULT_SETTINGS).retry).toEqual({ retries: 2, wait: 1_000, growth: 2, most: 60_000, asked: true, kinds: ["connection", "timeout", "overloaded", "server", "other"] });
 });

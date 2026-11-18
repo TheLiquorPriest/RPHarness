@@ -67,7 +67,7 @@ import { limitsOf } from "./limits";
 import type { Refusals } from "./refusals";
 import type { AgentChoice, LayerEvent, LayerOptions, ModelEffort, UserChoice } from "./source";
 import type { Hold, Throttle, Throttles } from "./throttle";
-import type { FailureFacts } from "./failure";
+import { askedWait, type FailureFacts, failureOf, retried, retryTermsOf, retryWait } from "./failure";
 import { promptTokens } from "./tokens";
 import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
@@ -382,14 +382,18 @@ function silenceWatch(deps: CallDeps, ms: number | undefined, silent: (ms: numbe
   };
 }
 
-/** What a call's latest request met: the status its server answered with, or that no server was reached. */
+/** What a call's latest request met: the status its server answered with, that no server was reached, or a redirect refused. */
 interface Wire {
   status?: number;
   unreached?: boolean;
+  /** The server answered with a redirect, which is never followed: the call wasn't made. */
+  redirected?: boolean;
+  /** The wait a failed request's response asked for before the next try, in milliseconds. */
+  asked?: number;
 }
 
 /** The fetch a call's client goes out through: it follows no redirect, notes on `wire` what each request met, and hands each piece of the response to `alive` as it passes. */
-function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void): typeof globalThis.fetch {
+function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void, now: () => number): typeof globalThis.fetch {
   const watched = async (input: Parameters<typeof globalThis.fetch>[0], init?: Parameters<typeof globalThis.fetch>[1]): Promise<Response> => {
     let response: Response;
     try {
@@ -397,10 +401,14 @@ function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void
     } catch (error) {
       // A redirect refused or a stop is no server out of reach.
       const said = error instanceof Error ? `${error.name} ${error.message} ${"code" in error ? String(error.code) : ""}` : String(error);
-      wire.unreached = init?.signal?.aborted !== true && !REDIRECT_REFUSED.test(said);
+      const redirected = REDIRECT_REFUSED.test(said);
+      if (redirected) wire.redirected = true;
+      wire.unreached = init?.signal?.aborted !== true && !redirected;
       throw error;
     }
     wire.status = response.status;
+    const asked = response.status >= 400 ? askedWait(response.headers, now()) : undefined;
+    if (asked !== undefined) wire.asked = asked;
     if (response.body === null) return response;
     const body = response.body.pipeThrough(
       new TransformStream<Uint8Array, Uint8Array>({
@@ -413,14 +421,6 @@ function callFetch(fetch: typeof globalThis.fetch, wire: Wire, alive: () => void
     return new Response(body, { status: response.status, statusText: response.statusText, headers: response.headers });
   };
   return Object.assign(watched, { preconnect: fetch.preconnect });
-}
-
-/** Whether a call that failed before any piece of its answer came may be made again: no server was reached, or it answered 429 or 5xx. */
-function mayRetry(wire: Wire, failed: AssistantMessage): boolean {
-  if (wire.unreached === true) return true;
-  // Google's client goes out through no fetch of the layer's: its status is the one its words lead with.
-  const status = wire.status ?? Number(/^(\d{3}):/.exec(failureWords(failed.errorMessage ?? ""))?.[1]);
-  return status === 429 || (status >= 500 && status <= 599);
 }
 
 /** An answer that ended before anything of it came: the call couldn't be made, or was stopped first. */
@@ -468,17 +468,18 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   /** What its latest request met; and whether a request went out at all, so a failure before one is a call never made. */
   const wire: Wire = {};
   let sending = false;
+  /** What the layer knew of the latest request's failure besides its words. */
+  const factsOf = (): FailureFacts => ({
+    ...(wire.status !== undefined ? { status: wire.status } : {}),
+    ...(wire.unreached === true ? { unreached: true } : {}),
+    ...(quiet.signal.aborted ? { silent: true } : {}),
+    ...(!sending || wire.redirected === true ? { unmade: true } : {}),
+    ...(wire.asked !== undefined ? { asked: wire.asked } : {}),
+    ...(connection.retries !== undefined ? { retries: connection.retries } : {}),
+  });
   /** Just before its answer ends in a failure, the run is told what the layer knew of it (`call_failed`), so it can sort it and decide whether to make it again. */
   const report = (ending: AssistantMessage): void => {
-    if (ending.stopReason !== "error") return;
-    const facts: FailureFacts = {
-      ...(wire.status !== undefined ? { status: wire.status } : {}),
-      ...(wire.unreached === true ? { unreached: true } : {}),
-      ...(quiet.signal.aborted ? { silent: true } : {}),
-      ...(!sending ? { unmade: true } : {}),
-      ...(connection.retries !== undefined ? { retries: connection.retries } : {}),
-    };
-    ask.heard?.({ kind: "call_failed", facts });
+    if (ending.stopReason === "error") ask.heard?.({ kind: "call_failed", facts: factsOf() });
   };
   try {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
@@ -545,7 +546,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       ...ask.carried,
       signal: ended,
       // Google's client takes no fetch but the process's own (pi-ai refuses another), which is why its connections take no address of their own: only pi-ai's events tell of its life.
-      ...(model.api === "google-generative-ai" ? {} : { fetch: callFetch(deps.fetch, wire, watching.alive) }),
+      ...(model.api === "google-generative-ai" ? {} : { fetch: callFetch(deps.fetch, wire, watching.alive, deps.now) }),
       ...budget,
       ...(reasoning !== undefined ? { reasoning } : {}),
       ...(typeof temperature === "number" ? { temperature } : {}),
@@ -661,10 +662,13 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     };
 
     const retries = ask.retries ?? connection.retries ?? settings.retries;
+    const again = retryTermsOf(settings);
     sending = true;
     for (let tried = 0; ; tried += 1) {
       delete wire.status;
       delete wire.unreached;
+      delete wire.asked;
+      delete wire.redirected;
       const failed = await attempt();
       if (failed === undefined) return;
       // A provider that refuses native tools is sent the same call at once with them as text, and its model is offered them so until the set time has passed.
@@ -683,13 +687,15 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
         tried -= 1;
         continue;
       }
-      if (tried >= retries || ended.aborted || !mayRetry(wire, failed)) {
+      // Google's client goes out through no fetch of the layer's: its status is the one its words lead with.
+      const broke = failureOf(failureWords(failed.errorMessage ?? ""), factsOf());
+      if (ended.aborted || !retried(again, broke, tried, retries)) {
         const ending = await failure(failed);
         report(ending);
         return endWith(out, ending);
       }
       const { promise: waited, resolve: wake } = Promise.withResolvers<void>();
-      const timer = deps.setTimeout(wake, settings.retryWait * 2 ** tried);
+      const timer = deps.setTimeout(wake, retryWait(again, tried, broke.asked));
       const woke = await Promise.race([waited, stopped]);
       deps.clearTimeout(timer);
       if (woke === STOPPED) return endWith(out, await failure(emptyAnswer(model, "aborted", stopWords(signal), deps.now())));

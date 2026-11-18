@@ -60,6 +60,18 @@ function askedIn(words: string): number | undefined {
   return Math.ceil(ms);
 }
 
+/** The wait a failed request's response asks for before the next try, in milliseconds: `retry-after-ms`, else `retry-after` in seconds or as a date. */
+export function askedWait(headers: Headers, now: number): number | undefined {
+  const ms = Number(headers.get("retry-after-ms") ?? Number.NaN);
+  if (Number.isFinite(ms) && ms >= 0) return Math.ceil(ms);
+  const after = headers.get("retry-after")?.trim() ?? "";
+  if (after === "") return undefined;
+  const seconds = Number(after);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+  const at = Date.parse(after);
+  return Number.isNaN(at) ? undefined : Math.max(0, at - now);
+}
+
 /** What a status says broke the call, given its words. */
 function byStatus(status: number, words: string): CallFailureKind {
   if (status === 401 || status === 403) return "key";
@@ -112,10 +124,25 @@ export interface RetryTerms {
   growth: number;
   /** The longest any wait is, in milliseconds (`calls.maxRetryWaitSeconds`). */
   most: number;
-  /** A wait its provider asked for is waited for, up to `most` (`calls.retryWaitAsProviderAsks`). */
+  /** A wait its provider asked for is waited for, up to `most` (`calls.retryWaitAsAsked`). */
   asked: boolean;
   /** The kinds of failure that are made again (`calls.retryOn.<kind>`): never one a try cannot help. */
   kinds: readonly CallFailureKind[];
+}
+
+/** The model layer's retry settings, as `calls.*` gives them (times in milliseconds). */
+export interface RetrySettings {
+  retries: number;
+  retryWait: number;
+  retryGrowth: number;
+  retryMost: number;
+  retryAsked: boolean;
+  retryOn: Readonly<Record<(typeof RETRIED_KINDS)[number], boolean>>;
+}
+
+/** The terms a failed call is made again under, from the settings. */
+export function retryTermsOf(settings: RetrySettings): RetryTerms {
+  return { retries: settings.retries, wait: settings.retryWait, growth: settings.retryGrowth, most: settings.retryMost, asked: settings.retryAsked, kinds: RETRIED_KINDS.filter((kind) => settings.retryOn[kind]) };
 }
 
 /** Whether a failure is made again under the terms, its kind's switch on and a try left: `tried` is how many tries it was made again already. */

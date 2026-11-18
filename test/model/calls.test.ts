@@ -159,12 +159,13 @@ describe("a failed call", () => {
     expect(await serverFailure(() => failed(429, { error: { message: "You exceeded your current quota, please check your plan and billing details.", type: "insufficient_quota", code: "insufficient_quota" } }))).toBe("429: You exceeded your current quota, please check your plan and billing details. (insufficient_quota)");
   });
 
-  test("says how a stream ended early or dropped in the middle, and is never made again once something of its answer came", async () => {
+  test("says how a stream ended early or dropped in the middle: never made again here once something of its answer came, and made again as a broken connection when it dropped before", async () => {
     expect(await anthropicFailure(() => eventStream(STARTED))).toContain("stream ended");
     expect(r?.sent.length).toBe(1);
     await r?.done();
+    // The socket closed before any piece of the answer was read.
     expect(await anthropicFailure(() => brokenStream(STARTED, "The socket connection was closed unexpectedly."))).toContain("The connection was closed or reset");
-    expect(r?.sent.length).toBe(1);
+    expect(r?.sent.length).toBe(3);
   });
 });
 
@@ -248,6 +249,42 @@ describe("a call that failed before any piece of its answer came", () => {
     stop.abort(new Error("The reply was stopped."));
     expect([(await calling).stopReason, (await calling).errorMessage]).toEqual(["aborted", "The reply was stopped."]);
     expect([made.sent.length, made.clock.pending]).toEqual([1, 0]);
+  });
+
+  test("a provider's asked wait (Retry-After) is waited for, up to the longest wait, where the settings keep to it; a run that makes its calls again itself has the call made once, and is told what broke it", async () => {
+    const asked = (): Response => new Response(JSON.stringify({ type: "error", error: { type: "rate_limit_error", message: "Rate limited" } }), { status: 429, headers: { "content-type": "application/json", "retry-after": "7" } });
+    const at: number[] = [];
+    let failing = 0;
+    const made: Rig = rig({
+      script: () => {
+        at.push(made.clock.now());
+        if (failing === 0) return eventStream(anthropicStream(anthropicTurn({ text: "At the quay." })));
+        failing -= 1;
+        return asked();
+      },
+    });
+    r = made;
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+    const sent = async (options: SimpleStreamOptions = {}): Promise<number[]> => {
+      at.length = 0;
+      failing = 1;
+      await made.clock.settle(call(agent, ASK, options));
+      return at.map((t) => t - at[0]!);
+    };
+    expect(await sent()).toEqual([0, 7_000]);
+    made.configs.global = "calls:\n  maxRetryWaitSeconds: 3\n";
+    expect(await sent()).toEqual([0, 3_000]);
+    made.configs.global = "calls:\n  retryWaitAsAsked: false\n";
+    expect(await sent()).toEqual([0, 1_000]);
+    // Its kind switched off, it is never made again.
+    made.configs.global = "calls:\n  retryOn:\n    overloaded: false\n";
+    expect(await sent()).toEqual([0]);
+    made.configs.global = "";
+    const heard: LayerEvent[] = [];
+    const once: SimpleStreamOptions & LayerOptions = { retries: 0, heard: (event) => heard.push(event) };
+    expect(await sent(once)).toEqual([0]);
+    expect(heard).toEqual([{ kind: "call_failed", facts: { status: 429, asked: 7_000 } }]);
   });
 
   test("never holds a key or a header's value, even where the provider repeats one", async () => {

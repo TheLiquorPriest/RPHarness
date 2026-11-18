@@ -5,21 +5,22 @@
 // Google's batch call; kinds.ts says which provider offers which. Texts go `embedding.batch` to a
 // request, and each request keeps the rules every call keeps: it follows no redirect, the
 // connection's key and headers go only where they were given for (book.ts), it waits no longer than
-// the provider wait, one that met no server or a 429 or 5xx is made again as a failed call is, it
+// the provider wait, one that met no server or a 429 or 5xx is made again as a failed call is (its kind switched on, the wait as the settings say), it
 // holds its connection's throttle, and no secret is in its failure words.
 
 import type { Embedded } from "../contract";
 import { MODELS } from "../harness/settings/models";
 import type { Connection } from "./book";
 import { type CallDeps, throttleOf } from "./call";
+import { askedWait, type FailureFacts, failureOf, retried, retryTermsOf, retryWait } from "./failure";
 import { isRecord } from "../contract/json";
 import { KINDS, type ProviderKind, kindOf } from "./kinds";
 import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
 
 type Wire = NonNullable<ProviderKind["embeddings"]>;
 
-/** One request's end: its vectors (with the tokens its provider counted, where it did), or why none came and whether it may be made again. */
-type Sent = { vectors: number[][]; tokens?: number } | { failed: string; again: boolean };
+/** One request's end: its vectors (with the tokens its provider counted, where it did), or why none came and, where it may be made again, what was known of it. */
+type Sent = { vectors: number[][]; tokens?: number } | { failed: string; again?: FailureFacts };
 
 /** The providers that make embeddings, by name, for words that say which to name. */
 const OFFERING = KINDS.filter((k) => k.embeddings !== undefined)
@@ -131,27 +132,32 @@ export async function embed(deps: CallDeps, texts: readonly string[], signal?: A
         response = await deps.fetch(url, { method: "POST", headers, body: bodyOf(batch), redirect: "error", signal: ended });
       } catch (error) {
         const said = error instanceof Error ? `${error.name} ${error.message} ${"code" in error ? String(error.code) : ""}` : String(error);
-        if (REDIRECT_REFUSED.test(said)) return { failed: REDIRECT_WORDS, again: false };
+        if (REDIRECT_REFUSED.test(said)) return { failed: REDIRECT_WORDS };
         if (ended.aborted) throw error;
         // No server was reached: it may be made again.
-        return { failed: errorWords(error), again: true };
+        return { failed: errorWords(error), again: { unreached: true } };
       }
       const text = await response.text();
-      if (!response.ok) return { failed: failureWords(`${response.status}: ${text}`), again: response.status === 429 || (response.status >= 500 && response.status <= 599) };
+      if (!response.ok) {
+        const failed = failureWords(`${response.status}: ${text}`);
+        if (response.status !== 429 && (response.status < 500 || response.status > 599)) return { failed };
+        const asked = askedWait(response.headers, deps.now());
+        return { failed, again: { status: response.status, ...(asked !== undefined ? { asked } : {}) } };
+      }
       let body: unknown;
       try {
         body = JSON.parse(text);
       } catch {
         // Said plainly: the parser's own words quote whatever the server sent.
-        return { failed: "its answer isn't JSON.", again: false };
+        return { failed: "its answer isn't JSON." };
       }
       const vectors = vectorsOf(wire, body, batch.length);
-      if (typeof vectors === "string") return { failed: vectors, again: false };
+      if (typeof vectors === "string") return { failed: vectors };
       const tokens = tokensOf(body);
       return { vectors, ...(tokens !== undefined ? { tokens } : {}) };
     } catch (error) {
-      if (signal?.aborted === true) return { failed: STOPPED, again: false };
-      return { failed: errorWords(wait.signal.aborted ? wait.signal.reason : error), again: false };
+      if (signal?.aborted === true) return { failed: STOPPED };
+      return { failed: errorWords(wait.signal.aborted ? wait.signal.reason : error) };
     } finally {
       deps.clearTimeout(timer);
     }
@@ -159,6 +165,7 @@ export async function embed(deps: CallDeps, texts: readonly string[], signal?: A
 
   const vectors: number[][] = [];
   const retries = connection.retries ?? settings.retries;
+  const terms = retryTermsOf(settings);
   const forever = new AbortController().signal;
   for (let from = 0; from < texts.length; from += set.batch) {
     const batch = texts.slice(from, from + set.batch);
@@ -176,8 +183,9 @@ export async function embed(deps: CallDeps, texts: readonly string[], signal?: A
           vectors.push(...sent.vectors);
           break;
         }
-        if (!sent.again || tried >= retries) return failed(`The connection "${connection.name}" made no embeddings: ${sent.failed}`);
-        if (!(await pause(deps, settings.retryWait * 2 ** tried, signal))) return failed(STOPPED);
+        const failure = sent.again !== undefined ? failureOf(sent.failed, sent.again) : undefined;
+        if (failure === undefined || !retried(terms, failure, tried, retries)) return failed(`The connection "${connection.name}" made no embeddings: ${sent.failed}`);
+        if (!(await pause(deps, retryWait(terms, tried, failure.asked), signal))) return failed(STOPPED);
       }
     } finally {
       taken.hold.settle(spent);

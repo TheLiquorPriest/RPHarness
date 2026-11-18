@@ -4,7 +4,7 @@
 // one reply with nothing twice, the broken call is booked, each try is a call against the limits, and
 // a failure no try can help is never made again.
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SETTINGS } from "../../src/harness/settings";
+import { callTerms, DEFAULT_SETTINGS, type Settings } from "../../src/harness/settings";
 import { TagReply } from "../../src/reply";
 import { type Reply, replyMissing, rigAgent, said, SinkRecorder, textOf, tool, user } from "./support";
 
@@ -83,5 +83,25 @@ describe("a call that broke off", () => {
       const outcome = await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
       expect([outcome.status, outcome.error, scripted.requests.length]).toEqual(["failed", error, 1]);
     }
+  });
+});
+
+describe("as the settings say", () => {
+  const terms = (model: Partial<Settings["model"]>) => callTerms({ ...DEFAULT_SETTINGS, model: { ...DEFAULT_SETTINGS.model, ...model } });
+  const cut: Reply = { pieces: [], end: "cut" };
+
+  test("the waits grow as set and never pass the longest; a provider's asked wait is kept to; a kind switched off is never made again", async () => {
+    const grown = rigAgent(author, [cut, cut, cut, cut], { terms: terms({ retries: 3, retryWait: 1_000, retryGrowth: 3, retryMost: 5_000 }) });
+    await grown.clock.settle(grown.runner.start({ messages: [user("Go.")] }).done);
+    expect(grown.scripted.requests.map((request) => request.at)).toEqual([0, 1_000, 4_000, 9_000]);
+
+    const busy: Reply = { pieces: [], end: { error: "429: Rate limit reached for requests. Please try again in 6.5s. (rate_limit_error)" } };
+    const asked = rigAgent(author, [busy, { pieces: [{ text: "Here." }] }]);
+    const answered = await asked.clock.settle(asked.runner.start({ messages: [user("Go.")] }).done);
+    expect([answered.status, asked.scripted.requests.map((request) => request.at)]).toEqual(["done", [0, 6_500]]);
+
+    const off = rigAgent(author, [cut, { pieces: [{ text: "Never." }] }], { terms: terms({ retryOn: { ...DEFAULT_SETTINGS.model.retryOn, connection: false } }) });
+    const failed = await off.clock.settle(off.runner.start({ messages: [user("Go.")] }).done);
+    expect([failed.status, off.scripted.requests.length]).toEqual(["failed", 1]);
   });
 });

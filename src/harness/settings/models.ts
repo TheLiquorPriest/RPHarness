@@ -3,8 +3,9 @@
 // to answer a connection's test or list its models, how long a sign-in stays open; a test call's
 // room, how much of a server's list of models is read, how much of a media address a refusal quotes,
 // how long a failed sign-in's words are kept and how long any failure's words may be, and the length
-// from which a secret is looked for anywhere in them; the wait before a failed call is made again,
-// and how many times where its connection says nothing; how long a
+// from which a secret is looked for anywhere in them; how a failed call is made again: how many
+// times where its connection says nothing, the wait before the first try, how it grows, the longest
+// it may be, whether a provider's own asked-for wait is kept to, and which kinds of failure; how long a
 // provider is asked to keep a prompt in its cache; how long a connection's model that refused
 // native tools is offered them as text, and one that refused a thinking level is sent the next
 // one down; each connection's throttle (§13.2): its requests and
@@ -44,9 +45,19 @@ export const MODELS = worded(
     wordsMost: { key: "calls.maxFailureChars", takes: { type: "whole", least: 1 }, default: 2000, perConnection: false, levels: SHARED, at: "model.wordsMost" },
     // Today's 8: a secret this long is looked for anywhere in a text, a shorter one as a word of its own, where it can't be part of an ordinary word.
     secretFloor: { key: "calls.minSecretChars", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, levels: SHARED, at: "model.secretFloor" },
-    // Appendix D.1 l.2416: 1 second, then twice the wait before; a connection's own count of tries stands over `retries`.
+    // Appendix D.1 l.2416: 1 second, then twice the wait before; a connection's own count of tries stands over `retries`. The owner's word of 18 Nov: a failed call is made again whenever in the call it failed, and nothing of how is fixed in code.
     retryWait: { key: "calls.retryWaitSeconds", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, levels: SHARED, at: "model.retryWait", ms: true },
+    retryGrowth: { key: "calls.retryWaitGrowth", takes: { type: "number", least: 1 }, default: 2, perConnection: false, levels: SHARED, at: "model.retryGrowth" },
+    // A minute: long enough for a provider that asks to slow down, short of a whole reply's hold and of Lumiverse's ten minutes of silence.
+    retryMost: { key: "calls.maxRetryWaitSeconds", takes: { type: "whole", least: 0 }, default: 60, perConnection: false, levels: SHARED, at: "model.retryMost", ms: true },
+    retryAsked: { key: "calls.retryWaitAsAsked", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryAsked" },
     retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "model.retries" },
+    // One switch for each kind of failure a try can help; a kind no try can help (no credit, a key refused, a request refused as invalid or too long, a call never sent) has none.
+    retryOnConnection: { key: "calls.retryOn.connection", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.connection" },
+    retryOnTimeout: { key: "calls.retryOn.timeout", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.timeout" },
+    retryOnOverloaded: { key: "calls.retryOn.overloaded", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.overloaded" },
+    retryOnServer: { key: "calls.retryOn.server", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.server" },
+    retryOnOther: { key: "calls.retryOn.other", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.other" },
     cacheRetention: { key: "calls.cacheRetention", takes: { type: "oneOf", values: ["none", "short", "long"] }, default: "short", perConnection: false, levels: SHARED, at: "model.cacheRetention" },
     // §13.2 "moved as it is": Build 1's 60 minutes, then native tools are tried again.
     toolRefusalMinutes: { key: "calls.toolRefusalMinutes", takes: { type: "whole", least: 0 }, default: 60, perConnection: false, levels: SHARED, at: "model.toolRefusalMinutes" },

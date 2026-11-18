@@ -56,7 +56,7 @@ export interface StoredConnection {
   serialTools?: true;
   /** Message threads are on. Off unless set: every request then carries everything it is about. */
   messageThreads?: true;
-  /** How many times a call that failed before any answer arrived is tried again; 2 when absent. */
+  /** How many times a failed call on it is made again, whenever in the call it failed (a request passed through with no turn: only before any answer came), standing over `calls.retries`, which holds when absent. */
   retries?: number;
   /** What the user entered as each model's limits, by model id (§13.3, Y33: an override per connection). */
   limits?: Record<string, ModelLimitsEntry>;

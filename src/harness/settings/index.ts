@@ -25,7 +25,7 @@
 import type { Effort, Environment, FilesPort, JsonObject, JsonValue, LayerLevel, Log, MergeLevels, Scope, SettingTakes, UserScope } from "../../contract";
 import type { AgentDefinition, DefinitionLimits, Guidance } from "../../files/api";
 import type { CallTerms } from "../../loop/types";
-import { RETRIED_KINDS } from "../../model/failure";
+import { retryTermsOf } from "../../model/failure";
 import { AGENTS } from "./agents";
 import { checkSettingValue, valueWords } from "./check";
 import { CALLS } from "./calls";
@@ -500,7 +500,7 @@ export function callTerms(settings: Settings, definition?: string): CallTerms {
     toolsAtOnce: settings.toolsAtOnce,
     ...(settings.repeats !== undefined ? { repeats: settings.repeats } : {}),
     ...(own !== undefined && Object.keys(own).length > 0 ? { sampling: { ...own } } : {}),
-    retry: { retries: settings.model.retries, wait: settings.model.retryWait, growth: 2, most: Number.POSITIVE_INFINITY, asked: false, kinds: RETRIED_KINDS },
+    retry: retryTermsOf(settings.model),
   };
 }
 

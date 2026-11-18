@@ -50,23 +50,29 @@ describe("a call that broke off", () => {
       return said("The hall is north.");
     });
     const broke: Reply = { pieces: [{ thinking: "Where is it?" }, { callBegun: "lookup", written: '{"note":"the ha' }], end: "cut" };
-    const { runner, clock, scripted } = rigAgent(author, [broke, { pieces: [{ call: "lookup", args: { note: "hall" } }] }, { pieces: [{ text: "North." }] }], { tools: [lookup] });
+    const { runner, clock, scripted, recorder } = rigAgent(author, [broke, { pieces: [{ call: "lookup", args: { note: "hall" } }] }, { pieces: [{ text: "North." }] }], { tools: [lookup] });
 
     const outcome = await clock.settle(runner.start({ messages: [user("Where is the hall?")] }).done);
 
     expect([outcome.status, outcome.text, runs]).toEqual(["done", "North.", 1]);
     expect(scripted.requests[1]?.messages).toEqual(scripted.requests[0]?.messages ?? []);
+    expect(recorder.of("call_failed").map((record) => [record.event.at, record.event.failure, record.event.retried])).toEqual([["tool-call", "connection", true]]);
   });
 
   test("each time, until its tries are used up: the work fails in the last failure's words, each wait twice the last", async () => {
     const cut: Reply = { pieces: [{ text: "The hall" }], end: "cut" };
-    const { runner, clock, scripted } = rigAgent(author, [cut, cut, cut]);
+    const { runner, clock, scripted, recorder } = rigAgent(author, [cut, cut, cut]);
 
     const outcome = await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
 
-    expect([outcome.status, outcome.error, outcome.failure]).toEqual(["failed", "The stream ended before the answer did.", "model"]);
+    expect([outcome.status, outcome.error, outcome.failure, outcome.broke]).toEqual(["failed", "The stream ended before the answer did.", "model", { failure: "connection", tries: 3 }]);
     expect(scripted.requests.map((request) => request.at)).toEqual([0, 1_000, 3_000]);
     expect(outcome.usage.calls).toBe(3);
+    expect(recorder.of("call_failed").map((record) => [record.event.at, record.event.tries, record.event.retried, record.event.wait])).toEqual([
+      ["text", 1, true, 1_000],
+      ["text", 2, true, 2_000],
+      ["text", 3, false, undefined],
+    ]);
   });
 
   test("each try is a call against the limits: at a limit, the work ends there", async () => {

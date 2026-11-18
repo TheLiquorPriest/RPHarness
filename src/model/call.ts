@@ -13,7 +13,7 @@
 // `calls.retryWaitSeconds` and doubles each time, unless its caller says it makes it again itself:
 // an agent's run (the runner) does, counting each try as a call against its limits and going on
 // from what of the reply was shown, whenever in the call it broke. For it the layer makes the call
-// once and tells the run what it knew of the failure (`call_failed`: the status, that no server was
+// once and tells the run what it knew of the failure (`call_facts`: the status, that no server was
 // reached, that its answer went silent, that it was never sent). pi-ai's own retries stay off.
 //
 // Every request carries everything it is about, so that what an agent was sent can be read back
@@ -477,9 +477,9 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     ...(wire.asked !== undefined ? { asked: wire.asked } : {}),
     ...(connection.retries !== undefined ? { retries: connection.retries } : {}),
   });
-  /** Just before its answer ends in a failure, the run is told what the layer knew of it (`call_failed`), so it can sort it and decide whether to make it again. */
+  /** Just before its answer ends in a failure, the run is told what the layer knew of it (`call_facts`), so it can sort it and decide whether to make it again. */
   const report = (ending: AssistantMessage): void => {
-    if (ending.stopReason === "error") ask.heard?.({ kind: "call_failed", facts: factsOf() });
+    if (ending.stopReason === "error") ask.heard?.({ kind: "call_facts", facts: factsOf() });
   };
   try {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));

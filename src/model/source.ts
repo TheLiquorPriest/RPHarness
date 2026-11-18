@@ -51,9 +51,10 @@ export interface AgentModel {
  * for its connection's throttle, a stand-in connection, a thinking level its provider refused and the
  * level sent instead, or the limit a call cannot be made within (bigger than its connection's whole
  * minute), at which the work ends; and, just before a call's answer ends in a failure, what the layer
- * knew of it (`call_failed`), by which the run sorts it and decides whether to make it again.
+ * knew of it (`call_facts`), by which the run sorts it and decides whether to make it again: the run
+ * traces that as `call_failed`.
  */
-export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "effort_lowered" | "limit" }> | { kind: "call_failed"; facts: FailureFacts };
+export type LayerEvent = Extract<TraceEvent, { kind: "connection_wait" | "connection_stand_in" | "effort_lowered" | "limit" }> | { kind: "call_facts"; facts: FailureFacts };
 
 /** What the runner hands an agent's stream function besides pi-ai's options: where the layer tells the agent's run of each such event (absent: nobody is told), and how many times the layer makes a call that failed before any of its answer came again. */
 export interface LayerOptions {

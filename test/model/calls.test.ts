@@ -284,7 +284,7 @@ describe("a call that failed before any piece of its answer came", () => {
     const heard: LayerEvent[] = [];
     const once: SimpleStreamOptions & LayerOptions = { retries: 0, heard: (event) => heard.push(event) };
     expect(await sent(once)).toEqual([0]);
-    expect(heard).toEqual([{ kind: "call_failed", facts: { status: 429, asked: 7_000 } }]);
+    expect(heard).toEqual([{ kind: "call_facts", facts: { status: 429, asked: 7_000 } }]);
   });
 
   test("never holds a key or a header's value, even where the provider repeats one", async () => {

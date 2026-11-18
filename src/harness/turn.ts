@@ -1320,8 +1320,13 @@ export class Turn {
         this.#firings.push({ firing: event.firing, call: this.#calls.get(agent) ?? 0 });
         this.#say("rule", { rule: event.firing.rule });
         return;
+      case "call_failed":
+        // A call made again: said in the progress file's words, with what broke it, the wait and the try it goes on to.
+        if (event.retried) this.#say("retrying", { failure: event.failure, is: { [event.failure]: true }, seconds: Math.ceil((event.wait ?? 0) / 1000), next: event.tries + 1, most: event.retries + 1 });
+        return;
       case "call_ended": {
-        if (event.stop === "cut") return;
+        // A call cut by a rule, or broken off, did nothing a rule's firing waits to hear of: no tool runs from it.
+        if (event.stop === "cut" || event.stop === "error") return;
         if (agent === this.#lead.id && event.error === undefined) {
           // In the tag form, its marked parts (the intent record, a reply) taken out: never the record into the chat.
           const tags = this.#opening?.form === "tags" ? this.#opening.tags : undefined;
@@ -1432,7 +1437,7 @@ export class Turn {
   #outcomeOf(outcome: AgentOutcome): RunOutcome {
     if (outcome.status === "limit") return this.#outcome({ status: "limit", ...(outcome.limit !== undefined ? { limit: outcome.limit } : {}) });
     if (outcome.status === "stopped") return this.#outcome({ status: "stopped" });
-    if (outcome.status === "failed") return this.#outcome({ status: "failed", error: { code: outcome.failure === "model" ? "provider" : "failed", ...(outcome.error !== undefined && outcome.error !== "" ? { detail: outcome.error } : {}) } });
+    if (outcome.status === "failed") return this.#outcome({ status: "failed", error: { code: outcome.failure === "model" ? "provider" : "failed", ...(outcome.error !== undefined && outcome.error !== "" ? { detail: outcome.error } : {}), ...(outcome.broke !== undefined ? { broke: outcome.broke } : {}) } });
     return this.#outcome({ status: this.#desk.released ? "released" : "no-reply" });
   }
 }

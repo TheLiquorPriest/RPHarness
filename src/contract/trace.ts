@@ -145,6 +145,15 @@ export type TraceEvent =
   /** A model call's answer, whole: its text, its thinking where the provider gave it, its tool calls, why it stopped, its tokens, its time; or its failure. */
   | { kind: "call_ended"; call: number; model: string; text: string; thinking?: string; toolCalls: ToolCallView[]; stop: string; usage: Usage; ms: number; error?: string }
   /**
+   * A model call failed (§13.2), told just after its end: what broke it (`failure`), the provider's
+   * or the layer's words, where in the call it broke (`at`), and the HTTP status where there was one.
+   * `tries`: the times the call has been made, this one among them. Made again (`retried`): after
+   * `wait` milliseconds, the provider's own asked-for wait being `asked` where it gave one, of
+   * `retries` retries in all. Not made again (a kind no try can help, its switch off, or its retries
+   * used up): the work ends on this failure.
+   */
+  | { kind: "call_failed"; call: number; failure: CallFailureKind; words: string; at: CallBreakPoint; status?: number; tries: number; retries: number; retried: boolean; wait?: number; asked?: number }
+  /**
    * A call held by its connection's throttle (§13.2): `minute`, its requests or tokens over the last
    * minute; `place`, its calls at once. Told as the wait begins, and again with `ms`, how long it
    * waited, as it ends.

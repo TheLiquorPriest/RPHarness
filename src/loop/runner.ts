@@ -29,7 +29,7 @@
 // files. A text the file does not have leaves the answer empty.
 import { Agent, runToolCall, type AfterToolCallContext, type AfterToolCallResult, type AgentEvent, type AgentMessage, type AgentRequestUpdate, type AgentTool, type AgentToolResult, type AgentTurnContext, type AgentTurnDecision, type BeforeToolCallContext, type BeforeToolCallResult, type StreamFn, type ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { createAssistantMessageEventStream, createInitialSystemMessage, getCurrentTools, isContextOverflow, toToolDeclaration, type Api, type AssistantMessage, type AssistantMessageEventStream, type Message, type Model, type SimpleStreamOptions, type SystemMessage, type TextContent, type ToolCall, type ToolResultMessage, type TranscriptContext, type UserMessage } from "@earendil-works/pi-ai";
-import type { AgentRef, CallPermission, CallRefusal, Effort, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
+import type { AgentRef, CallBreakPoint, CallFailureKind, CallPermission, CallRefusal, Effort, JsonSchema, JsonValue, LimitHit, RuleAction, ToolContent, ToolCtx, ToolResult, TraceEvent, Usage } from "../contract";
 import { failureOf, retried, retryWait, type FailureFacts } from "../model/failure";
 import type { LayerOptions } from "../model/source";
 import { estimateOf, type ProviderCount, requestTokens, tokensOf } from "../model/tokens";
@@ -250,10 +250,12 @@ interface Stint {
   resent: number;
   /** How many times in a row a call that failed was made again: an answer that ends whole ends the row. */
   retried: number;
-  /** What the model layer knew of the call under way's failure (`call_failed`), until the run sorts it. */
+  /** What the model layer knew of the call under way's failure (`call_facts`), until the run sorts it. */
   facts?: FailureFacts;
   /** How much of the reply had been shown when the call under way began. */
   shownAt: number;
+  /** What broke the call the work ended on, failed, and how many times that call was made. */
+  broke?: { failure: CallFailureKind; tries: number };
   /** Its hooks at the work's end were asked this stretch. */
   hooked: boolean;
   /**
@@ -499,7 +501,7 @@ export class AgentRunner {
     const worked = { tools: stint.finished.size, wrote: last !== undefined ? textOf(last) : "" };
     if (stint.halt?.status === "limit") outcome = { ...base, status: "limit", limit: stint.halt.hit, worked };
     else if (stint.halt !== undefined) outcome = { ...base, status: "stopped", worked };
-    else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "", failure: failure !== undefined ? "harness" : "model" };
+    else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "", failure: failure !== undefined ? "harness" : "model", ...(failure === undefined && stint.broke !== undefined ? { broke: stint.broke } : {}) };
     else if (stint.asked !== undefined) {
       outcome = { ...base, status: "asked", question: stint.asked.question };
       this.#asked = stint.asked.call;
@@ -675,9 +677,27 @@ export class AgentRunner {
     stint.facts = undefined;
     if (terms === undefined || last?.stopReason !== "error" || isContextOverflow(last)) return undefined;
     const failure = failureOf(last.errorMessage ?? "", facts);
-    if (!retried(terms, failure, stint.retried, facts.retries)) return undefined;
-    const wait = retryWait(terms, stint.retried, failure.asked);
-    stint.retried += 1;
+    const retries = facts.retries ?? terms.retries;
+    const wait = retried(terms, failure, stint.retried, retries) ? retryWait(terms, stint.retried, failure.asked) : undefined;
+    const tries = stint.retried + 1;
+    this.#emit(stint, {
+      kind: "call_failed",
+      call: this.#calls,
+      failure: failure.kind,
+      words: last.errorMessage ?? "",
+      at: this.#brokeAt(stint, last),
+      ...(failure.status !== undefined ? { status: failure.status } : {}),
+      tries,
+      retries,
+      retried: wait !== undefined,
+      ...(wait !== undefined ? { wait } : {}),
+      ...(failure.asked !== undefined ? { asked: failure.asked } : {}),
+    });
+    if (wait === undefined) {
+      stint.broke = { failure: failure.kind, tries };
+      return undefined;
+    }
+    stint.retried = tries;
     this.#pi.state.messages = this.#pi.state.messages.slice(0, stint.callFrom);
     if (!(await this.#pause(stint, wait))) return undefined;
     const shown = this.#o.channel?.tail() ?? "";
@@ -688,6 +708,13 @@ export class AgentRunner {
     }
     // A first call has nothing of the agent's own to go on from.
     return this.#pi.state.messages.length === 0 ? () => this.#pi.prompt([]) : () => this.#pi.continue();
+  }
+
+  /** Where a call that failed broke: after some of the reply was shown in it; else in the piece it was writing (thinking, a tool call, text); else before any of its answer came. */
+  #brokeAt(stint: Stint, message: AssistantMessage): CallBreakPoint {
+    if ((this.#o.channel?.shown.length ?? 0) > stint.shownAt) return "shown";
+    const piece = message.content.at(-1);
+    return piece === undefined ? "before" : piece.type === "toolCall" ? "tool-call" : piece.type === "thinking" ? "thinking" : "text";
   }
 
   /** Waits `ms` on the host's clock, or until the work stops or reaches a limit: whether it may go on. */
@@ -787,7 +814,7 @@ export class AgentRunner {
         ...options,
         ...streamSettings(settings),
         heard: (event) => {
-          if (event.kind === "call_failed") stint.facts = event.facts;
+          if (event.kind === "call_facts") stint.facts = event.facts;
           else if (event.kind === "limit") this.#halt(stint, { status: "limit", hit: event.hit });
           else this.#emit(stint, event);
         },

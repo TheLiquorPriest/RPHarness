@@ -4,6 +4,7 @@ import type { HistoryRange } from "./chat";
 import type { AgentRef, Scope, Usage } from "./common";
 import type { ContextBlock } from "./events";
 import type { PromptMessage } from "./prompt";
+import type { CallFailureKind } from "./trace";
 
 /** What a generation asks for (§10.10): a new reply, another attempt at one, more of one, or a draft for the player's own character. */
 export type TurnKind = "new" | "swipe" | "regenerate" | "continue" | "impersonate";
@@ -160,6 +161,12 @@ export interface ReplyError {
    * own line (§10.7).
    */
   text?: string;
+  /**
+   * For `provider`: what broke the lead's last call (`failure`, a kind of `CallFailureKind`) and how
+   * many times that call was made, its retries among them (`tries`), where the harness sorted it. The
+   * host says it in its own words, with `detail`.
+   */
+  broke?: { failure: CallFailureKind; tries: number };
 }
 
 /**

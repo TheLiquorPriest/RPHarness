@@ -1,7 +1,7 @@
 // What the agent runner takes and gives, beyond the contract's own types.
 import type { AgentMessage, ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { Api, Message, Model } from "@earendil-works/pi-ai";
-import type { AgentRef, AgentStatus, CallPermission, CallRefusal, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
+import type { AgentRef, AgentStatus, CallFailureKind, CallPermission, CallRefusal, Clock, JsonSchema, JsonValue, LimitHit, Sampling, ToolContent, ToolCtx, ToolResult, Usage } from "../contract";
 import type { RetryTerms } from "../model/failure";
 import type { Fired } from "./rules";
 
@@ -258,6 +258,8 @@ export interface AgentOutcome {
   error?: string;
   /** For `failed`: whether the model's provider failed, or RPH's own work around it. */
   failure?: "model" | "harness";
+  /** For a `failed` model: what broke its last call, and how many times that call was made, its retries among them. */
+  broke?: { failure: CallFailureKind; tries: number };
   /** The text of its last message: a sub-agent's answer. Empty when it stopped first. */
   text: string;
   /** For `limit` and `stopped`: what it had done by then: how many of its tool calls had finished, and the text of its last whole message (empty where it wrote none). */

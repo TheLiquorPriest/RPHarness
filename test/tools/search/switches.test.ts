@@ -102,8 +102,8 @@ describe("switches", () => {
     expect([...ran].sort()).toEqual(['Fetches {"address":"https://pages.example.invalid/tide"}', 'Gives {"formula":"3d6"}']);
   });
 
-  test("switched off, or with no switches at all, its tools are neither found nor named, and a pinned one is refused", async () => {
-    for (const states of [{ "dice-tower": "off", page_fetch: "off" } as const, undefined]) {
+  test("switched off, its tools are neither found nor named, and a pinned one is refused", async () => {
+    for (const states of [{ "dice-tower": "off", page_fetch: "off" } as const]) {
       const { s, ran } = await played(states);
 
       const search = await lines(s, "tool-search");

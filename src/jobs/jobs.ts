@@ -27,7 +27,7 @@ import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/s
 import type { JobCount } from "../harness/usage";
 import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
-import { joined } from "../agents/attachments";
+import { joined, startedRef } from "../agents/attachments";
 import { type JobAsk, type JobCore, type JobHooked, type PreparedJob, prepareJob } from "./run";
 import { prepareTagCheck, TAG_CHECK, tagChecks } from "./tagcheck";
 import type { JobCall, JobsWork, RunJobs } from "./tool";
@@ -149,6 +149,8 @@ export class Jobs implements JobsApi, JobsWork {
         run.started -= 1;
         return answer(part?.line("no_task"), true);
       }
+      // A name of the starting turn's folder is kept by its whole path: the job runs in a session of its own, whose turn folder is another.
+      asked = { ...asked, attach: await Promise.all(asked.attach.map((ref) => startedRef(this.#core.env.files, scope, ref))) };
       begun = await this.#begin({
         // A job started in a job of no chat is of no chat too (C-23); else of the caller's chat, tied to its turn.
         scope: scope.chat === undefined ? { user: scope.user, session: this.#core.ids() } : { user: scope.user, chat: scope.chat, session: this.#core.ids(), ...(scope.turn !== undefined ? { turn: scope.turn } : {}) },

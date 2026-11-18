@@ -9,7 +9,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import type { AgentRef, JobView, JsonValue, StorePort, TraceRecord } from "../../src/contract";
 import { createHarness } from "../../src/index";
 import { type Answer, memoryJobs, type Reply, scriptedModel } from "../../src/testing/rig";
-import { gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
+import { CHARACTER, CHAT, gate, request, said, type Stage, stage, textOf, USER, WatchedSink } from "../harness/support";
 import { jobOf, userHarness } from "./support";
 
 let open: Stage | undefined;
@@ -228,6 +228,26 @@ describe("a job an agent starts", () => {
     } finally {
       await again.close();
     }
+  });
+
+  test("is given a file of the starting turn's folder by the name it has there, and a folder by what is in it", async () => {
+    const PLAN = "Fixture plan: the bells first.";
+    const folder = `chats/${CHARACTER}/${CHAT}/sessions/s1/turns/t1/scratch`;
+    const attach = ["file:scratch/plan.md", "file:sessions/s1/turns/t1/scratch/"];
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER(), [`${folder}/plan.md`]: `${PLAN}\n` },
+      answers: routed([{ pieces: [{ call: "job_start", args: { agent: "keeper", brief: BRIEF, attach }, id: "start-1" }] }, reply("The tower is quiet.")], [{ pieces: [{ text: "Fixture count: seven." }] }]),
+    }));
+
+    await s.turn(request("t1", { lead: "lead" }));
+    await jobEnded(s, "done");
+
+    const done = toldJobs(s).at(-1)!;
+    expect(done.attach).toEqual(["file:sessions/s1/turns/t1/scratch/plan.md", "file:sessions/s1/turns/t1/scratch/"]);
+    expect(done.missing).toBeUndefined();
+    const brief = s.model.requests.map((req) => req.messages.map(textOf).join("\n")).find((text) => text.includes(BRIEF) && text.includes(PLAN)) ?? "";
+    expect(brief).toContain(`### file:sessions/s1/turns/t1/scratch/plan.md\n\n${PLAN}`);
+    expect(brief).toContain("### file:sessions/s1/turns/t1/scratch/\n\nsessions/s1/turns/t1/scratch is a folder. Its files, each by its path and size:\nsessions/s1/turns/t1/scratch/plan.md (");
   });
 });
 

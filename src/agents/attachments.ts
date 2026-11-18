@@ -1,6 +1,7 @@
 // What a sub-agent is given by name (§10.5 `delegate`, §5.4 `given:`), found and handed over in
 // full. RPH finds its own kinds itself:
-//   file:<path>                 a file, from the chat's folder, or failing that from this turn's
+//   file:<path>                 a file, from the chat's folder, or failing that from this turn's;
+//                               a folder by what is in it, each file by its path and size
 //   chat:history[scene]         a stretch of the chat the host names
 //   chat:history[-30:]          the last thirty messages
 //   chat:history[#120..#179]    messages 120 to 179, both included, counted from 0
@@ -14,7 +15,7 @@
 // A stretch of the chat is given whole, however long: read page by page of the user's
 // `tools.perCall` messages, in order, nothing cut (§10.5: "each in full").
 // Messages and entries are laid out by lines of a file; nothing here adds a word.
-import type { AgentRef, AttachMoment, AttachmentRef, ChatMessage, ContextBlock, Environment, HistoryRange, RunScope, Scope } from "../contract";
+import type { AgentRef, AttachMoment, AttachmentRef, ChatMessage, ContextBlock, Environment, FilesPort, HistoryRange, RunScope, Scope } from "../contract";
 import type { LinesPart } from "../files/api";
 
 /** A name an agent is given, and where it was named: its definition's `given:`, or the call that started it. */
@@ -80,6 +81,23 @@ export function joined(texts: readonly string[]): string {
     .join("\n\n");
 }
 
+/**
+ * A name as a job an agent starts keeps it (`job_start`): a `file:` found only in the folder of the
+ * turn the agent works in (`file:scratch/scene.md`), by its whole path from the chat's folder, which
+ * reads the same from the job's own session, where "this turn's folder" is the job's; every other
+ * name as it was written.
+ */
+export async function startedRef(files: Pick<FilesPort, "read" | "places">, scope: RunScope, ref: string): Promise<string> {
+  const kind = kindOf(ref);
+  if (kind.kind !== "file") return ref;
+  const turn = (await files.places(scope)).turn;
+  for (const path of [kind.path, ...(turn === undefined || kind.path.startsWith(turn) ? [] : [`${turn}${kind.path}`])]) {
+    const read = await files.read(scope, path, { start: 1, end: 1 }).catch(() => undefined);
+    if (read?.status === "read" || (read?.status === "missing" && read.folder === true)) return `file:${path}`;
+  }
+  return ref;
+}
+
 /** Finds and lays out what the agent `reader` is given, and gives the host the whole list to keep. */
 export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonly Wanted[]): Promise<Given> {
   const { env, scope, lines } = deps;
@@ -91,16 +109,32 @@ export async function attach(deps: AttachDeps, reader: AgentRef, wanted: readonl
   });
   let turnFolder: Promise<string | undefined> | undefined;
 
-  const fileText = async (path: string): Promise<string | undefined> => {
+  /** A folder named as a file: what is in it, every file at any depth by its path and size, as many as the user's `tools.perCall`. */
+  const folderText = async (path: string): Promise<string | undefined> => {
+    const found = await env.files.find(scope, { by: "glob", pattern: "**", path, limit: deps.most });
+    if (found.status !== "found") return undefined;
+    const head = lines?.line("folder", { path, ...(found.hits.length === 0 ? { empty: true } : {}) });
+    const files = found.hits.map((hit) => lines?.line("folder_file", { path: hit.path, ...(hit.bytes !== undefined ? { bytes: hit.bytes } : {}) }));
+    const more = found.stopped?.limit === undefined ? undefined : lines?.line("folder_more", { max: found.stopped.limit.max });
+    return [head, ...files, more].filter((line): line is string => line !== undefined && line !== "").join("\n");
+  };
+
+  /** A file's text, a folder's listing, or `null` where nothing is at `path`. */
+  const at = async (path: string): Promise<string | undefined | null> => {
     const read = await env.files.read(scope, path);
     if (read.status === "read") return read.text;
     if (read.status !== "missing") return undefined;
+    return read.folder === true ? await folderText(read.path) : null;
+  };
+
+  const fileText = async (path: string): Promise<string | undefined> => {
+    const found = await at(path);
+    if (found !== null) return found;
     // A definition cannot know the turn's folder, so it names a file of the turn from there (`file:scratch/scene.md`).
     turnFolder ??= env.files.places(scope).then((places) => places.turn);
     const turn = await turnFolder;
     if (turn === undefined || path.startsWith(turn)) return undefined;
-    const again = await env.files.read(scope, `${turn}${path}`);
-    return again.status === "read" ? again.text : undefined;
+    return (await at(`${turn}${path}`)) ?? undefined;
   };
 
   const chatText = async (scope: Scope, stretch: Stretch): Promise<string | undefined> => {

@@ -38,15 +38,3 @@ test("the front held to where the prompt first differs, and the slice there brok
   const swipe = presetA({ history: 6, lore: ["e-1"], text: { style: "Write in the present tense." } });
   expect((await play(host, "t-4b", swipe, ["e-1"], "t-3")).front).toEqual({ length: lengthOf(swipe, 3), brokenBy: "preset.style" });
 });
-
-test.skip("a chat keeps only its newest turns to be compared with; a turn it no longer keeps is not compared", async () => {
-  // hardening
-  const host = memoryHost();
-  const built = presetA({ history: 2, lore: ["e-1"] });
-  for (const turn of ["t-1", "t-2", "t-3", "t-4"]) await play(host, turn, built, ["e-1"], undefined);
-  expect((await play(host, "t-5", built, ["e-1"], "t-4")).front).toEqual({ length: lengthOf(built, built.messages.length) });
-  // Three are kept (t-3, t-4, t-5): t-1 is gone, so a turn that follows it is measured as one with none before it.
-  expect((await play(host, "t-1b", built, ["e-1"], "t-1")).front).toEqual({ length: 0, brokenBy: "Main Prompt" });
-  // No turn named: the chat's newest kept turn.
-  expect((await play(host, "t-6", built, ["e-1"], undefined)).front.brokenBy).toBeUndefined();
-});

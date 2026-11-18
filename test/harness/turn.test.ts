@@ -210,18 +210,18 @@ describe("the lead's tools", () => {
     expect(reported?.fields?.["tools"]).not.toContain("world_query");
   });
 
-  // hardening
-  test.skip("a tool nobody registered is reported once, when the session opens: not again on its later turns, and again for another session", async () => {
-    const s = (open = await stage({ answers: Array.from({ length: 3 }, () => ({ pieces: [{ text: "<reply>Calm, for now.</reply>" }] })) }));
+  test("a tool nobody registered is reported once, when the session opens: not again on its later turns, and again for another session", async () => {
+    const unregistered = "---\nname: lead\ndescription: Fixture lead.\nmodel: default\ntools: [file_read, tide_chart]\ngiven:\n  - briefing\n---\nFixture lead: you run the turn.\n";
+    const s = (open = await stage({ files: { ".agents/lead.md": unregistered }, answers: Array.from({ length: 3 }, () => ({ pieces: [{ text: "<reply>Calm, for now.</reply>" }] })) }));
     const warnings = (): unknown[] => s.logged.filter((line) => line.level === "warn" && line.message.startsWith("Tools the lead's definition lists are registered by nobody")).map((line) => line.fields?.["tools"]);
 
     for (const req of [request("t1", { lead: "lead" }), request("t2", { lead: "lead", parent: "t1" })]) expect((await s.turn(req)).outcome.status).toBe("released");
-    // RPH's own lead names the searches of the host's other stores and of the web, which the folder host does not offer.
-    expect(warnings()).toEqual([["archive_search", "web_search"]]);
+    // The lead's definition names a tool the folder host does not register.
+    expect(warnings()).toEqual([["tide_chart"]]);
 
     const other = request("u1", { lead: "lead" });
     expect((await s.turn({ ...other, scope: { ...other.scope, session: "s2" } })).outcome.status).toBe("released");
-    expect(warnings()).toEqual([["archive_search", "web_search"], ["archive_search", "web_search"]]);
+    expect(warnings()).toEqual([["tide_chart"], ["tide_chart"]]);
   });
 });
 

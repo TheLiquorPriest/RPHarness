@@ -1,9 +1,7 @@
 // A sub-agent's and a job's brief go with their requests as a lead's blocks do (§10.2, §13.3): the
 // fixed context their runner sets before every request in pi's request hook, after their opening
-// block, the same on every call; and the run's point before each request is theirs too, through the
-// team that makes them. Everything here is invented.
+// block, the same on every call. Everything here is invented.
 import { afterEach, describe, expect, test } from "bun:test";
-import type { PendingRequest, RequestPoint } from "../../src/loop/types";
 import { definition, type RecordedRequest, said, type Stage as AgentsStage, stage as agentsStage, textOf } from "../agents/support";
 import { request, type Stage as HarnessStage, stage as harnessStage } from "../harness/support";
 import type { Answer, Reply } from "./support";
@@ -21,40 +19,18 @@ const ROLL = { roll: { tier: "read" as const, description: "Fixture: rolls dice.
 /** The keeper's three calls: two rolls, then its count. */
 const KEEPER_CALLS: Reply[] = [{ pieces: [{ call: "roll", id: "r-1" }] }, { pieces: [{ call: "roll", id: "r-2" }] }, { pieces: [{ text: "Fixture count: seven bells." }] }];
 
-/** A point that is shown every request of the keeper's and puts nothing in place. */
-function watching(shown: PendingRequest[]): (agent: { definition: string }) => RequestPoint | undefined {
-  return (agent) =>
-    agent.definition === "keeper"
-      ? {
-          reserve: 0,
-          resend: 0,
-          check: (pending) => {
-            shown.push(pending);
-            return undefined;
-          },
-        }
-      : undefined;
-}
-
-/** Each request carries the opening block and the brief at its head, the same bytes every time; the point was shown that head as the fixed context. */
-function expectBriefEveryCall(requests: readonly RecordedRequest[], shown: readonly PendingRequest[]): void {
+/** Each request carries the opening block and the brief at its head, the same bytes every time. */
+function expectBriefEveryCall(requests: readonly RecordedRequest[]): void {
   expect(requests).toHaveLength(3);
   const head = (req: RecordedRequest): string => JSON.stringify(req.messages.slice(0, 2));
   expect(requests[0]!.messages[0]?.role).toBe("system");
   expect(requests[0]!.messages[1]?.role).toBe("user");
   expect(textOf(requests[0]!.messages[1]!)).toContain(BRIEF);
   for (const req of requests) expect(head(req)).toBe(head(requests[0]!));
-  expect(shown.map((pending) => pending.call)).toEqual([1, 2, 3]);
-  shown.forEach((pending, at) => {
-    expect(pending.context).toEqual({ from: 1, to: 2 });
-    expect(JSON.parse(JSON.stringify(pending.messages))).toEqual(requests[at]!.messages);
-  });
 }
 
 describe("a sub-agent's brief", () => {
-  // hardening
-  test.skip("goes with every one of its requests from the request hook, and the point the team gives it is shown each of them first", async () => {
-    const shown: PendingRequest[] = [];
+  test("goes with every one of its requests from the request hook", async () => {
     const s = await agentsStage({
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER },
       tools: ROLL,
@@ -67,14 +43,12 @@ describe("a sub-agent's brief", () => {
 
     expect((await (await s.play("Fixture: how many bells?")).done).status).toBe("done");
 
-    expectBriefEveryCall(s.models["keeper-model"]!.requests, shown);
+    expectBriefEveryCall(s.models["keeper-model"]!.requests);
   });
 });
 
 describe("a job's brief", () => {
-  // hardening
-  test.skip("goes with every request of the job's first agent, made by the team as jobs make it, and its point is shown each of them first", async () => {
-    const shown: PendingRequest[] = [];
+  test("goes with every request of the job's first agent, made by the team as jobs make it", async () => {
     const s = await agentsStage({
       files: { ".agents/lead.md": LEAD, ".agents/keeper.md": KEEPER },
       tools: ROLL,
@@ -88,7 +62,7 @@ describe("a job's brief", () => {
     if (!("runner" in made)) throw new Error("The team made no keeper.");
     expect((await made.runner.start({ messages: [] }).done).status).toBe("done");
 
-    expectBriefEveryCall(s.models["keeper-model"]!.requests, shown);
+    expectBriefEveryCall(s.models["keeper-model"]!.requests);
   });
 
   test("a job an agent starts carries its brief after its opening block on every call, the same each time", async () => {

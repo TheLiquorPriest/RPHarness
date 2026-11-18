@@ -3,7 +3,8 @@
 // what its definition lists of RPH's own tools and the host's, with the gate, the rules and the
 // sub-agents a turn's agents have. A job has no reply: the reply tools are not among its tools. A
 // job started from a turn holds that turn's prompt (R-16): its prompt tools and `prompt:` names read
-// the prompt RPH kept for that turn, so a mapper run as a job maps it.
+// the prompt RPH kept for that turn, so a mapper run as a job maps it. A job of a chat that no turn
+// started (the owner's own, as his "Map again") holds the chat's newest kept prompt instead.
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import { AGENT_TOOLS, agentDrop, agentMessage, askAuthor, delegate, Team } from "../agents";
 import type { DelegateCall } from "../agents/tools";
@@ -222,9 +223,9 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
     // A job has no briefing to hold a rule's text for.
     late: (agent, judged) => env.log.info("A rule's question was answered yes after its agent's work had ended; its text went to no agent.", { job: ask.id, agent: agent.id, rule: judged.fired.firing.rule }),
   });
-  // The prompt of the turn the job came from, read once when first asked for; a job of no turn has none.
+  // The prompt of the turn the job came from, or the chat's newest kept for a job of the chat no turn started, read once when first asked for; a job of no chat has none.
   let turnPrompt: Promise<TurnPrompt | undefined> | undefined;
-  const prompt = (): Promise<TurnPrompt | undefined> => (turnPrompt ??= scope.turn === undefined ? Promise.resolve(undefined) : keptPrompt(env, scope, scope.turn).then((kept) => kept?.prompt));
+  const prompt = (): Promise<TurnPrompt | undefined> => (turnPrompt ??= scope.chat === undefined ? Promise.resolve(undefined) : keptPrompt(env, scope, scope.turn).then((kept) => kept?.prompt));
   const team = new Team({
     env,
     trace,

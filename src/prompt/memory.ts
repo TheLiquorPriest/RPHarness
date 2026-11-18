@@ -1,107 +1,116 @@
 // What a turn does with its prompt at its start (§4.8 "What code does every turn"), and what a
 // chat's turns' prompts held, kept through the host's store under the chat's scope so that the next
-// turn, or a swipe of one, is compared with the turn it follows. RPH keeps no count of turns and
-// reads no retention setting: a turn before is compared only while the host still keeps its turn
-// folder, and what RPH kept of a turn's prompt is let go once its folder is gone, whatever the host
-// prunes its folders by (RPE by its own `retention.turnFolders`).
+// turn, or a swipe of one, is compared with the turn it follows, and a page or a job started from a
+// turn reads it back. RPH keeps no count of turns and reads no retention setting: what it kept of a
+// turn's prompt is read only while the host still keeps the turn's folder, and is let go once that
+// folder is gone, whatever the host prunes its folders by. RPH never makes a turn folder's path
+// itself: when it keeps a turn it asks the host for the turn's place (`FilesPort.places`), in the
+// session the turn played in, and it looks there.
 import type { AgentRef, Environment, FilesPort, JsonObject, JsonValue, LocatedSlices, PromptMap, PromptMessage, Scope, StorePort } from "../contract";
 import { TurnPrompt } from "./prompt";
 import { locatedOf, type PromptRecord, recordOf } from "./shape";
 import { messageText, textHash } from "./text";
 
-/** The store key of a chat's kept prompts. */
+/** The store key of a chat's kept turns. */
 function keyOf(scope: Scope): string {
   return `prompt/turns/${textHash(`${scope.user}\n${scope.chat}`)}`;
 }
 
-type Kept = { turn: string; record: PromptRecord }[];
-
-function keptOf(value: JsonValue | undefined): Kept {
-  const turns = typeof value === "object" && value !== null && !Array.isArray(value) ? value["turns"] : undefined;
-  return Array.isArray(turns) ? (turns as unknown as Kept) : [];
+/** A turn whose prompt is kept: its id, the session it played in, and its folder as the host placed it. */
+interface KeptTurn {
+  turn: string;
+  session: string;
+  folder: string;
 }
 
-/** The folder every session's folder is in (§5 `sessions/`), in the agents' view. */
-async function sessionsFolder(files: Pick<FilesPort, "places">, scope: Scope): Promise<string> {
-  return (await files.places(scope)).session.replace(/[^/]+\/$/, "");
+/** The chat's kept turns, the newest last; an entry that does not name all three is passed over. */
+function keptOf(value: JsonValue | undefined): KeptTurn[] {
+  const turns = typeof value === "object" && value !== null && !Array.isArray(value) ? value["turns"] : undefined;
+  if (!Array.isArray(turns)) return [];
+  return turns.flatMap((k) => {
+    if (typeof k !== "object" || k === null || Array.isArray(k)) return [];
+    const { turn, session, folder } = k;
+    return typeof turn === "string" && typeof session === "string" && typeof folder === "string" ? [{ turn, session, folder }] : [];
+  });
+}
+
+/** What is kept of one turn's prompt: its messages as text, where its slices were found, and what it held for the comparison of the turn after. */
+interface Held {
+  messages: PromptMessage[];
+  located: LocatedSlices;
+  record: PromptRecord;
+}
+
+function heldOf(value: JsonValue | undefined): Held | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  return Array.isArray(value["messages"]) && typeof value["record"] === "object" && value["record"] !== null ? (value as unknown as Held) : undefined;
 }
 
 /** What a chat's turns' prompts held, kept through the host's store for as long as the host keeps each turn's folder. */
 export class PromptMemory {
   readonly #store: StorePort;
-  readonly #files: Pick<FilesPort, "places" | "find">;
+  readonly #files: Pick<FilesPort, "places" | "read">;
 
-  constructor(store: StorePort, files: Pick<FilesPort, "places" | "find">) {
+  constructor(store: StorePort, files: Pick<FilesPort, "places" | "read">) {
     this.#store = store;
     this.#files = files;
   }
 
-  /** Whether the host still keeps the folder of `turn` (§5.3: `sessions/<session>/turns/<turn>/`). */
-  async #folderKept(scope: Scope, turn: string): Promise<boolean> {
-    const found = await this.#files.find(scope, { by: "glob", pattern: `*/turns/${turn}/**`, path: await sessionsFolder(this.#files, scope), limit: 1 });
-    return found.status === "found" && found.hits.length > 0;
+  /** Whether the host still keeps a kept turn's folder, looked at where the host placed it, in the session the turn played in; undefined where the host could not say, so nothing is let go on it. */
+  async #folderKept(scope: Scope, kept: KeptTurn): Promise<boolean | undefined> {
+    const at: Scope = { user: scope.user, chat: scope.chat, session: kept.session, turn: kept.turn };
+    const looked = await this.#files.read(at, kept.folder).catch(() => undefined);
+    if (looked === undefined || looked.status === "refused") return undefined;
+    return looked.status === "missing" && looked.folder === true;
   }
 
-  /** The turns whose folders the host keeps, by id; undefined where the listing stopped short, so nothing is let go on it. */
-  async #turnsKept(scope: Scope): Promise<Set<string> | undefined> {
-    const folder = await sessionsFolder(this.#files, scope);
-    const found = await this.#files.find(scope, { by: "list", path: folder, depth: 3, limit: Number.POSITIVE_INFINITY });
-    if (found.status !== "found" || found.stopped !== undefined) return undefined;
-    const turns = new Set<string>();
-    for (const hit of found.hits) {
-      const turn = hit.type === "folder" && hit.path.startsWith(folder) ? /^[^/]+\/turns\/([^/]+)\/?$/.exec(hit.path.slice(folder.length))?.[1] : undefined;
-      if (turn !== undefined) turns.add(turn);
-    }
-    return turns;
+  /** The kept turn `turn` (`undefined`: the chat's newest kept) and what is kept of its prompt, while the host keeps its folder. */
+  async #found(scope: Scope, turn: string | undefined): Promise<{ kept: KeptTurn; held: Held } | undefined> {
+    const all = keptOf(await this.#store.get(scope, keyOf(scope)));
+    const kept = turn === undefined ? all.at(-1) : all.find((k) => k.turn === turn);
+    if (kept === undefined || (await this.#folderKept(scope, kept)) !== true) return undefined;
+    const held = heldOf(await this.#store.get(scope, heldKey(scope, kept.turn)));
+    return held === undefined ? undefined : { kept, held };
   }
 
   /** What the turn `parent` held: the one a turn follows (`undefined`: the chat's newest kept turn; `null`: it follows none), while the host keeps its folder. */
   async before(scope: Scope, parent: string | null | undefined): Promise<PromptRecord | undefined> {
     if (parent === null) return undefined;
-    const kept = keptOf(await this.#store.get(scope, keyOf(scope)));
-    const found = parent === undefined ? kept.at(-1) : kept.find((k) => k.turn === parent);
-    if (found === undefined || !(await this.#folderKept(scope, found.turn))) return undefined;
-    return found.record;
+    return (await this.#found(scope, parent))?.held.record;
   }
 
   /**
-   * Keeps what the turn `scope.turn` held, as the chat's newest, and the turn's prompt itself (each
-   * message's role, name and text) with where its slices were found, so a page or a job started from
-   * the turn reads it back (`held`); those whose turn folders the host no longer keeps are let go.
+   * Keeps the turn `scope.turn`'s prompt (each message's role, name and text), where its slices were
+   * found and what it held, so the turn after is compared with it and a page or a job started from
+   * the turn reads it back (`held`). The turn becomes the chat's newest kept, named with its session
+   * and its folder as the host places it; a turn the host gives no folder is not kept, as it could
+   * never be looked for. The kept turns whose folders the host no longer keeps are let go.
    */
   async keep(scope: Scope, record: PromptRecord, messages: readonly PromptMessage[], located: LocatedSlices): Promise<void> {
     const turn = scope.turn;
     if (turn === undefined) return;
-    const folders = await this.#turnsKept(scope);
-    const gone: string[] = [];
-    await this.#store.update(scope, keyOf(scope), (current) => {
-      const kept = keptOf(current).filter((k) => {
-        const stays = k.turn !== turn && (folders === undefined || folders.has(k.turn));
-        if (!stays && k.turn !== turn) gone.push(k.turn);
-        return stays;
-      });
-      kept.push({ turn, record });
-      return { turns: kept } as unknown as JsonValue;
-    });
+    const [folder, earlier] = await Promise.all([this.#files.places(scope).then((places) => places.turn), this.#store.get(scope, keyOf(scope)).then(keptOf)]);
+    if (folder === undefined) return;
+    const looked = await Promise.all(earlier.map(async (k) => (k.turn !== turn && (await this.#folderKept(scope, k)) === false ? [k.turn] : [])));
+    const gone = new Set(looked.flat());
     const texts = messages.map((m) => ({ role: m.role, content: messageText(m), ...(m.name !== undefined ? { name: m.name } : {}) }));
-    await this.#store.set(scope, heldKey(scope, turn), { messages: texts, located } as unknown as JsonValue);
-    await Promise.all(gone.map((old) => this.#store.delete(scope, heldKey(scope, old))));
+    await this.#store.set(scope, heldKey(scope, turn), { messages: texts, located, record } as unknown as JsonValue);
+    await this.#store.update(scope, keyOf(scope), (current) => ({ turns: [...keptOf(current).filter((k) => k.turn !== turn && !gone.has(k.turn)), { turn, session: scope.session, folder }] }) as unknown as JsonValue);
+    await Promise.all([...gone].map((old) => this.#store.delete(scope, heldKey(scope, old))));
   }
 
   /** A turn's prompt as kept (`turn` absent: the chat's newest kept turn), while the host keeps the turn's folder; undefined where none is. */
   async held(scope: Scope, turn?: string): Promise<HeldPrompt | undefined> {
-    const kept = keptOf(await this.#store.get(scope, keyOf(scope)));
-    const at = turn ?? kept.at(-1)?.turn;
-    if (at === undefined || !(await this.#folderKept(scope, at))) return undefined;
-    const value = await this.#store.get(scope, heldKey(scope, at));
-    if (typeof value !== "object" || value === null || Array.isArray(value) || !Array.isArray(value["messages"])) return undefined;
-    return { turn: at, messages: value["messages"] as unknown as PromptMessage[], located: value["located"] as unknown as LocatedSlices };
+    const found = await this.#found(scope, turn);
+    if (found === undefined) return undefined;
+    return { turn: found.kept.turn, session: found.kept.session, messages: found.held.messages, located: found.held.located };
   }
 }
 
-/** A turn's prompt as kept: the turn, its messages as text, and where its slices were found then. */
+/** A turn's prompt as kept: the turn, the session it played in, its messages as text, and where its slices were found then. */
 export interface HeldPrompt {
   turn: string;
+  session: string;
   messages: PromptMessage[];
   located: LocatedSlices;
 }

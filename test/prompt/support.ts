@@ -234,6 +234,8 @@ export interface MemoryHost {
   maps: Map<string, PromptMap>;
   located: LocatedSlices[];
   logged: string[];
+  /** Takes a turn's folder away, as a host that prunes it does. */
+  removeFolder(turn: string): void;
 }
 
 /** A host's prompt and lore ports over the invented chat. Lore keeps from a reader that plays a character what the character may not know. */
@@ -243,6 +245,14 @@ export function memoryHost(): MemoryHost {
   const maps = new Map<string, PromptMap>();
   const located: LocatedSlices[] = [];
   const logged: string[] = [];
+  // Turn folders named as RPE names them, not by the turn's id: `turn-<n>-<first 8 of the id>`, `n` counted as each turn is first placed.
+  const folders = new Map<string, string>();
+  const removed = new Set<string>();
+  const folderOf = (scope: Scope): string | undefined => {
+    if (scope.turn === undefined) return undefined;
+    if (!folders.has(scope.turn)) folders.set(scope.turn, `sessions/${scope.session}/turns/turn-${folders.size + 1}-${scope.turn.slice(0, 8)}/`);
+    return folders.get(scope.turn);
+  };
   const kept = new Map<string, JsonValue>();
   const prompt: PromptPort = {
     async layout() {
@@ -309,13 +319,16 @@ export function memoryHost(): MemoryHost {
       },
       jobs: memoryJobs(),
     },
-    // Every turn's folder is kept: a turn before is always there to be compared with, and its listing stops short, so nothing is let go.
+    // Every turn's folder is kept until it is taken away: a turn before is there to be compared with.
     files: {
       layers: async () => [],
-      read: async (_scope, path) => ({ status: "missing", path }),
+      read: async (_scope, path) => ({ status: "missing", path, ...([...folders].some(([turn, folder]) => folder === path && !removed.has(turn)) ? { folder: true as const } : {}) }),
       write: async (_scope, path) => ({ status: "refused", path, reason: "outside", writable: [] }),
-      places: async (scope) => ({ notes: "persistent-workspace/", session: `sessions/${scope.session}/`, writable: [] }),
-      find: async (_scope, query) => (query.by === "glob" ? { status: "found", hits: [{ path: "sessions/s/turns/t/briefing.md", type: "file", level: "chat", kind: "generated" }] } : { status: "found", hits: [], stopped: { limit: { max: 0 } } }),
+      places: async (scope) => {
+        const turn = scope.chat === undefined ? undefined : folderOf(scope);
+        return { notes: "persistent-workspace/", session: `sessions/${scope.session}/`, ...(turn !== undefined ? { turn } : {}), writable: [] };
+      },
+      find: async () => ({ status: "found", hits: [] }),
     },
   };
   return {
@@ -327,6 +340,7 @@ export function memoryHost(): MemoryHost {
     maps,
     located,
     logged,
+    removeFolder: (turn) => void removed.add(turn),
   };
 }
 

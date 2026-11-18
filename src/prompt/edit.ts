@@ -20,11 +20,11 @@ import { promptWords } from "./words";
 
 type Env = Pick<Environment, "prompt" | "lore" | "log" | "store" | "files">;
 
-/** A kept turn's prompt (`turn` absent: the chat's newest kept), its slices found by the map as it stands now; undefined where RPH keeps none. */
+/** A kept turn's prompt (`turn` absent: the chat's newest kept), its slices found by the map as it stands now, read in the session the turn played in; undefined where RPH keeps none. */
 export async function keptPrompt(env: Env, scope: Scope, turn?: string): Promise<{ prompt: TurnPrompt; shown: Pick<PromptMapShown, "turn" | "notices" | "front"> } | undefined> {
   const held = await new PromptMemory(env.store, env.files).held(scope, turn);
   if (held === undefined) return undefined;
-  const prompt = await TurnPrompt.read({ env, scope: { ...scope, turn: held.turn }, messages: held.messages });
+  const prompt = await TurnPrompt.read({ env, scope: { ...scope, session: held.session, turn: held.turn }, messages: held.messages });
   return { prompt, shown: { turn: held.turn, notices: held.located.notices, front: held.located.front } };
 }
 

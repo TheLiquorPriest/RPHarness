@@ -16,7 +16,7 @@ export const PROMPT_TOOLS = ["prompt", "prompt_map_write"] as const;
 
 /** What the prompt map's tools are made with. */
 export interface PromptToolsDeps {
-  /** The prompt the calling agent's work serves: this turn's, or the turn's a job was started from. None: there is no prompt in view. */
+  /** The prompt the calling agent's work serves: this turn's, the turn's a job was started from, or the chat's newest kept for a job of the chat no turn started. None: there is no prompt in view. */
   prompt(ctx: ToolCtx): Promise<TurnPrompt | undefined>;
   /** The guidance of the scope the tools serve: the lines of the prompt map's words. */
   guidance: Pick<Guidance, "part">;

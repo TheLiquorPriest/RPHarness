@@ -23,7 +23,7 @@ describe("a simple turn", () => {
   test("is exactly one model call, and its first request holds the opening block, the prompt in the order sent, and the briefing", async () => {
     const s = (open = await stage({
       drafted: true,
-      answers: [{ pieces: [{ text: `<intent>${INTENT}</intent>` }, { text: "<reply>Wren shakes her head. No boat, not in this sea.</reply>" }, { call: "todo", args: { items: [{ text: "record the missing boat", done: true }], closing: true } }] }],
+      answers: [{ pieces: [{ text: `<intent>${INTENT}</intent>` }, { text: "<reply>Wren shakes her head. No boat, not in this sea.</reply>" }] }],
     }));
 
     const { outcome, sink } = await s.turn(request("t1"));

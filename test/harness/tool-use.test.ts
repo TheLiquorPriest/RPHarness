@@ -90,26 +90,6 @@ describe("a call through tool_use", () => {
     expect(s.trace.of("rule_fired").map((record) => [record.event.firing.rule, record.event.firing.tool, record.event.firing.callId])).toEqual([["fixture-hold", "bell_toll", "hold-1"]]);
   });
 
-  test("a closing call through tool_use ends the run on the found tool's own answer: a clean one ends it, one that reports something goes on for one more call", async () => {
-    const ran: string[] = [];
-    const s = (open = await stage({
-      tools: hostTools(ran, { bell_toll: { run: async () => ({ content: [{ type: "text", text: "The bell tolls." }], reports: ["The rope is frayed."] }) } }),
-      answers: [
-        { pieces: [{ text: "<reply>The tide turns.</reply>" }, { call: "tool_use", args: { name: "tide_table", args: { day: 1 }, closing: true }, id: "close-1" }] },
-        // The next turn: the closing call's answer reports something, so the lead is called once more.
-        { pieces: [{ text: "<reply>The bell tolls.</reply>" }, { call: "tool_use", args: { name: "bell_toll", args: { when: "at dawn" }, closing: true }, id: "close-2" }] },
-        { pieces: [{ text: "Noted: the rope." }] },
-      ],
-    }));
-
-    expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
-    expect(s.model.requests).toHaveLength(1);
-    expect((await s.turn(request("t2", { lead: "lead" }))).outcome.status).toBe("released");
-    expect(s.model.requests).toHaveLength(3);
-    expect(answerTo(s, "close-2")).toContain("The rope is frayed.");
-    expect(ran).toEqual(['tide_table {"day":1}']);
-  });
-
   test("ask_author reached through tool_use puts the question to the agent that gave the work, and the answer comes back as that call's answer", async () => {
     const lead = "---\nname: lead\ndescription: Fixture lead.\nmodel: default\ntools: [delegate, agent_message, tool_search, tool_use]\ngiven:\n  - briefing\n---\nFixture lead: you run the turn.\n";
     const gm = "---\nname: gm\ndescription: Fixture GM.\nmodel: default\ntools: [tool_search, tool_use]\n---\nFixture GM: rule on what you are asked.\n";

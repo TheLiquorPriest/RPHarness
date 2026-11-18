@@ -69,7 +69,6 @@ test("the Author's stack lists the reply contract, each family guide, each held 
     ["opening", "guide", "tools/files", "@global/.tools/files.md"],
     ["opening", "guide", "tools/agents", "@global/.tools/agents.md"],
     ["opening", "guide", "tools/skills", "@shipped/.tools/skills.md"],
-    ["opening", "closing", "tools/closing", "@shipped/.tools/closing.md"],
     ["opening", "description", "tools/file_read", "@shipped/.tools/file_read.md"],
     ["opening", "description", "tools/delegate", "@shipped/.tools/delegate.md"],
     ["opening", "description", "tools/skill_load", "@shipped/.tools/skill_load.md"],
@@ -162,7 +161,7 @@ test("the writer write_reply starts is handed whole a file pinned for it and a f
       [`${CHAT}persistent-workspace/plan.md`]: `${PLAN}\n`,
       [`${CHAT}persistent-workspace/style.md`]: `${STYLE}\n`,
     },
-    answers: [{ pieces: [{ call: "write_reply", args: { brief: "Fixture brief: the boat is late." } }] }, { pieces: [{ text: "The boat has not come." }] }, { pieces: [{ call: "reply_release", args: { closing: true } }] }],
+    answers: [{ pieces: [{ call: "write_reply", args: { brief: "Fixture brief: the boat is late." } }] }, { pieces: [{ text: "The boat has not come." }] }, { pieces: [{ call: "reply_release", args: {} }] }, { pieces: [{ text: "Released." }] }],
   }));
   expect((await s.turn(request("t1", { lead: "chief" }))).outcome.status).toBe("released");
   const writer = s.model.requests[1]!.messages.map((message) => textOf(message));

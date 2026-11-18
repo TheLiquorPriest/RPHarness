@@ -63,10 +63,9 @@ const firstCall: Reply = {
     { text: "er ran down her spine. " },
     { wait: 10 },
     { text: "She runs.</reply>" },
-    { call: "scene_note", args: { note: "she fled", closing: true } },
   ],
 };
-const secondCall: Reply = { pieces: [{ text: "<reply>Something moves; the cold reaches her before the sound does. " }, { wait: 10 }, { text: "She runs.</reply>" }, { call: "scene_note", args: { note: "she fled", closing: true } }] };
+const secondCall: Reply = { pieces: [{ text: "<reply>Something moves; the cold reaches her before the sound does. " }, { wait: 10 }, { text: "She runs.</reply>" }] };
 
 function setUp(inForce: boolean) {
   const sink = new SinkRecorder();
@@ -82,7 +81,7 @@ function setUp(inForce: boolean) {
 
 describe("a rule on the stream", () => {
   test("stops the call at the match, drops what was not shown, adds the rule's text, and the agent goes on", async () => {
-    const { runner, scripted, recorder, clock, sink, rules, held, released, notes } = setUp(true);
+    const { runner, scripted, recorder, clock, sink, rules, held, released } = setUp(true);
 
     const outcome = await clock.settle(runner.start({ messages: [user("She enters the hall.")] }).done);
 
@@ -94,11 +93,9 @@ describe("a rule on the stream", () => {
     expect(sink.text).not.toContain("shiv");
     expect(sink.pieces.map((piece) => piece.text).join("")).toBe(sink.text);
     expect(released).toEqual([sink.text]);
-    // The cut call's closing call never ran; the call after it did.
-    expect(notes).toEqual(["noted"]);
     const [firing] = recorder.of("rule_fired").map((record) => record.event.firing);
     expect(firing).toMatchObject({ rule: "banned-phrases", moment: "stream", watched: "reply", matched: PHRASE, action: "cut", dropped: "Something moves, and a shiver ran down her spine. " });
-    expect(recorder.of("call_ended").map((record) => record.event.stop)).toEqual(["cut", "toolUse"]);
+    expect(recorder.of("call_ended").map((record) => record.event.stop)).toEqual(["cut", "stop"]);
     // The next call: the cut message is gone, and the rule's text comes with where the player's view ends.
     const next = scripted.requests[1]!.messages;
     expect(next.some((message) => message.role === "assistant")).toBe(false);
@@ -153,9 +150,9 @@ describe("a rule on the stream", () => {
       ["user", `${RULE}${goOn}`],
     ]);
     // The cut message's call never ran and is in no record as if it had.
-    expect(notes).toEqual(["noted"]);
-    expect(recorder.of("tool_started")).toHaveLength(1);
-    expect(recorder.of("tool_ended").map((record) => [record.event.tool, record.event.clean, record.event.endedRun])).toEqual([["scene_note", true, true]]);
+    expect(notes).toEqual([]);
+    expect(recorder.of("tool_started")).toHaveLength(0);
+    expect(recorder.of("tool_ended")).toEqual([]);
     expect(sink.text).toBe("Something moves; the cold reaches her before the sound does. She runs.");
   });
 

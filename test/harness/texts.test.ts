@@ -250,13 +250,16 @@ test("every text sent to a provider in five whole turns, as the provider receive
     { steps: [{ call: "write_reply", args: { brief: "Wren says the boat has not come." } }] },
     // The narrator.
     { steps: [{ text: " has not come, Wren says." }] },
-    { steps: [{ call: "reply_release", args: { closing: true } }] },
-    // Turn three, the lead: a draft the narrator leaves empty, then the narrator live, the hand-over closing.
+    { steps: [{ call: "reply_release", args: {} }] },
+    // The lead's message after the release makes no call, and ends its run.
+    { steps: [{ text: "Released." }] },
+    // Turn three, the lead: a draft the narrator leaves empty, then the narrator live, the hand-over.
     { steps: [{ call: "write_reply", args: { brief: "Wren says the boat may come at dawn." } }] },
     { steps: [] },
-    { steps: [{ call: "write_reply", args: { brief: "Wren says the boat may come at dawn.", live: true, closing: true } }] },
+    { steps: [{ call: "write_reply", args: { brief: "Wren says the boat may come at dawn.", live: true } }] },
     // The narrator, live.
     { steps: [{ text: "At dawn, perhaps," }, { text: " Wren says." }] },
+    { steps: [{ text: "Done." }] },
   ];
   const { s, bodies } = await served(tagged, {
     drafted: true,
@@ -308,7 +311,7 @@ test("every text sent to a provider in five whole turns, as the provider receive
         { call: "gap_check", args: { topic: "supply boat", terms: ["Wren"] } },
       ],
     },
-    { steps: [{ text: "Wren shakes her head. No boat, not in this sea." }, { call: "todo", args: { items: [], closing: true } }] },
+    { steps: [{ text: "Wren shakes her head. No boat, not in this sea." }] },
   ];
   const plainStage = await served(plain, { config: "reply:\n  form: two-step\n", chat: CHAT_PATH });
   const fourth = request("t4", { lead: "lead" });
@@ -317,7 +320,7 @@ test("every text sent to a provider in five whole turns, as the provider receive
   expect(plainStage.bodies).toHaveLength(plain.length);
 
   // Each path was taken, whatever the words the files give it: every call above got an answer of its own, and the fixtures' texts went where they go.
-  for (const call of ["call_2_1", "call_2_2", "call_2_3", "call_2_4", "call_2_5", "call_2_6", "call_2_7", "call_2_8", "call_2_9", "call_2_10", "call_2_11", "call_2_12", "call_2_13", "call_2_14", "call_3_1", "call_8_1"]) expect(answerTo(bodies, call)).not.toBe("");
+  for (const call of ["call_2_1", "call_2_2", "call_2_3", "call_2_4", "call_2_5", "call_2_6", "call_2_7", "call_2_8", "call_2_9", "call_2_10", "call_2_11", "call_2_12", "call_2_13", "call_2_14", "call_3_1", "call_9_1"]) expect(answerTo(bodies, call)).not.toBe("");
   for (const call of ["call_1_1", "call_1_2", "call_1_3", "call_1_4", "call_1_5"]) expect(answerTo(plainStage.bodies, call)).not.toBe("");
   const all = [...bodies, ...plainStage.bodies].flatMap(sentTexts).join("\n");
   for (const expected of [

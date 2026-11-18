@@ -23,16 +23,16 @@ describe("around a tool call", () => {
       ctx.onUpdate(said("south wing done"));
       return { content: [{ type: "text", text: "both wings" }], marks: ["unsourced"] };
     });
-    const { runner, scripted, recorder, clock } = rigAgent(author, [{ pieces: [{ call: "survey", args: { closing: "true" } }] }, { pieces: [{ text: "Done." }] }], { tools: [survey] });
+    const { runner, scripted, recorder, clock } = rigAgent(author, [{ pieces: [{ call: "survey", args: {} }] }, { pieces: [{ text: "Done." }] }], { tools: [survey] });
 
     await clock.settle(runner.start({ messages: [user("Survey the house.")] }).done);
 
     expect(recorder.kinds().filter((kind) => kind.startsWith("tool_"))).toEqual(["tool_started", "tool_update", "tool_update", "tool_ended"]);
-    expect(recorder.of("tool_started")[0]!.event).toMatchObject({ closing: true, args: {} });
+    expect(recorder.of("tool_started")[0]!.event).toMatchObject({ args: {} });
     expect(recorder.of("tool_update").map((record) => textOf(record.event.partial))).toEqual(["north wing done", "south wing done"]);
     expect(recorder.of("tool_ended")[0]!.event.result.marks).toEqual(["unsourced"]);
-    // A clean closing call: no second call was needed, though the model may send `closing` as text.
-    expect(scripted.requests).toHaveLength(1);
+    // The message after the answer made no call: the run ended on it.
+    expect(scripted.requests).toHaveLength(2);
   });
 
   test("a tool that fails reaches the model as a failed call, and keeps the run going", async () => {

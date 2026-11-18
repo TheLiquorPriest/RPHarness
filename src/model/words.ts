@@ -52,10 +52,49 @@ function bodyWords(text: string): { words: string; status?: number } | null {
   return { words: kind !== undefined && !message.includes(kind) ? `${message} (${kind})` : message, ...(status !== undefined ? { status } : {}) };
 }
 
+/** Bun's advice to a programmer, which ends its fetch errors; no reader of a failure is helped by it. */
+const BUN_ADVICE = /\s*For more information, pass `verbose: true` in the second argument to fetch\(\)\.?/g;
+
+/** What a connection that broke says, by kind: the codes and phrases Node's, Bun's and the SDKs' network errors carry, and what each is in plain words. The first kind a text fits is its kind. */
+const NETWORK = [
+  { is: /\b(?:ENOTFOUND|EAI_AGAIN)\b|\bgetaddrinfo\b|could not be resolved/i, words: (at?: string) => (at === undefined ? "The provider's name could not be resolved" : `The name ${at} could not be resolved`) },
+  { is: /\bECONNREFUSED\b|\bConnectionRefused\b|Unable to connect\b|connection refused/i, words: (at?: string) => (at === undefined ? "The connection was refused" : `The connection to ${at} was refused`) },
+  { is: /\b(?:ECONNRESET|ECONNABORTED|EPIPE|ConnectionClosed)\b|socket connection was closed|socket hang up|other side closed|connection (?:was )?reset/i, words: () => "The connection was closed or reset" },
+  { is: /\b(?:ETIMEDOUT|ESOCKETTIMEDOUT|TimeoutError)\b|(?:operation|request|connection) timed out/i, words: () => "The request timed out" },
+] as const;
+/** The raw code a network failure names: the system's, or Bun's own name for it. */
+const NETWORK_CODE = /\b(?:E(?:CONNRESET|CONNABORTED|PIPE|NOTFOUND|AI_AGAIN|CONNREFUSED|TIMEDOUT|SOCKETTIMEDOUT)|ConnectionRefused|ConnectionClosed|TimeoutError)\b/;
+/** The address a failed connection names ("getaddrinfo ENOTFOUND host", "connect ECONNREFUSED 127.0.0.1:4000"). */
+const NETWORK_AT = /\b(?:getaddrinfo|connect) E[A-Z_]+ (\S+)/;
+/** What a network failure says of itself in every case, and so tells nothing of what the provider said. */
+const NETWORK_FILLER = /The socket connection was closed unexpectedly|Unable to connect\. Is the computer able to access the url\?|Connection error|fetch failed|The operation timed out|Request timed out/gi;
+
+/**
+ * A connection that broke, in plain words: the connection was closed or reset, the name could not be
+ * resolved, the connection was refused, the request timed out. The provider's own message, where it sent
+ * one besides, stays after the words, and the raw code stands last in brackets. Bun's advice to a programmer is
+ * taken off whatever the text is. A text that is no such failure stands as it came.
+ */
+export function networkWords(text: string): string {
+  const plain = text.replace(BUN_ADVICE, "").trim();
+  const net = NETWORK.find((n) => n.is.test(plain));
+  if (net === undefined) return plain;
+  const at = NETWORK_AT.exec(plain)?.[1]?.replace(/[.,;:]+$/, "");
+  const code = NETWORK_CODE.exec(plain)?.[0];
+  const kept = plain
+    .replace(NETWORK_AT, "")
+    .replace(NETWORK_FILLER, "")
+    .replace(new RegExp(NETWORK_CODE.source, "g"), "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/^[\s:;,.()-]+|[\s:;,.()-]+$/g, "");
+  return `${net.words(at)}${/[\p{L}\p{N}]/u.test(kept) ? `: ${kept}` : ""}${code !== undefined ? ` (${code})` : ""}`;
+}
+
 /**
  * A failed call's words: the HTTP status first where there was one, then the provider's own message
  * (and its kind), then whatever pi-ai said after the body. Text that carries no status (a connection
- * that dropped, a stream that ended early) stands as it came.
+ * that dropped, a stream that ended early) is said in plain words where it is a network failure (`networkWords`),
+ * and else stands as it came.
  */
 export function failureWords(text: string): string {
   const trimmed = text.trim();
@@ -69,7 +108,7 @@ export function failureWords(text: string): string {
   const body = bodyWords(head.trim());
   status ??= body?.status;
   const words = body !== null ? `${body.words}${tail}` : rest;
-  return status !== undefined ? `${status}: ${words}` : words;
+  return status !== undefined ? `${status}: ${words}` : body !== null ? words : networkWords(words);
 }
 
 /** What Bun's fetch says when it meets a redirect it was told not to follow. */

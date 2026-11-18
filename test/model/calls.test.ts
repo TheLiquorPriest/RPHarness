@@ -163,7 +163,7 @@ describe("a failed call", () => {
     expect(await anthropicFailure(() => eventStream(STARTED))).toContain("stream ended");
     expect(r?.sent.length).toBe(1);
     await r?.done();
-    expect(await anthropicFailure(() => brokenStream(STARTED, "The socket connection was closed unexpectedly."))).toContain("socket connection was closed");
+    expect(await anthropicFailure(() => brokenStream(STARTED, "The socket connection was closed unexpectedly."))).toContain("The connection was closed or reset");
     expect(r?.sent.length).toBe(1);
   });
 });

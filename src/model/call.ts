@@ -69,7 +69,7 @@ import type { ModelTexts } from "./texts";
 import { asText, refusesTools, withWrittenCalls } from "./tools-text";
 import { levelBelow, refusesEffort } from "./effort";
 import { addressed, answered, compatSays, holdsAddress, inPlace, keepsSystemInPlace } from "./transcript";
-import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, redact, settingWords } from "./words";
+import { REDIRECT_REFUSED, REDIRECT_WORDS, durationWords, errorWords, failureWords, networkWords, redact, settingWords } from "./words";
 
 export interface CallDeps {
   pi: MutableModels;
@@ -670,8 +670,8 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     }
   } catch (error) {
     if (signal?.aborted === true) return endWith(out, emptyAnswer(model, "aborted", stopWords(signal), deps.now()));
-    // Whatever words leave here, no key, token or header's value the layer holds is in them.
-    endWith(out, emptyAnswer(model, "error", redact(errorWords(error), await secrets(), settings), deps.now()));
+    // Whatever words leave here, no key, token or header's value the layer holds is in them; a connection that broke is said in plain words.
+    endWith(out, emptyAnswer(model, "error", redact(networkWords(errorWords(error)), await secrets(), settings), deps.now()));
   } finally {
     watch?.stop();
     hold?.settle(spent);

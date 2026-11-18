@@ -91,6 +91,11 @@ function added(had: JobLimits | undefined, more: JobLimits): JobLimits {
   return sum;
 }
 
+/** A kept job's start as a call again: its agent, brief, attachments and the character its agent plays. */
+function startOf(view: JobView): DelegateCall {
+  return { agent: view.agent, brief: view.brief, attach: view.attach ?? [], ...(view.plays !== undefined ? { plays: view.plays } : {}) };
+}
+
 export class Jobs implements JobsApi, JobsWork {
   readonly #core: Omit<JobCore, "jobs">;
   readonly #live = new Map<string, Live>();
@@ -143,7 +148,7 @@ export class Jobs implements JobsApi, JobsWork {
           run.started -= 1;
           return answer(part?.line("not_again", { id: earlier.id, state: earlier.state }), true);
         }
-        asked = { ...delegate, agent: delegate.agent !== "" ? delegate.agent : earlier.agent, brief: delegate.brief !== "" ? delegate.brief : earlier.brief, attach: delegate.attach.length > 0 ? delegate.attach : (earlier.attach ?? []) };
+        asked = { ...delegate, agent: delegate.agent !== "" ? delegate.agent : earlier.agent, brief: delegate.brief !== "" ? delegate.brief : earlier.brief, attach: delegate.attach.length > 0 ? delegate.attach : (earlier.attach ?? []), ...(delegate.plays === undefined && earlier.plays !== undefined ? { plays: earlier.plays } : {}) };
         limits = earlier.limits;
       } else if (call.agent === "" || call.brief === "") {
         run.started -= 1;
@@ -275,7 +280,7 @@ export class Jobs implements JobsApi, JobsWork {
   async start(scope: Scope | UserScope, start: JobStart): Promise<JobView | JobRefusal> {
     const bad = badLimit(start.limits);
     if (bad !== undefined) return bad;
-    const begun = await this.#begin({ scope: this.#ownScope(scope.user, "chat" in scope ? scope.chat : undefined), call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [] }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
+    const begun = await this.#begin({ scope: this.#ownScope(scope.user, "chat" in scope ? scope.chat : undefined), call: { agent: start.agent, brief: start.brief, attach: start.attach ?? [], ...(start.plays !== undefined ? { plays: start.plays } : {}) }, ...(start.limits !== undefined ? { limits: start.limits } : {}) });
     return this.#started(begun, start.agent);
   }
 
@@ -343,7 +348,7 @@ export class Jobs implements JobsApi, JobsWork {
     if (!AGAIN.includes(old.state)) return { refused: "state", id, state: old.state, applies: [...AGAIN] };
     // A tag check is started again as a check of the same connection, all its turns played afresh.
     if (old.check !== undefined) return this.tagCheck(user, old.check.connection);
-    const begun = await this.#begin({ scope: this.#ownScope(user, old.scope.chat), call: { agent: old.agent, brief: old.brief, attach: old.attach ?? [] }, ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
+    const begun = await this.#begin({ scope: this.#ownScope(user, old.scope.chat), call: startOf(old), ...(old.limits !== undefined ? { limits: old.limits } : {}), repeats: id });
     return this.#started(begun, old.agent);
   }
 
@@ -394,7 +399,7 @@ export class Jobs implements JobsApi, JobsWork {
         {
           id: view.id,
           scope,
-          call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] },
+          call: startOf(view),
           ...(view.startedBy !== "user" ? { by: view.startedBy } : {}),
           spend,
           ...(view.limits !== undefined ? { limits: view.limits } : {}),
@@ -536,8 +541,9 @@ export class Jobs implements JobsApi, JobsWork {
       startedBy: by ?? "user",
       started: core.env.clock.now(),
       usage: emptyUsage(),
-      // Its start is kept with it: a job that waits can wait again after a restart, and be started again with the same task.
+      // Its start is kept with it: a job that waits can wait again after a restart, and be started again with the same task, playing the same character.
       ...(call.attach.length > 0 ? { attach: [...call.attach] } : {}),
+      ...(call.plays !== undefined ? { plays: call.plays } : {}),
       ...(ask.limits !== undefined ? { limits: ask.limits } : {}),
       ...(ask.repeats !== undefined ? { repeats: ask.repeats } : {}),
       ...(prepared.missing.length > 0 ? { missing: prepared.missing } : {}),
@@ -763,7 +769,7 @@ export class Jobs implements JobsApi, JobsWork {
       const prepared =
         view.check !== undefined
           ? await prepareTagCheck({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, spend }, view.check.connection)
-          : await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: { agent: view.agent, brief: view.brief, attach: view.attach ?? [] }, ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spend, ...(view.limits !== undefined ? { limits: view.limits } : {}) });
+          : await prepareJob({ ...this.#core, jobs: this }, { id: view.id, scope: view.scope, call: startOf(view), ...(view.startedBy !== "user" ? { by: view.startedBy } : {}), spend, ...(view.limits !== undefined ? { limits: view.limits } : {}) });
       if (!("run" in prepared)) {
         log.warn("A job that was waiting could not be queued again.", { job: view.id, agent: view.agent });
         return false;

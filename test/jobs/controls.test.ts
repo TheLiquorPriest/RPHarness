@@ -304,6 +304,21 @@ describe("a job started again", () => {
     await jobIn(s, "done");
     expect(await s.harness.jobs!.get(USER, again.id)).toMatchObject({ state: "done", report: "Counted seven." });
   });
+
+  test("a start that names whom its agent plays: the agent plays that character, the job keeps it, and a start again plays it too", async () => {
+    const stuck = gate();
+    const s = (open = await stage({ files: FILES, answers: [{ pieces: [{ hold: stuck }, { text: "Never written." }] }, { pieces: [{ text: "Counted seven." }] }] }));
+    const first = jobOf(await s.harness.jobs!.start(request("t1").scope, { agent: "keeper", brief: BRIEF, plays: "Wren" }));
+    expect(first.plays).toBe("Wren");
+    await s.trace.seen((record) => record.run === first.id && record.event.kind === "call_started");
+    expect(s.trace.records.find((record) => record.run === first.id && record.event.kind === "agent_started")?.agent?.plays).toBe("Wren");
+    await s.harness.jobs!.cancel(USER, first.id);
+    stuck.open();
+    const again = jobOf(await s.harness.jobs!.again(USER, first.id));
+    expect(again.plays).toBe("Wren");
+    await jobIn(s, "done");
+    expect(s.trace.records.find((record) => record.run === again.id && record.event.kind === "agent_started")?.agent?.plays).toBe("Wren");
+  });
 });
 
 describe("the limits of the owner's own start", () => {

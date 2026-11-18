@@ -56,6 +56,8 @@ export interface JobView {
   stoppedBy?: JobStopper;
   /** The attachments its start named, by name, kept with the rest of its start (agent, brief, limits, the turn in `scope`) so a job that waited can wait again after a restart. */
   attach?: string[];
+  /** The character its agent plays, by name, as its start named it (`plays`); kept so a job started again, or waiting again after a restart, plays it too. */
+  plays?: string;
   /** The limits of its own its start gave. */
   limits?: JobLimits;
   /** What its agent was not given: the names in `attach` nobody could find (§4.8). */
@@ -131,11 +133,13 @@ export interface JobLimits {
   askAt?: number;
 }
 
-/** A job the user starts: the definition its agent runs as, what to do, what it is given by name, and limits of its own. A job held to one of them ends with what it has, and its record says which (`JobView.limit`). */
+/** A job the user starts: the definition its agent runs as, what to do, what it is given by name, the character its agent plays, and limits of its own. A job held to one of them ends with what it has, and its record says which (`JobView.limit`). */
 export interface JobStart {
   agent: string;
   brief: string;
   attach?: string[];
+  /** The character its agent plays, by name, as `delegate`'s `plays` names one: an agent of the character definition acts for that character. */
+  plays?: string;
   limits?: JobLimits;
 }
 

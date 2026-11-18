@@ -477,8 +477,9 @@ export class AgentRunner {
     if (stint.halt !== undefined || failed) this.#settle(stint);
     const base = { agent: this.agent, usage: stint.usage, text: last !== undefined && stint.halt === undefined ? textOf(last) : "" };
     let outcome: AgentOutcome;
-    if (stint.halt?.status === "limit") outcome = { ...base, status: "limit", limit: stint.halt.hit };
-    else if (stint.halt !== undefined) outcome = { ...base, status: "stopped" };
+    const worked = { tools: stint.finished.size, wrote: last !== undefined ? textOf(last) : "" };
+    if (stint.halt?.status === "limit") outcome = { ...base, status: "limit", limit: stint.halt.hit, worked };
+    else if (stint.halt !== undefined) outcome = { ...base, status: "stopped", worked };
     else if (failed) outcome = { ...base, status: "failed", error: failure ?? last?.errorMessage ?? "", failure: failure !== undefined ? "harness" : "model" };
     else if (stint.asked !== undefined) {
       outcome = { ...base, status: "asked", question: stint.asked.question };

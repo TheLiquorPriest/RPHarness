@@ -4,7 +4,10 @@
 // given by name is found, kept with the turn, and what cannot be found is said. How deep and how
 // many are the user's settings.
 import { afterEach, describe, expect, test } from "bun:test";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import type { Message } from "@earendil-works/pi-ai";
+import { SHIPPED_GUIDANCE } from "../../src/helpers";
 import { CHARACTER, CHAT, definition, said, type Stage, stage, textOf } from "./support";
 
 let open: Stage | undefined;
@@ -152,6 +155,23 @@ describe("delegate", () => {
       ["gm-1", { limit: "depth", per: "turn", max: 1, value: 2 }],
       [expect.any(String), { limit: "agents", per: "turn", max: 1, value: 1 }],
     ]);
+  });
+
+  test("a sub-agent that reaches one of its limits is answered with which, its count, and what it had done by then", async () => {
+    const shipped = await readFile(join(SHIPPED_GUIDANCE, ".prompts/delegation.md"), "utf8");
+    const lines = shipped.replace(/^limit: .*$/m, "limit: {{agent}}: {{limit}}{{#is.calls}} (calls){{/is.calls}} {{value}} of {{max}} per {{per}}; {{calls}} calls, {{tools}} tool calls; wrote: {{wrote}}");
+    const gm = definition("gm", { model: "gm-model", tools: ["file_read"], limits: "{ calls: 1 }" }, "Fixture GM.");
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/gm.md": gm, ".prompts/delegation.md": lines },
+      models: {
+        "lead-model": [{ pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule on the jump." }, id: "d-1" }] }, { pieces: [{ text: "Settled." }] }],
+        "gm-model": [{ pieces: [{ text: "Checking the rail first." }, { call: "file_read", args: { path: "persistent-workspace/none.md" } }] }, { pieces: [{ text: "Never written." }] }],
+      },
+    }));
+
+    await (await s.play(PLAYER)).done;
+
+    expect(toolResults(s.models["lead-model"]!.requests[1]!.messages)).toEqual(["gm-1: calls (calls) 1 of 1 per agent; 1 calls, 1 tool calls; wrote: Checking the rail first."]);
   });
 
   test("calls made in one step cannot pass the count together", async () => {

@@ -257,6 +257,8 @@ export interface AgentOutcome {
   failure?: "model" | "harness";
   /** The text of its last message: a sub-agent's answer. Empty when it stopped first. */
   text: string;
+  /** For `limit` and `stopped`: what it had done by then: how many of its tool calls had finished, and the text of its last whole message (empty where it wrote none). */
+  worked?: { tools: number; wrote: string };
   /** For `asked`: the question, as its tool gave it. */
   question?: JsonValue;
   usage: Usage;

@@ -202,6 +202,12 @@ export function fieldsOf(ref: AgentRef): Fields {
   return { ...fields };
 }
 
+/** What a sub-agent stopped short had done by then, for its line: its model calls, its tool calls that finished, and what it last wrote, where it wrote anything. */
+function workedFields(outcome: AgentOutcome): Fields {
+  const wrote = outcome.worked?.wrote.trim() ?? "";
+  return { calls: outcome.usage.calls, tools: outcome.worked?.tools ?? 0, ...(wrote !== "" ? { wrote } : {}) };
+}
+
 /** An answer of one text, or of none when it is empty. */
 function said(text: string, extra: Omit<LoopToolResult, "content"> = {}): LoopToolResult {
   return { content: text === "" ? [] : [{ type: "text", text }], ...extra };
@@ -644,12 +650,13 @@ export class Team implements TeamWork {
       case "done":
         return said(joined([words("answered", fields) ?? "", outcome.text]), extra);
       case "limit": {
+        // Which limit, its count, and what it had done by then (calls, tool calls, its last words), for the line to say.
         const hit = outcome.limit;
-        const line = words("limit", { ...fields, ...(hit !== undefined ? { limit: hit.limit, per: hit.per, max: hit.max, value: hit.value } : {}) });
+        const line = words("limit", { ...fields, ...workedFields(outcome), ...(hit !== undefined ? { limit: hit.limit, is: { [hit.limit]: true }, per: hit.per, max: hit.max, value: hit.value } : {}) });
         return said(line ?? "", { error: true, ...extra });
       }
       case "stopped":
-        return said(words("stopped", fields) ?? "", { error: true, ...extra });
+        return said(words("stopped", { ...fields, ...workedFields(outcome) }) ?? "", { error: true, ...extra });
       case "failed": {
         // Which failed, its model or RPH's own work under it, by name, for the line to say.
         const failure = outcome.failure ?? "harness";

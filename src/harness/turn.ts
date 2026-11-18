@@ -1223,7 +1223,8 @@ export class Turn {
     if (outcome.status === "asked" && this.#team !== undefined) return this.#team.asked(ref, outcome);
     // Why there is no reply is the file's to say, by how the writer's work ended; the error's own words are the model layer's or the provider's, for whoever runs the host.
     if (outcome.error !== undefined && outcome.error !== "") env.log.warn("The writer's work ended in an error.", { writer, status: outcome.status, error: outcome.error });
-    const failedWords = { writer, ...(outcome.status === "failed" || outcome.status === "limit" || outcome.status === "stopped" ? { [outcome.status]: true } : {}) };
+    const hit = outcome.limit;
+    const failedWords = { writer, ...(outcome.status === "failed" || outcome.status === "limit" || outcome.status === "stopped" ? { [outcome.status]: true } : {}), ...(hit !== undefined ? { hit: { limit: hit.limit, per: hit.per, max: hit.max, value: hit.value } } : {}) };
     if (shown !== undefined) return shown.released ? { content: [{ type: "text", text: shown.shown }] } : answer(words("not_written", failedWords), true);
     if (outcome.status !== "done" || outcome.text.trim() === "") return answer(words("not_written", failedWords), true);
     this.#drafted(ref, outcome);

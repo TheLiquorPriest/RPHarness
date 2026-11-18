@@ -55,7 +55,7 @@ no_writer: No reply was written: {{^writer}}your definition names no agent to wr
 no_draft: There is no draft to release yet.
 second_reply: The reply for this turn has already gone out. Nothing more goes to the chat.
 released: The reply went out.
-not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached one of its limits{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.
+not_written: {{writer}} gave no reply{{#failed}}: a call to its model failed{{/failed}}{{#limit}}: it reached the player's limit on {{hit.limit}} per {{hit.per}}, {{hit.value}} where the player allows {{hit.max}}{{/limit}}{{#stopped}}: it was stopped{{/stopped}}.
 empty_answer: {{tool}} answered with nothing.
 pictures_answer: {{tool}} answered with these pictures alone.
 timed_out: {{tool}} did not answer within {{seconds}} seconds, so it was stopped. It may have done its work, or not.

@@ -32,6 +32,8 @@ export const MODELS = worded(
   {
     // Appendix D.1 l.2417: an answer that goes silent is ended after 5 minutes.
     silentAfter: { key: "calls.silentAfterSeconds", takes: { type: "whole", least: 1 }, default: 300, orNone: true, none: "no limit", perConnection: false, at: "model.silentAfter", ms: true },
+    // The owner's word of 18 Nov, "nothing should run silent": a provider that took a call and says nothing of it is a dead call. Five minutes, the lead's word: a call that has shown nothing for five minutes has failed. A front of a million tokens at the highest effort may take a while to begin; a connection that needs longer is given more here, or `~` for none.
+    unansweredAfter: { key: "calls.unansweredAfterSeconds", takes: { type: "whole", least: 1 }, default: 300, orNone: true, none: "no limit", perConnection: false, at: "model.unansweredAfter", ms: true },
     providerWait: { key: "calls.providerWaitSeconds", takes: { type: "whole", least: 1 }, default: 60, perConnection: false, levels: SHARED, at: "model.providerWait", ms: true },
     signInOpen: { key: "calls.signInOpenSeconds", takes: { type: "whole", least: 1 }, default: 600, perConnection: false, levels: SHARED, at: "model.signInOpen", ms: true },
     // Enough for any provider's smallest answer (OpenAI asks at least 16), little enough to cost nothing to speak of.

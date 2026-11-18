@@ -12,6 +12,7 @@ import { fauxAssistantMessage, fauxProvider, normalizeContext } from "@earendil-
 import { SETTINGS } from "rp-harness/helpers";
 import type { Scope } from "../../src/contract";
 import type { AgentModel } from "../../src/model";
+import { failureOf } from "../../src/model/failure";
 import { KINDS } from "../../src/model/kinds";
 import type { FakeClock } from "../../src/testing/rig";
 import type { Rig } from "./support";
@@ -220,16 +221,16 @@ describe("a stream that goes silent", () => {
     expect(answer.content).toEqual([{ type: "text", text: "The mill is closed." }]);
   });
 
-  test("a model slow to begin is left to begin, a keep-alive counts as life, and the wait is the one its setting gives", async () => {
+  test("a model slow to begin is left to begin within its wait, a keep-alive counts as life once it has begun, and the wait is the one its setting gives", async () => {
     const held = heldStream();
     r = rig({ script: () => held.response, global: "calls:\n  silentAfterSeconds: 30\n" });
     const agent = await heldClaude(r);
     const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
     const events = stream[Symbol.asyncIterator]();
-    // The call is open and the model still reads its prompt: nothing waits on it yet, however long that takes.
+    // The call is open and the model still reads its prompt: only the wait for its answer to begin holds it, four minutes into five.
     await held.send(event(...ANSWER.slice(0, 1)) + PING);
-    r.clock.advance(10 * 30_000);
-    expect(r.clock.pending).toBe(0);
+    r.clock.advance(4 * 60_000);
+    expect(r.clock.pending).toBe(1);
     await held.send(event(...ANSWER.slice(1, 3)));
     await untilText(events);
     // Twenty seconds in a keep-alive comes, and twenty seconds after it the wait looks again: the stream is alive.
@@ -246,8 +247,31 @@ describe("a stream that goes silent", () => {
     expect(r.clock.pending).toBe(0);
   });
 
+  test("a call sent that has had no first piece of its answer for its wait is ended, as a call that timed out, in words that say so; a wait of none waits for ever", async () => {
+    const held = heldStream();
+    r = rig({ script: () => held.response });
+    const agent = await heldClaude(r);
+    const stream = await agent.streamFn(agent.model, normalizeContext({ messages: ASK }), {});
+    // The provider takes the call and sends its start and keep-alives, and nothing of an answer.
+    await held.send(event(...ANSWER.slice(0, 1)) + PING);
+    r.clock.advance(5 * 60_000);
+    const answer = await stream.result();
+    expect([answer.stopReason, answer.errorMessage]).toEqual(["error", 'The model gave no answer: nothing of one came for 5 minutes after the call was sent, so the call was ended. The setting "Unanswered call ends after" on the Settings page says how long a call may wait for its answer to begin.']);
+    expect(failureOf(answer.errorMessage ?? "", { silent: true }).kind).toBe("timeout");
+    await r.done();
+
+    const open = heldStream();
+    r = rig({ script: () => open.response, global: "calls:\n  unansweredAfterSeconds: ~\n" });
+    const patient = await heldClaude(r);
+    await patient.streamFn(patient.model, normalizeContext({ messages: ASK }), {});
+    await open.send(event(...ANSWER.slice(0, 1)));
+    r.clock.advance(60 * 60_000);
+    expect(r.clock.pending).toBe(0);
+  });
+
   test("a wait of none sets no limit at all: set so in the global file, or in a chat's over a global wait, for that chat's agents", async () => {
-    for (const configs of [{ global: "calls:\n  silentAfterSeconds: ~\n" }, { global: "calls:\n  silentAfterSeconds: 30\n", chats: { [QUAY.chat]: "calls:\n  silentAfterSeconds: ~\n" } }]) {
+    const none = "calls:\n  silentAfterSeconds: ~\n  unansweredAfterSeconds: ~\n";
+    for (const configs of [{ global: none }, { global: "calls:\n  silentAfterSeconds: 30\n  unansweredAfterSeconds: 30\n", chats: { [QUAY.chat]: none } }]) {
       const faux = fauxProvider({ provider: "groq", models: [{ id: "faux-1" }], tokenSize: { min: 1, max: 1 } });
       faux.setResponses([fauxAssistantMessage("The mill is closed.")]);
       const made = rig({ providers: [faux.provider], ...configs });

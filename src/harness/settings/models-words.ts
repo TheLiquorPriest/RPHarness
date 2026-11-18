@@ -1,5 +1,6 @@
 export const MODELS_WORDS = {
   "calls.silentAfterSeconds": { name: "Silent answer ends after", about: "Seconds an answer that has begun may go with nothing from its server before it is ended." },
+  "calls.unansweredAfterSeconds": { name: "Unanswered call ends after", about: "Seconds a call that has been sent may wait for the first word, thought or tool call of its answer; past them it is called failed, as a call that timed out, and made again as a failed call is. It finds a provider that took the call and went dead; it is no limit on an agent's work, which takes as long as it takes once its answer has begun." },
   "calls.providerWaitSeconds": { name: "Provider wait", about: "Seconds a provider has to answer a connection's test or list its models." },
   "calls.signInOpenSeconds": { name: "Sign-in stays open", about: "Seconds a sign-in to a provider stays open for you to finish it." },
   "calls.testRoomTokens": { name: "Test call's room", about: "Tokens a connection's test call lets its answer take." },

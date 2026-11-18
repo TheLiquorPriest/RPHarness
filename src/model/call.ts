@@ -337,8 +337,9 @@ function failedWith(message: AssistantMessage, kind: ProviderKind): string {
   return failureWords(said);
 }
 
-/** A call's watch for silence: told of each sign of life, of the answer's beginning, and let go when the call ends. */
+/** A call's watch for silence: told of each request sent, of each sign of life, of the answer's beginning, and let go when the call ends. */
 interface SilenceWatch {
+  sent(): void;
   alive(): void;
   begun(): void;
   stop(): void;
@@ -348,36 +349,54 @@ interface SilenceWatch {
 const LONGEST_TIMER = 2_147_483_647;
 
 /**
- * Watches a call for silence, and calls `silent` once it has lasted `ms` (none at all where `ms` is
- * none: `calls.silentAfterSeconds` set to no limit). The wait starts with the answer, at its first piece of
- * text, of thinking or of a tool call: until then the model may still be reading a long prompt, or
- * thinking where nothing of it is shown, and a slow start is no dead stream. From then on anything
- * from the server is life: any byte of the response (a ping or a keep-alive that pi-ai never passes
- * on among them) and any event pi-ai makes of it.
+ * Watches a call for a dead provider, and calls `silent` with what it found: `unanswered`, once a
+ * request has gone `first` with no first piece of its answer (none at all where `first` is none:
+ * `calls.unansweredAfterSeconds` set to no limit); `silent`, once an answer that has begun has gone
+ * `ms` with nothing from its server (`calls.silentAfterSeconds`). The first wait is told only the
+ * answer's beginning, a piece of text, of thinking or of a tool call, since a provider that took the
+ * request and says nothing of it is a dead call however long it is kept open. From the answer's
+ * beginning on, anything from the server is life: any byte of the response (a ping or a keep-alive
+ * that pi-ai never passes on among them) and any event pi-ai makes of it.
  */
-function silenceWatch(deps: CallDeps, ms: number | undefined, silent: (ms: number) => void): SilenceWatch {
-  if (ms === undefined) return { alive() {}, begun() {}, stop() {} };
-  const wait = ms;
+function silenceWatch(deps: CallDeps, ms: number | undefined, first: number | undefined, silent: (found: "unanswered" | "silent", ms: number) => void): SilenceWatch {
   let started = false;
   let last = 0;
+  let sentAt = 0;
   let timer: unknown;
+  let waiting: unknown;
   const check = (): void => {
+    if (ms === undefined) return;
     const quiet = deps.now() - last;
-    if (quiet >= wait) silent(wait);
-    else timer = deps.setTimeout(check, Math.min(wait - quiet, LONGEST_TIMER));
+    if (quiet >= ms) silent("silent", ms);
+    else timer = deps.setTimeout(check, Math.min(ms - quiet, LONGEST_TIMER));
+  };
+  const unanswered = (): void => {
+    if (first === undefined || started) return;
+    const waited = deps.now() - sentAt;
+    if (waited >= first) silent("unanswered", first);
+    else waiting = deps.setTimeout(unanswered, Math.min(first - waited, LONGEST_TIMER));
   };
   return {
+    sent() {
+      if (started || first === undefined) return;
+      deps.clearTimeout(waiting);
+      sentAt = deps.now();
+      waiting = deps.setTimeout(unanswered, Math.min(first, LONGEST_TIMER));
+    },
     alive() {
       last = deps.now();
     },
     begun() {
       if (started) return;
       started = true;
+      deps.clearTimeout(waiting);
+      if (ms === undefined) return;
       last = deps.now();
-      timer = deps.setTimeout(check, Math.min(wait, LONGEST_TIMER));
+      timer = deps.setTimeout(check, Math.min(ms, LONGEST_TIMER));
     },
     stop() {
       deps.clearTimeout(timer);
+      deps.clearTimeout(waiting);
     },
   };
 }
@@ -538,7 +557,15 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       prefix,
       addresses: holdsAddress(context.messages),
     };
-    const watching = silenceWatch(deps, settings.silentAfter, (silentFor) => quiet.abort(new Error(`The model went silent: nothing came from its server for ${durationWords(silentFor)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`)));
+    const watching = silenceWatch(deps, settings.silentAfter, settings.unansweredAfter, (found, waited) =>
+      quiet.abort(
+        new Error(
+          found === "silent"
+            ? `The model went silent: nothing came from its server for ${durationWords(waited)} after its answer began, so the stream was ended. ${settingWords(MODELS.silentAfter)} says how long an answer may go silent.`
+            : `The model gave no answer: nothing of one came for ${durationWords(waited)} after the call was sent, so the call was ended. ${settingWords(MODELS.unansweredAfter)} says how long a call may wait for its answer to begin.`,
+        ),
+      ),
+    );
     watch = watching;
     const ended = signal === undefined ? quiet.signal : AbortSignal.any([signal, quiet.signal]);
     const theirs = ask.carried.onPayload;
@@ -603,6 +630,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     };
     /** One go at the call: `out` ended, or the failure of a go that received nothing, which may be made again. */
     const attempt = async (): Promise<AssistantMessage | undefined> => {
+      watching.sent();
       const events = deps.pi.streamSimple(sentTo, { messages }, options);
       const iterator = events[Symbol.asyncIterator]();
       /** The answer as far as it came. */
@@ -671,6 +699,8 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
       delete wire.redirected;
       const failed = await attempt();
       if (failed === undefined) return;
+      // The try ended: the wait for its answer to begin ends with it, so nothing waits on a request no longer out; the next try starts its own.
+      watching.stop();
       // A provider that refuses native tools is sent the same call at once with them as text, and its model is offered them so until the set time has passed.
       if (offersTools && !toolsAsText && ask.toolsAs !== "native" && refusesTools(failed.errorMessage)) {
         deps.refusals.note(refusal, deps.now());

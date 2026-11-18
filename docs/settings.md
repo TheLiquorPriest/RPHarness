@@ -113,6 +113,7 @@ words say after "`~`:".
 | Key | Takes | Default | Levels | What it is |
 |---|---|---|---|---|
 | `calls.silentAfterSeconds` | whole ≥ 1 | 300 | all | **Silent answer ends after.** Seconds an answer that has begun may go with nothing from its server before it is ended. |
+| `calls.unansweredAfterSeconds` | whole ≥ 1 | 300 | all | **Unanswered call ends after.** Seconds a call that has been sent may wait for the first word, thought or tool call of its answer; past them it is called failed, as a call that timed out, and made again as a failed call is. It finds a provider that took the call and went dead; it is no limit on an agent's work, which takes as long as it takes once its answer has begun. |
 | `calls.providerWaitSeconds` | whole ≥ 1 | 60 | shipped, global | **Provider wait.** Seconds a provider has to answer a connection's test or list its models. |
 | `calls.signInOpenSeconds` | whole ≥ 1 | 600 | shipped, global | **Sign-in stays open.** Seconds a sign-in to a provider stays open for you to finish it. |
 | `calls.testRoomTokens` | whole ≥ 1 | 64 | shipped, global | **Test call's room.** Tokens a connection's test call lets its answer take. |

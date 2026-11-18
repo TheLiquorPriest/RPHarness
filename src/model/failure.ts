@@ -21,7 +21,7 @@ export interface FailureFacts {
   status?: number;
   /** No server was reached. */
   unreached?: boolean;
-  /** Its answer went silent past `calls.silentAfterSeconds`. */
+  /** Its answer went silent past `calls.silentAfterSeconds`, or none began within `calls.unansweredAfterSeconds` of its being sent. */
   silent?: boolean;
   /** It was never sent: no key, a switch not on, bigger than its connection's minute. */
   unmade?: boolean;
@@ -45,7 +45,7 @@ const CREDIT = /insufficient[_ ](?:balance|quota|funds|credits?)|out of credits?
 const KEY = /invalid[_ ](?:api[_ ])?key|incorrect api key|unauthori[sz]ed|authentication|sign-in couldn't be renewed|permission denied|forbidden/i;
 const OVERLOADED = /overloaded|rate[_ ]limit|too many requests|slow down|at capacity|server is busy|try again later/i;
 const CONNECTION = /closed or reset|connection was refused|was refused|could not be resolved|\bE(?:CONNRESET|CONNABORTED|CONNREFUSED|PIPE|NOTFOUND|AI_AGAIN)\b|socket|stream ended|ended before|premature|fetch failed|network|terminated/i;
-const TIMEOUT = /timed out|timeout|went silent/i;
+const TIMEOUT = /timed out|timeout|went silent|gave no answer/i;
 const SERVER = /internal server error|server error|bad gateway|service unavailable|\bapi_error\b/i;
 /** A wait a provider asks for in its words: "Please try again in 6.124s", "retry after 20 seconds". */
 const ASKED = /(?:try again|retry)(?: (?:in|after))? (\d+(?:\.\d+)?)\s*(ms|milliseconds?|s|secs?|seconds?|m|mins?|minutes?)\b/i;

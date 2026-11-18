@@ -68,8 +68,8 @@ export type AgentStatus = "done" | "asked" | "limit" | "stopped" | "failed";
 /**
  * What broke a model call that failed (§13.2), by whether making it again can help. Made again as
  * the settings say: `connection` (reset, refused, cut, its name not resolved, the stream ended
- * before the answer did), `timeout` (the answer went silent past `calls.silentAfterSeconds`, the
- * request timed out), `overloaded` (the provider is busy or asks to slow down), `server` (a fault of
+ * before the answer did), `timeout` (the answer went silent past `calls.silentAfterSeconds`, none
+ * began within `calls.unansweredAfterSeconds` of the call's being sent, the request timed out), `overloaded` (the provider is busy or asks to slow down), `server` (a fault of
  * the provider's server), `other` (a failure nothing here names). Never made again, since trying
  * again cannot help or is not the engine's to decide: `credit` (no credit or quota left), `key` (a
  * key or sign-in refused), `invalid` (a request the provider calls invalid), `too-long` (a prompt

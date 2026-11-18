@@ -129,8 +129,8 @@ test("a picture in a system message on the folder host: the request carries none
   expect(s.trace.of("prompt_notices").flatMap((record) => record.event.pictures ?? [])).toEqual([{ message: 0, count: 1 }]);
   // Nothing about the picture reaches the agent from RPH: no word of pictures in what it was sent.
   expect(sent.some((message) => /pictur/i.test(JSON.stringify(message.content)))).toBe(false);
-  // RPH's own files say nothing of a picture left out: a line that names pictures only counts them.
-  const named = (await shippedLines()).filter(({ line }) => /pictur|image/i.test(line));
+  // RPH's own files say nothing of a picture left out: a line that names pictures only counts them. A file's `description:` header is for the person who reads the page, not sent to an agent.
+  const named = (await shippedLines()).filter(({ line }) => /pictur|image/i.test(line) && !line.startsWith("description:"));
   expect(named.filter(({ line }) => /left|leav|drop|omit|remov|strip|cannot|can't|could not|carr|unable|not (?:be )?(?:sent|shown)/i.test(line))).toEqual([]);
 });
 

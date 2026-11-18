@@ -398,6 +398,8 @@ export class Turn {
         this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "command", detail: why });
         env.log.warn("A rule's command could not answer; the rule did not fire.", { turn: scope.turn, rule: rule.rule, path: rule.path, why });
       },
+      // A rule whose command waits to be switched on, or is off: the record says the rule would have asked, and by what name it is switched on.
+      commandWaiting: (agent, rule, state) => this.#trace.event(agent, this.#parents.get(agent.id), { kind: "rule_waiting", rule: rule.rule, path: rule.path, thing: { kind: "rule-command", name: rule.rule, target: rule.command }, state }),
       ...(memory !== undefined ? { memory } : {}),
     });
     this.#rules = rules;

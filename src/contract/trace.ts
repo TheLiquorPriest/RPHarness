@@ -162,6 +162,12 @@ export type TraceEvent =
   /** A question rule's question cannot be put (§5.4, §17.2): the judging model's part is missing, off or names no `yes:`, its connection is none, or it has no model. Shown each time it would be asked, never taken as a "no". `detail`: what is missing, in words. */
   | { kind: "rule_failed"; rule: string; path: string; why: "judge"; detail: string }
   /**
+   * A rule's moment came and its condition held, but its command did not run (C5): it waits for the
+   * owner to switch it on from the host's command line, by the name `thing` gives (`rpe allow
+   * <name>` on RPE), or he switched it off. The rule did not fire. Once in a run for each rule.
+   */
+  | { kind: "rule_waiting"; rule: string; path: string; thing: Switchable; state: Exclude<SwitchState, "on"> }
+  /**
    * A hook ran (§5.4 "Hooks", C2): which, at which moment, what it did, and how long it took; for a
    * tool's moments, the call (`callId`); `text`: its reason where it blocked, failed or timed out, or
    * what it added. The record's agent is the one it ran for.

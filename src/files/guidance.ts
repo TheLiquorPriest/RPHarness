@@ -713,8 +713,8 @@ class TreeGuidance implements Guidance {
   }
 
   async ruleRun(options: RuleRunOptions): Promise<RuleRun> {
-    const { facts, memory, window, patternTime, ranOut, stops, command, commandFailed } = options;
-    const terms = { facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}) };
+    const { facts, memory, window, patternTime, ranOut, stops, command, commandFailed, commandWaiting } = options;
+    const terms = { facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}), ...(commandWaiting !== undefined ? { commandWaiting } : {}) };
     const scope = this.scope;
     if ("chat" in scope) {
       // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).

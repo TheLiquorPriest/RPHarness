@@ -17,7 +17,7 @@ import { factFields, factsNamed, holds } from "./facts";
 import type { Rule, RuleScope } from "./rules";
 import { runPattern } from "./pattern";
 
-export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandFailed"> {
+export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandFailed" | "commandWaiting"> {
   /** The run's scope: a chat's, or a job of no chat's, whose run is given no rules. */
   scope: RunScope;
   /** The triggered rules in force when the run begins, each loaded whole. */
@@ -134,6 +134,9 @@ class Run implements RuleRun {
   readonly #stopsFor: RuleRunInput["stops"];
   readonly #command: RuleRunInput["command"];
   readonly #commandFailed: RuleRunInput["commandFailed"];
+  readonly #commandWaiting: RuleRunInput["commandWaiting"];
+  /** The rules whose command was found waiting or off in this run: each is told once. */
+  readonly #waitingTold = new Set<string>();
   /** Each agent's connection's word, as last asked at a model call's start: may a stream rule stop its call. */
   readonly #stops = new Map<string, boolean>();
   /** `<rule> <agent id>`: what fired in this run, for `once per turn`. */
@@ -157,6 +160,7 @@ class Run implements RuleRun {
     this.#stopsFor = input.stops;
     this.#command = input.command;
     this.#commandFailed = input.commandFailed;
+    this.#commandWaiting = input.commandWaiting;
     this.#defs = new Map(input.facts.defs().map((d) => [d.name, d] as const));
     this.#factNames = new Set(this.#defs.keys());
     const memory: RuleMemory = input.memory === undefined ? { turns: 0, fired: {}, held: [] } : structuredClone(input.memory);
@@ -287,8 +291,9 @@ class Run implements RuleRun {
 
   /**
    * Asks a rule's command about the moment (C5), with the moment's facts and the agent's place: true
-   * when it says yes. One that waits for its switch or is off ran nothing and does not fire; one that
-   * failed or ran out of time is told, as unable to work, and is never taken for a no.
+   * when it says yes. One that waits for its switch or is off ran nothing and does not fire, and is
+   * told once in the run, so the record shows the rule would have asked; one that failed or ran out
+   * of time is told, as unable to work, and is never taken for a no.
    */
   async #asks(agent: AgentRef, rule: Rule, command: string, moment: RuleMoment, facts: Record<string, FactValue>): Promise<boolean> {
     if (this.#command === undefined) return false;
@@ -299,6 +304,13 @@ class Run implements RuleRun {
       said = await this.#command(agent, { rule: rule.name, command }, input);
     } catch (error) {
       said = { failed: error instanceof Error ? error.message : String(error) };
+    }
+    if (said === "waiting" || said === "off") {
+      if (!this.#waitingTold.has(rule.name)) {
+        this.#waitingTold.add(rule.name);
+        this.#commandWaiting?.(agent, { rule: rule.name, path: rule.path, command }, said);
+      }
+      return false;
     }
     if (typeof said !== "object") return said === "yes";
     this.problems.push({ path: rule.path, level: rule.level, message: `Its command could not answer (${said.failed}), so it did not fire: the rule is unable to work until its command answers yes or no.` });

@@ -297,6 +297,17 @@ describe("`repeat:`", () => {
   });
 });
 
+describe("`command:`", () => {
+  test("a rule whose command waits to be switched on does not fire, and is told once in the run with its name and command", async () => {
+    b = await bench({ chat: { "rules/asks.md": "---\ndescription: Asks.\nagents: all\nat: run-end\nrepeat: always\ncommand: sh asks.sh\n---\nAsked.\n" } });
+    const told: unknown[] = [];
+    const r = await loadGuidance(b.host.files, scope).ruleRun({ facts: createFacts(b.host.facts, () => own), patternTime: 50, command: async () => "waiting", commandWaiting: (agent, rule, state) => told.push([agent.id, rule, state]) });
+    expect(await r.runEnd.due({ agent: author, call: 1 })).toEqual([]);
+    expect(await r.runEnd.due({ agent: author, call: 2 })).toEqual([]);
+    expect(told).toEqual([[author.id, { rule: "asks", path: "rules/asks.md", command: "sh asks.sh" }, "waiting"]]);
+  });
+});
+
 describe("`needs:`", () => {
   test("a reminder stops the moment the file it needs is switched off, within one run", async () => {
     b = await drafts();

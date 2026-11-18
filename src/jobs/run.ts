@@ -147,6 +147,8 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       trace.event(agent, undefined, { kind: "rule_failed", rule: rule.rule, path: rule.path, why: "command", detail: why });
       env.log.warn("A rule's command could not answer; the rule did not fire.", { job: ask.id, rule: rule.rule, path: rule.path, why });
     },
+    // One whose command waits to be switched on, or is off, is in the record once a run, by the name it is switched on by.
+    commandWaiting: (agent, rule, state) => trace.event(agent, undefined, { kind: "rule_waiting", rule: rule.rule, path: rule.path, thing: { kind: "rule-command", name: rule.rule, target: rule.command }, state }),
   });
   for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
   // The settings' limits on a job's run, each given by the start standing in place of the setting where the owner started the job (his word for it, looser or tighter, §12), and made tighter, never looser, where an agent did. The day's limits hold either way.

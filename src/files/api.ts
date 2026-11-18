@@ -395,6 +395,8 @@ export interface RuleRunOptions {
   command?(agent: AgentRef, rule: { rule: string; command: string }, input: JsonValue): Promise<RuleCommandAnswer>;
   /** Told of a rule whose command failed or ran out of time: it did not fire, and it is shown as unable to work, never as a "no". */
   commandFailed?(agent: AgentRef, rule: { rule: string; path: string }, why: string): void;
+  /** Told of a rule whose moment came and whose condition held, but whose command did not run: it waits to be switched on, or is off (`state`). Once in the run for each rule. */
+  commandWaiting?(agent: AgentRef, rule: { rule: string; path: string; command: string }, state: "waiting" | "off"): void;
 }
 
 /** What a rule's command answered: yes or no; that it waits for its switch or is off (nothing ran); or why it could not answer. */

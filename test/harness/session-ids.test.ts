@@ -47,7 +47,8 @@ test("a turn with a question rule, a compaction and a writer: the judge's, the s
       case "lead":
         leadCalls += 1;
         if (leadCalls <= 3) return played(leadCalls);
-        return leadCalls === 4 ? { pieces: [{ call: "write_reply", args: { brief: "Tell the tide." } }] } : { pieces: [{ call: "reply_release", args: { closing: true } }] };
+        if (leadCalls === 4) return { pieces: [{ call: "write_reply", args: { brief: "Tell the tide." } }] };
+        return leadCalls === 5 ? { pieces: [{ call: "reply_release", args: {} }] } : { pieces: [{ text: "Released." }] };
     }
   };
   // Each session let go, with how many trace records had come by then.
@@ -67,12 +68,12 @@ test("a turn with a question rule, a compaction and a writer: the judge's, the s
 
   const sessions = (kind: RequestKind): (string | undefined)[] => s.model.requests.filter((req) => kindOf(req) === kind).map((req) => req.options.sessionId);
   // The lead's own calls, the save call among them, carry the scene's session id.
-  expect(sessions("lead")).toHaveLength(5);
+  expect(sessions("lead")).toHaveLength(6);
   expect(new Set(sessions("lead"))).toEqual(new Set([S1.session]));
   expect(sessions("save")).toEqual([S1.session]);
   // The others each carry one of their own: one per judge's question, one per summary call, one for the writer.
   const others = [...sessions("judge"), ...sessions("summary"), ...sessions("writer")];
-  expect(sessions("judge")).toHaveLength(3);
+  expect(sessions("judge")).toHaveLength(4);
   expect(sessions("summary")).toHaveLength(1);
   expect(sessions("writer")).toHaveLength(1);
   for (const id of others) {

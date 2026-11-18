@@ -29,7 +29,7 @@ describe("the two-step form", () => {
       config: "reply:\n  form: two-step\n",
       answers: [
         { pieces: [{ text: "Checking what the notes say first." }, { call: "file_write", args: { path: "sessions/s1/turns/t1/scratch/intent.md", op: "write", text: intent } }] },
-        { pieces: [{ text: "Wren shakes her head." }, { hold: more }, { text: " No boat, not in this sea." }, { call: "todo", args: { items: [], closing: true } }] },
+        { pieces: [{ text: "Wren shakes her head." }, { hold: more }, { text: " No boat, not in this sea." }] },
       ],
     }));
     const sink = new WatchedSink(s.clock);
@@ -133,7 +133,7 @@ describe("a finished file", () => {
     const text = "The lamp turns. Wren sets down the cloth.\n\nNo boat tonight, she says. Not in this sea.\n";
     const s = (open = await stage({
       files: { "chats/wren-hale/lighthouse/persistent-workspace/reply.md": text },
-      answers: [{ pieces: [{ call: "reply_release", args: { path: "persistent-workspace/reply.md", closing: true } }] }],
+      answers: [{ pieces: [{ call: "reply_release", args: { path: "persistent-workspace/reply.md" } }] }, { pieces: [{ text: "Released." }] }],
     }));
 
     const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
@@ -149,20 +149,21 @@ describe("a finished file", () => {
 });
 
 describe("the narrator", () => {
-  test("draft first: the lead hands over a brief, reads the draft, and releases it whole; three calls", async () => {
+  test("draft first: the lead hands over a brief, reads the draft, and releases it whole; four calls", async () => {
     const s = (open = await stage({
       drafted: true,
       answers: [
         { pieces: [{ text: "<intent>Hand the prose over.</intent>" }, { call: "write_reply", args: { brief: BRIEF } }] },
         { pieces: [{ text: " has not come," }, { text: " Wren says, and turns back to the brass." }] },
-        { pieces: [{ call: "reply_release", args: { closing: true } }] },
+        { pieces: [{ call: "reply_release", args: {} }] },
+        { pieces: [{ text: "Released." }] },
       ],
     }));
 
     const { outcome, sink } = await s.turn(request("t1", { prefill: "The boat", prompt: [...PROMPT, { role: "assistant", content: "The boat" }], presetSampling: PRESET, replyMaxTokens: 600 }));
 
     expect(outcome).toMatchObject({ status: "released", form: "narrator", reply: " has not come, Wren says, and turns back to the brass." });
-    expect(s.model.requests).toHaveLength(3);
+    expect(s.model.requests).toHaveLength(4);
     // Sent whole, once the lead released it.
     expect(sink.pieces.map((piece) => piece.text)).toEqual([" has not come, Wren says, and turns back to the brass."]);
     const narrator = s.model.requests[1]!;
@@ -196,7 +197,8 @@ describe("the narrator", () => {
         { pieces: [{ call: "write_reply", args: { brief: BRIEF } }] },
         { pieces: [{ text: "Wren turns. A shiver down her spine" }, { text: " as she says it." }] },
         { pieces: [{ text: "Wren turns and says it plainly." }] },
-        { pieces: [{ call: "reply_release", args: { closing: true } }] },
+        { pieces: [{ call: "reply_release", args: {} }] },
+        { pieces: [{ text: "Released." }] },
       ],
     }));
 
@@ -204,7 +206,7 @@ describe("the narrator", () => {
 
     expect(outcome).toMatchObject({ status: "released", form: "narrator", reply: "Wren turns and says it plainly." });
     expect(sink.text).toBe("Wren turns and says it plainly.");
-    expect(s.model.requests).toHaveLength(4);
+    expect(s.model.requests).toHaveLength(5);
     expect(s.trace.of("rule_fired").map((record) => [record.agent?.definition, record.event.firing.rule, record.event.firing.action, record.event.firing.dropped])).toEqual([["narrator", "fixture-shiver", "cut", "Wren turns. A shiver down her spine"]]);
     // Nothing of the draft had been shown, so the narrator goes on under the rule's text alone.
     expect(textOf(s.model.requests[2]!.messages.at(-1)!)).toBe(rule);
@@ -233,13 +235,14 @@ describe("the narrator", () => {
     expect(s.logged).toContainEqual(expect.objectContaining({ level: "warn", fields: expect.objectContaining({ writer: "narrator", error: "400: Fixture: the request was refused." }) }));
   });
 
-  test("live: the narrator's words reach the player as they are written, and a closing hand-over ends the turn; two calls", async () => {
+  test("live: the narrator's words reach the player as they are written, and the lead's next message after the hand-over ends the turn; three calls", async () => {
     const more = gate();
     const s = (open = await stage({
       drafted: true,
       answers: [
-        { pieces: [{ call: "write_reply", args: { brief: BRIEF, live: true, closing: true } }] },
+        { pieces: [{ call: "write_reply", args: { brief: BRIEF, live: true } }] },
         { pieces: [{ text: "Not yet," }, { hold: more }, { text: " Wren says." }] },
+        { pieces: [{ text: "Done." }] },
       ],
     }));
     const sink = new WatchedSink(s.clock);
@@ -252,7 +255,7 @@ describe("the narrator", () => {
     const { outcome } = await turn;
 
     expect(outcome).toMatchObject({ status: "released", form: "narrator-live", reply: "Not yet, Wren says." });
-    expect(s.model.requests).toHaveLength(2);
+    expect(s.model.requests).toHaveLength(3);
     expect(sink.pieces.map((piece) => piece.text)).toEqual(["Not yet,", " Wren says."]);
     const released = s.told.find((told) => told.kind === "released")?.payload;
     expect(released).toMatchObject({ form: "narrator-live", by: { definition: "narrator" }, length: "Not yet, Wren says.".length });
@@ -302,9 +305,10 @@ describe("one reply per generation", () => {
   test("two-step: a second reply in one generation gets the plain line", async () => {
     const s = (open = await stage({
       config: "reply:\n  form: two-step\n",
+      files: { "chats/wren-hale/lighthouse/persistent-workspace/draft.md": "Wren shakes her head.\n" },
       answers: [
-        // The reply, with a closing call that does not come back clean, so the lead gets another call.
-        { pieces: [{ text: "Wren shakes her head." }, { call: "file_read", args: { path: "persistent-workspace/absent.md", closing: true } }] },
+        // The reply goes out as a file; the message after it, text with no call, is a second reply.
+        { pieces: [{ call: "reply_release", args: { path: "persistent-workspace/draft.md" } }] },
         { pieces: [{ text: "On second thought, a boat." }] },
         { pieces: [{ text: "Understood." }] },
       ],
@@ -312,8 +316,8 @@ describe("one reply per generation", () => {
 
     const { outcome, sink } = await s.turn(request("t1", { lead: "lead" }));
 
-    expect(outcome).toMatchObject({ status: "released", form: "message", reply: "Wren shakes her head." });
-    expect(sink.pieces.map((piece) => piece.text)).toEqual(["Wren shakes her head."]);
+    expect(outcome).toMatchObject({ status: "released", form: "file", reply: "Wren shakes her head.\n" });
+    expect(sink.pieces.map((piece) => piece.text)).toEqual(["Wren shakes her head.\n"]);
     expect(s.model.requests).toHaveLength(3);
     const told = s.model.requests[2]!.messages.at(-1)!;
     expect(told.role).toBe("user");

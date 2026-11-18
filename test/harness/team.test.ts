@@ -188,8 +188,9 @@ test("the caller's definition's writer: key decides who writes; a writer: header
   const s = (open = await stage({
     files: { ".agents/scribe.md": SCRIBE.replace("writer: narrator", "writer: bard"), ".agents/herald.md": herald, ".agents/narrator.md": NARRATOR, ".agents/bard.md": BARD, ".tools/write_reply.md": WRITE_REPLY_NAMING },
     answers: [
-      { pieces: [{ call: "write_reply", args: { brief: "Tell the leap.", live: true, closing: true }, id: "w-1" }] },
+      { pieces: [{ call: "write_reply", args: { brief: "Tell the leap.", live: true }, id: "w-1" }] },
       { pieces: [{ text: "She clears the gap by a hand." }] },
+      { pieces: [{ text: "Done." }] },
       { pieces: [{ call: "write_reply", args: { brief: "Tell the leap." }, id: "w-2" }] },
       { pieces: [{ text: "<reply>She waits for the tide.</reply>" }] },
     ],

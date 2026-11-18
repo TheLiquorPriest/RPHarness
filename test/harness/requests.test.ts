@@ -246,12 +246,13 @@ test("rebuilding a turn's first requests from the turn folder gives, byte for by
     answers: [
       { pieces: [{ text: "<intent>Hand the prose over.</intent>" }, { call: "write_reply", args: { brief: "Wren says the boat has not come." } }] },
       { pieces: [{ text: " has not come, Wren says." }] },
-      { pieces: [{ call: "reply_release", args: { closing: true } }] },
+      { pieces: [{ call: "reply_release", args: {} }] },
+      { pieces: [{ text: "Released." }] },
     ],
   }));
   expect((await drafted.turn(request("t1", { prefill: "The boat", prompt: [...PROMPT, { role: "assistant", content: "The boat" }] }))).outcome.status).toBe("released");
   const draftedStarted = drafted.trace.of("call_started");
-  expect(draftedStarted.map((record) => record.event.request !== undefined)).toEqual([true, true, false]);
+  expect(draftedStarted.map((record) => record.event.request !== undefined)).toEqual([true, true, false, false]);
   for (const [at, record] of draftedStarted.entries()) {
     if (record.event.request === undefined) continue;
     const rebuilt = await kept(drafted, record.event.request);

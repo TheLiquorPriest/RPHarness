@@ -1,7 +1,7 @@
 // A `question:` rule about the reply (§5.4): a small model is asked about the reply once it has been
 // shown, so the question is put the moment the reply is released, in whichever form, and its text
-// goes to the next briefing. A closing `reply_release` ends the run with no further message, and
-// the question is asked all the same. Everything here is invented.
+// goes to the next briefing. A `reply_release` is followed by the lead's own message with no call,
+// which ends the run, and the question is asked at the release all the same. Everything here is invented.
 import { afterEach, expect, test } from "bun:test";
 import type { Answer, RecordedRequest, Reply } from "../../src/testing/rig";
 import { request, type Stage, stage, textOf } from "./support";
@@ -33,11 +33,11 @@ function routed(lead: Reply[], judge: Reply[]): Answer[] {
   return Array.from({ length: lead.length + judge.length }, () => route);
 }
 
-test("a question rule on the reply, released by a closing reply_release: asked once at release, its text in the next briefing", async () => {
+test("a question rule on the reply, released by a reply_release: asked once at release, its text in the next briefing", async () => {
   const s = (open = await stage({
     files: { ".agents/lead.md": LEAD, ".rules/fixture-promise.md": RULE, "chats/wren-hale/lighthouse/persistent-workspace/reply.md": `${RELEASED}\n` },
     answers: routed(
-      [{ pieces: [{ call: "reply_release", args: { path: "persistent-workspace/reply.md", closing: true } }] }, { pieces: [{ text: "<reply>The tower waits.</reply>" }] }],
+      [{ pieces: [{ call: "reply_release", args: { path: "persistent-workspace/reply.md" } }] }, { pieces: [{ text: "Released." }] }, { pieces: [{ text: "<reply>The tower waits.</reply>" }] }],
       [{ pieces: [{ text: "Yes." }] }, { pieces: [{ text: "No." }] }],
     ),
   }));
@@ -46,8 +46,8 @@ test("a question rule on the reply, released by a closing reply_release: asked o
   const first = await s.turn(request("t1", { lead: "lead" }));
 
   expect(first.outcome).toMatchObject({ status: "released", form: "file" });
-  // The run ended on the closing release, with no further message of the lead's, and the question was put once, about the reply.
-  expect(s.model.requests.filter((req) => !asks(req))).toHaveLength(1);
+  // The run ended on the lead's message after the release, and the question was put once, about the reply.
+  expect(s.model.requests.filter((req) => !asks(req))).toHaveLength(2);
   expect(judged()).toHaveLength(1);
   expect(judged()[0]).toContain(RELEASED);
   expect(s.trace.of("rule_fired").map((record) => [record.scope.turn, record.event.firing.rule, record.event.firing.watched, record.event.firing.action])).toEqual([["t1", "fixture-promise", "reply", "briefing"]]);
@@ -55,6 +55,6 @@ test("a question rule on the reply, released by a closing reply_release: asked o
   await s.turn(request("t2", { lead: "lead", parent: "t1" }));
   const lead = s.model.requests.filter((req) => !asks(req));
   // The next turn's briefing carries the rule's text; the first turn's lead never saw it.
-  expect(textOf(lead[1]!.messages.at(-1)!)).toContain(TEXT);
-  expect(lead[0]!.messages.map((message) => textOf(message)).join("\n")).not.toContain(TEXT);
+  expect(textOf(lead[2]!.messages.at(-1)!)).toContain(TEXT);
+  for (const call of lead.slice(0, 2)) expect(call.messages.map((message) => textOf(message)).join("\n")).not.toContain(TEXT);
 });

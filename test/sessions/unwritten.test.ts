@@ -6,7 +6,7 @@
 import { afterEach, expect, test } from "bun:test";
 import type { FilesPort } from "../../src/contract";
 import { type Stage, stage } from "../harness/support";
-import { carried, entries, FILE, inOrder, play, played, S1, said } from "./support";
+import { carried, entries, FILE, inOrder, play, played, S1, said, turn } from "./support";
 
 let open: Stage | undefined;
 afterEach(async () => {
@@ -38,9 +38,15 @@ test("appends refused from the one holding the compacted entry to the end of tha
   const sessions = s.harness.sessions!;
   await play(s, ["t1", "t2", "t3"]);
   await sessions.compact(S1);
-  await play(s, ["t4"], "t3");
+  // Its reply stands in the chat; the run that could not keep its session ends failed after it, in the shipped line's words.
+  const four = await s.turn(turn("t4", { parent: "t3" }));
+  expect(four.outcome).toMatchObject({ status: "failed", released: true, reply: "Reply 4.", error: { code: "failed" } });
+  expect(four.outcome.error?.detail).toContain(`The session file ${FILE} could not be written (Fixture: the disk is full.).`);
   expect(failing).toBe(true);
-  expect(s.logged.some((line) => line.level === "error" && line.fields?.["error"] === "Fixture: the disk is full.")).toBe(true);
+  // Said once while it lasts, however many appends failed.
+  const failed = s.logged.filter((line) => line.message.startsWith("The session file could not be written"));
+  expect(failed).toHaveLength(1);
+  expect(failed[0]).toMatchObject({ level: "warn", fields: { path: FILE, error: "Fixture: the disk is full." } });
 
   // The disk takes lines again: the next turn finds the session as t4 left it.
   healed = true;

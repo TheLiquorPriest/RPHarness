@@ -147,7 +147,9 @@ export interface ReplyError {
   /**
    * For `no-definition` and `no-tags`: the name of the agent definition the turn named as its lead. `no-definition`: no
    * file in force for the chat defines it. `no-tags`: the connection's replies are marked by tags (§10.7) and no reply contract
-   * in force names them. RPH words neither: the host does, from its own file. For `failed`, `detail` is the failure's own words, never an RPH sentence.
+   * in force names them. RPH words neither: the host does, from its own file. For `failed`, `detail` is the failure's own words, never an RPH sentence
+   * written in code; for a run whose session file could not be written, it is the shipped line `session_unwritten` (`.prompts/tool-notices.md`),
+   * naming the file and the host's reason.
    */
   agent?: string;
   /**

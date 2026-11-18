@@ -19,7 +19,7 @@ import type { DaySpend, UsageBook } from "../harness/usage";
 import type { External } from "../external";
 import { agentJson, hookSettings, Hooks, scopeJson } from "../external/hooks";
 import { joined } from "../agents/attachments";
-import { type SessionBook, sessionScope } from "../sessions/book";
+import { type HeldFile, MIB, type SessionBook, sessionScope } from "../sessions/book";
 import { keptWork } from "../sessions/work";
 import { userMessage } from "../harness/prompt";
 import { type AgentOutcome, type AgentRunner, Budget, emptyUsage, leftFact, type LoopTool, type LoopToolResult, type ParentCall, RunTrace, type Work } from "../loop";
@@ -78,7 +78,7 @@ export interface JobEnd {
   outcome: AgentOutcome;
   usage: Usage;
   limit?: LimitHit;
-  /** What his job-end hooks added (§5.4 "Hooks"), for the job's report. */
+  /** What goes after its agent's text in the job's report: what his job-end hooks added (§5.4 "Hooks"), then, for a run that could not keep its session, why it failed. */
   added?: string[];
 }
 
@@ -332,8 +332,18 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
       core.hub.started({ run: ask.id, scope, what: "job", agents: [], started: startedAt });
       core.usage.begin(ask.id);
       heard = hearing;
+      // The job's own session file, held for the run: its lines are tried once more at the end, and the lines held past `sessions.maxUnwrittenMiB` while it cannot be written stop the run.
+      core.book.heldMost = settings.sessions.unwrittenMost * MIB;
+      const own: HeldFile | undefined = await core.book.hold(sessionScope(scope, scope.session)).catch(() => undefined);
+      /** Why its session file could not be written when the lines held passed the setting and the run was stopped. */
+      let full: string | undefined;
       trace.watch((record) => {
         core.usage.record(record);
+        const failure = own?.file.failure;
+        if (full === undefined && failure !== undefined && core.book.over) {
+          full = failure;
+          for (const entry of working) entry.work.stop();
+        }
         const { event } = record;
         if (event.kind !== "call_ended") return;
         // What every agent of the run has spent, as of the call that ended.
@@ -404,7 +414,15 @@ export async function prepareJob(core: JobCore, ask: JobAsk): Promise<PreparedJo
         // The sessions of the job's agents close at its end, and their lines settle with its request files and transcripts before its end is told, as a turn's do.
         await runs.close();
         while (pending.size > 0) await Promise.allSettled([...pending]);
+        // Its own session's lines tried once more: a run that could not keep them, or was stopped past the lines held, ends failed and says why; the lines stay held with the file, for a later write to land.
+        await own?.file.flush();
+        if (own !== undefined && (own.file.unwritten || full !== undefined)) {
+          const line = words("session_unwritten", { path: own.file.path, reason: own.file.failure ?? full ?? "", ...(full !== undefined ? { over: true, most: settings.sessions.unwrittenMost } : {}) });
+          outcome = { ...outcome, status: "failed", failure: "harness", error: line ?? "" };
+          if (line !== undefined) ended = [...ended, line];
+        }
       } finally {
+        own?.release();
         working.delete(entry);
         signal.removeEventListener("abort", stop);
         unwatch();

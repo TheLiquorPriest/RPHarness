@@ -30,7 +30,7 @@ import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, TagRepl
 import { SILENCE_MOST_MS } from "../reply/progress";
 import type { ReleaseCheck } from "../reply/release";
 import { SilentReply } from "../reply/silent";
-import type { HeldFile, SessionBook, SessionFile, Unreadable } from "../sessions/book";
+import { type HeldFile, MIB, type SessionBook, type SessionFile, type Unreadable } from "../sessions/book";
 import { type CarriedInput, carriedFields, compactionAt, compactionMaterial, materialFields, pathTurns, recordsTokens } from "../sessions/carry";
 import { Compactor, type EarlierTurns, saveBeforeCompaction } from "../sessions/compact";
 import { entryOf } from "../sessions/runs";
@@ -170,6 +170,8 @@ export class Turn {
   #sessionTurns = 0;
   /** Why the session's file could not be read at this turn's start, where it could not (§17.2): the briefing says so. */
   #unreadable: Unreadable | undefined;
+  /** Why the session's file could not be written when the lines held passed `sessions.maxUnwrittenMiB` and the turn was stopped, where they did. */
+  #full: string | undefined;
   #draft: { text: string; by: AgentRef } | undefined;
   #released: { text: string; form: ReleaseForm } | undefined;
   /** The judging model of the `question:` rules, once the turn's rules are loaded. */
@@ -242,7 +244,12 @@ export class Turn {
       outcome = this.#outcome({ status: "failed", error: { code: "failed", detail: errorWords(error) } });
     }
     this.#keep?.stop();
-    if (!this.#desk.released) this.#sink.error(replyError(outcome, this.#lastText));
+    // A run with no reply whose session's lines could not be written says so to the chat: they are tried once more first.
+    if (!this.#desk.released) {
+      await this.#file?.flush();
+      outcome = this.#unkept(outcome);
+      this.#sink.error(replyError(outcome, this.#lastText));
+    }
     // Every sub-agent ends with the turn's work, once what of it is still going has ended: its session closes.
     await this.#team?.over();
     signal.removeEventListener("abort", onAbort);
@@ -254,6 +261,8 @@ export class Turn {
     // Its own version of each scratch file the session carries becomes the standing one, as its work.
     await this.#keepScratch().catch((error: unknown) => env.log.error("The session's cache could not keep the turn's scratch files.", { turn: this.scope.turn, run: this.run, error: errorWords(error) }));
     await this.#settled();
+    // Its reply, released, stands in the chat: a run whose session's lines are still not written ends failed after it, as a run that broke after its reply does.
+    outcome = this.#unkept(outcome);
     this.#trace.event(this.#lead, undefined, { kind: "run_ended", outcome });
     await this.#tell(env.events.ended(this.scope, outcome));
     usage.end(this.run);
@@ -296,6 +305,8 @@ export class Turn {
     this.#settings = settings;
     // How many sessions the harness keeps read between their turns, as this turn reads the setting.
     this.#c.book.held = settings.sessions.held;
+    // The most the session files may hold unwritten, every session's, as this turn reads the setting.
+    this.#c.book.heldMost = settings.sessions.unwrittenMost * MIB;
     this.#roleMark = roleMark(roleNote);
     this.#places = places;
     const hooks = new Hooks({ hooks: () => guidance.hooks(), switches: env.switches, user: scope.user, settings: hookSettings(settings), trace: this.#trace, log: env.log });
@@ -1289,6 +1300,7 @@ export class Turn {
   #watch(record: AgentRecord): void {
     this.#c.usage.record(record);
     this.#record(record);
+    this.#heldPast();
     const { event } = record;
     const agent = record.agent.id;
     switch (event.kind) {
@@ -1323,6 +1335,27 @@ export class Turn {
       default:
         return;
     }
+  }
+
+  /** Past the lines held while session files cannot be written (`sessions.maxUnwrittenMiB`), with the turn's own among them: every agent of the turn stops, and its run ends failed. What is held stays held. */
+  #heldPast(): void {
+    const failure = this.#file?.failure;
+    if (this.#full !== undefined || failure === undefined || !this.#c.book.over) return;
+    this.#full = failure;
+    this.stop();
+  }
+
+  /**
+   * A run whose session file still holds lines it could not write, or that was stopped past the lines
+   * held, ends failed, in the words of `session_unwritten` (`.prompts/tool-notices.md`), naming the file
+   * and the host's reason. A run that failed already keeps its own failure. The lines stay with the
+   * file, which the book keeps, for a later write to land.
+   */
+  #unkept(outcome: RunOutcome): RunOutcome {
+    const file = this.#file;
+    if (outcome.status === "failed" || file === undefined || (!file.unwritten && this.#full === undefined)) return outcome;
+    const detail = this.#words("session_unwritten", { path: file.path, reason: file.failure ?? this.#full ?? "", ...(this.#full !== undefined ? { over: true, most: this.#settings.sessions.unwrittenMost } : {}) });
+    return this.#outcome({ status: "failed", error: { code: "failed", ...(detail !== undefined ? { detail } : {}) } });
   }
 
   /** The lead's work, into the session file as it happens (§11): its intent records, what it wrote in each call, its calls and what came back. Never its thinking. */
@@ -1373,7 +1406,7 @@ export class Turn {
 
   async #settled(): Promise<void> {
     await this.#told();
-    await this.#file?.settled();
+    await this.#file?.flush();
     (await this.#holding?.catch(() => undefined))?.release();
   }
 

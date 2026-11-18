@@ -46,12 +46,12 @@ export const MODELS = worded(
     // Today's 8: a secret this long is looked for anywhere in a text, a shorter one as a word of its own, where it can't be part of an ordinary word.
     secretFloor: { key: "calls.minSecretChars", takes: { type: "whole", least: 1 }, default: 8, perConnection: false, levels: SHARED, at: "model.secretFloor" },
     // Appendix D.1 l.2416: 1 second, then twice the wait before; a connection's own count of tries stands over `retries`. The owner's word of 18 Nov: a failed call is made again whenever in the call it failed, and nothing of how is fixed in code.
+    retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "model.retries" },
     retryWait: { key: "calls.retryWaitSeconds", takes: { type: "whole", least: 0 }, default: 1, perConnection: false, levels: SHARED, at: "model.retryWait", ms: true },
     retryGrowth: { key: "calls.retryWaitGrowth", takes: { type: "number", least: 1 }, default: 2, perConnection: false, levels: SHARED, at: "model.retryGrowth" },
     // A minute: long enough for a provider that asks to slow down, short of a whole reply's hold and of Lumiverse's ten minutes of silence.
     retryMost: { key: "calls.maxRetryWaitSeconds", takes: { type: "whole", least: 0 }, default: 60, perConnection: false, levels: SHARED, at: "model.retryMost", ms: true },
     retryAsked: { key: "calls.retryWaitAsAsked", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryAsked" },
-    retries: { key: "calls.retries", takes: { type: "whole", least: 0 }, default: 2, perConnection: false, levels: SHARED, at: "model.retries" },
     // One switch for each kind of failure a try can help; a kind no try can help (no credit, a key refused, a request refused as invalid or too long, a call never sent) has none.
     retryOnConnection: { key: "calls.retryOn.connection", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.connection" },
     retryOnTimeout: { key: "calls.retryOn.timeout", takes: { type: "yesNo" }, default: true, perConnection: false, levels: SHARED, at: "model.retryOn.timeout" },

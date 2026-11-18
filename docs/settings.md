@@ -39,7 +39,7 @@ words say after "`~`:".
 | `limits.turn.depth` | whole ≥ 0 | 2 | all | **Sub-agent depth.** How deep sub-agents may go: at 1 only the lead starts them, at 2 they may start their own, at 0 none is started. |
 | `limits.turn.agents` | whole ≥ 0 | no limit | all | **Sub-agents in a turn.** Sub-agents one turn may start in all. |
 | `limits.turn.agentsAtOnce` | whole ≥ 1 | 3 | all | **Sub-agents at once.** Sub-agents of one run at work at the same time; one more waits for a place, first come first served. |
-| `limits.toolsAtOnce` | whole ≥ 1 | 4 | all | **Tool calls at once.** An answer's tool calls that run at the same time, for an agent whose definition sets none of its own; one more waits for a place. |
+| `limits.toolsAtOnce` | whole ≥ 1 | 4 | all | **Tool calls at once for every agent.** An answer's tool calls that run at the same time, for an agent whose definition sets none of its own; one more waits for a place. |
 | `limits.repeats` | whole ≥ 1 | 10 | all | **Same call in a row.** The same tool call with the same arguments this many times in a row, with nothing written by any agent between, ends that agent's work at this limit. Below 2: At 1 an agent's work ends at its first tool call. |
 | `limits.cachedWeight` | number ≥ 0 | 0.1 | all | **Weight of a cached token.** What a token read again from a provider's cache counts for against every limit on tokens sent: an agent's, a turn's, a job's and a day's; 1 counts it in full. Above 1: Above 1 a token read again from the cache counts for more than one sent anew. |
 | `limits.day.tokens` | whole ≥ 0 | no limit | all | **Tokens in a day.** Tokens, sent and written, that all your agents may spend over any 24 hours, turns and jobs alike; past it no call is made. Below 1: At 0 no call is made at all. |

@@ -131,6 +131,13 @@ export interface LimitHit {
   agent?: AgentRef;
   /** For a day's count of jobs on one connection, or a connection's throttle: which, by the name or id its setting gives. */
   connection?: string;
+  /**
+   * Set where the limit was not passed but too little was left under it for an answer: what was left,
+   * `max` less `value` (`value` counting the next call's prompt, for `tokens`), was under the least
+   * room an answer is given (`limits.minAnswerTokens`), so the next call was not made. That least
+   * room, in tokens.
+   */
+  floor?: number;
 }
 
 /**

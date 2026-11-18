@@ -44,6 +44,13 @@ test("no_writer is true in each of its three cases: no writer named, a writer no
   expect(part.line("no_writer", { writer: "narrator" })).toContain("cannot be used");
 });
 
+test("a writer stopped with too little left under a limit for an answer is told what was left, the least room, and that its call was not made", async () => {
+  const hit = { limit: "tokens", is: { tokens: true }, per: "job", max: 300, value: 279, floor: 256, left: 21 };
+  expect((await lines()).line("not_written_floor", { writer: "narrator", limit: true, hit })).toBe(
+    "narrator gave no reply: of its limit of 300 on tokens per job, 21 was left once its next call's prompt was counted, less than the least room an answer is given (256 tokens), so its call was not made.",
+  );
+});
+
 test("second_reply is true of the tags' form and of the two-step form: it names neither", async () => {
   const said = (await lines()).line("second_reply", {}) ?? "";
   expect(said).toBe("The reply for this turn has already gone out. Nothing more goes to the chat.");

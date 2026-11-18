@@ -651,9 +651,11 @@ export class Team implements TeamWork {
       case "done":
         return said(joined([words("answered", fields) ?? "", outcome.text]), extra);
       case "limit": {
-        // Which limit, its count, and what it had done by then (calls, tool calls, its last words), for the line to say.
+        // Which limit, its count, and what it had done by then (calls, tool calls, its last words), for the line to say; stopped by the
+        // least room for an answer, with the limit not passed, what was left under it and that least room, for its own line.
         const hit = outcome.limit;
-        const line = words("limit", { ...fields, ...workedFields(outcome), ...(hit !== undefined ? { limit: hit.limit, is: { [hit.limit]: true }, per: hit.per, max: hit.max, value: hit.value } : {}) });
+        const floor = hit?.floor !== undefined ? { floor: hit.floor, left: hit.max - hit.value } : {};
+        const line = words(hit?.floor !== undefined ? "limit_floor" : "limit", { ...fields, ...workedFields(outcome), ...(hit !== undefined ? { limit: hit.limit, is: { [hit.limit]: true }, per: hit.per, max: hit.max, value: hit.value, ...floor } : {}) });
         return said(line ?? "", { error: true, ...extra });
       }
       case "stopped":

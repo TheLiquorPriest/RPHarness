@@ -1233,9 +1233,12 @@ export class Turn {
     // Why there is no reply is the file's to say, by how the writer's work ended; the error's own words are the model layer's or the provider's, for whoever runs the host.
     if (outcome.error !== undefined && outcome.error !== "") env.log.warn("The writer's work ended in an error.", { writer, status: outcome.status, error: outcome.error });
     const hit = outcome.limit;
-    const failedWords = { writer, ...(outcome.status === "failed" || outcome.status === "limit" || outcome.status === "stopped" ? { [outcome.status]: true } : {}), ...(hit !== undefined ? { hit: { limit: hit.limit, per: hit.per, max: hit.max, value: hit.value } } : {}) };
-    if (shown !== undefined) return shown.released ? { content: [{ type: "text", text: shown.shown }] } : answer(words("not_written", failedWords), true);
-    if (outcome.status !== "done" || outcome.text.trim() === "") return answer(words("not_written", failedWords), true);
+    const floor: JsonObject = hit?.floor !== undefined ? { floor: hit.floor, left: hit.max - hit.value } : {};
+    const failedWords = { writer, ...(outcome.status === "failed" || outcome.status === "limit" || outcome.status === "stopped" ? { [outcome.status]: true } : {}), ...(hit !== undefined ? { hit: { limit: hit.limit, is: { [hit.limit]: true }, per: hit.per, max: hit.max, value: hit.value, ...floor } } : {}) };
+    // Stopped by the least room for an answer, with the limit not passed: its own line says what was left, and that its call was not made for it.
+    const unwritten = outcome.status === "limit" && hit?.floor !== undefined ? "not_written_floor" : "not_written";
+    if (shown !== undefined) return shown.released ? { content: [{ type: "text", text: shown.shown }] } : answer(words(unwritten, failedWords), true);
+    if (outcome.status !== "done" || outcome.text.trim() === "") return answer(words(unwritten, failedWords), true);
     this.#drafted(ref, outcome);
     return { content: [{ type: "text", text: outcome.text }] };
   }

@@ -174,6 +174,25 @@ describe("delegate", () => {
     expect(toolResults(s.models["lead-model"]!.requests[1]!.messages)).toEqual(["gm-1: calls (calls) 1 of 1 per agent; 1 calls, 1 tool calls; wrote: Checking the rail first."]);
   });
 
+  test("a sub-agent stopped with too little left under a limit for an answer is answered with what was left, the least room, and that its call was not made, in the shipped line", async () => {
+    const gm = definition("gm", { model: "gm-model", tools: ["file_read"], limits: "{ tokensOut: 300 }" }, "Fixture GM.");
+    const s = (open = await stage({
+      files: { ".agents/lead.md": LEAD, ".agents/gm.md": gm },
+      models: {
+        "lead-model": [{ pieces: [{ call: "delegate", args: { agent: "gm", brief: "Rule on the jump." }, id: "d-1" }] }, { pieces: [{ text: "Settled." }] }],
+        // Its first call writes 100 of its 300: 200 left, under the 256 an answer is given at least.
+        "gm-model": [{ pieces: [{ text: "Checking the rail first." }, { call: "file_read", args: { path: "persistent-workspace/none.md" } }], usage: { input: 50, output: 100 } }, { pieces: [{ text: "Never written." }] }],
+      },
+    }));
+
+    await (await s.play(PLAYER)).done;
+
+    expect(s.models["gm-model"]!.requests).toHaveLength(1);
+    expect(toolResults(s.models["lead-model"]!.requests[1]!.messages)).toEqual([
+      "gm-1 stopped before it answered: of its limit of 300 on tokensOut per agent, 200 was left, less than the least room an answer is given (256 tokens), so that call was not made. By then it had made 1 model calls and 1 tool calls. What it last wrote: Checking the rail first.",
+    ]);
+  });
+
   test("calls made in one step cannot pass the count together", async () => {
     const keeper = definition("keeper", { model: "keeper-model", tools: [] }, "Fixture keeper.");
     const s = (open = await stage({

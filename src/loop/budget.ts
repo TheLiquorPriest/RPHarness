@@ -61,7 +61,7 @@ export interface RoomAsk {
 /**
  * The next answer's room: the least of every bound on it and of the tokens left under every limit on
  * what it writes (absent: nothing bounds it); or, where a limit has less than the floor left, that
- * limit, the tightest, and no call.
+ * limit, the tightest, and no call: with the floor on the hit (`LimitHit.floor`) where some was left.
  */
 export type Room = { room: number | undefined } | { hit: LimitHit };
 
@@ -142,7 +142,8 @@ export class Budget {
         if (tightest === undefined || left < tightest.left) tightest = { left, hit: budget.#hit(limit, max, value + coming, agent) };
       }
     }
-    if (tightest !== undefined && tightest.left < ask.floor) return { hit: tightest.hit };
+    // Some left, but less than an answer is given at least: the limit is not passed, and the hit says why the call is not made.
+    if (tightest !== undefined && tightest.left < ask.floor) return { hit: tightest.left > 0 ? { ...tightest.hit, floor: ask.floor } : tightest.hit };
     const bounds = [...ask.bounds, tightest?.left].filter((bound): bound is number => bound !== undefined);
     return { room: bounds.length > 0 ? Math.min(...bounds) : undefined };
   }

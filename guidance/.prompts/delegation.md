@@ -5,6 +5,7 @@ format: lines
 answered: {{agent}} answered:
 stopped: {{agent}} was stopped before it answered. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
 limit: {{agent}} reached the player's limit on {{limit}} per {{per}} before it answered: {{value}}, and the player allows {{max}}{{#is.time}} (milliseconds){{/is.time}}{{#is.callTime}} (milliseconds){{/is.callTime}}. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
+limit_floor: {{agent}} stopped before it answered: of its limit of {{max}} on {{limit}} per {{per}}, {{left}} was left{{#is.tokens}} once its next call's prompt was counted{{/is.tokens}}, less than the least room an answer is given ({{floor}} tokens), so that call was not made. By then it had made {{calls}} model calls and {{tools}} tool calls.{{#wrote}} What it last wrote: {{wrote}}{{/wrote}}
 failed: {{agent}} could not go on: {{#model}}a call to its model failed{{/model}}{{^model}}the system that runs it failed{{/model}}.
 missing: {{agent}} was not given {{ref}}: it could not be found.
 no_agent: There is no agent definition named {{agent}}.

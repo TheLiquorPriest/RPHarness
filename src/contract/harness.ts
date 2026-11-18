@@ -260,6 +260,15 @@ export interface SessionView {
   closedBy?: string;
   /** The closing that stands was the owner's own (S-3): his `reopen` takes it back. */
   by?: "user";
+  /** For a closed session: when the closing that stands was written, in milliseconds since 1970. */
+  closedAt?: number;
+  /**
+   * For a closed session, what closed it: the owner's own close (`user`); the host closing a scene's
+   * session at a turn (`turn`, its scene changing there; `closedBy` names the turn); the host's own
+   * close, of no turn (`host`); the end of the run an agent's or a talk's session belonged to (`run`);
+   * the end of a job's run (`job`). A compaction never closes a session.
+   */
+  closedHow?: "user" | "turn" | "host" | "run" | "job";
   /** The session and turn it was forked from, for a branch (§10.10). */
   from?: { chat: string; session: string; turn: string };
   /** Turns played in it. */

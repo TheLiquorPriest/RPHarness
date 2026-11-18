@@ -39,13 +39,14 @@ test("a session opens and closes only on the host's word; closing belongs to the
   // Turns played do not close it.
   expect(await sessions.get(S1)).toMatchObject({ state: "open", turns: 3 });
   expect(await sessions.close({ ...S1, turn: "t3" })).toMatchObject({ state: "closed", closedBy: "t3", turns: 3 });
-  expect(await sessions.get(S1)).toMatchObject({ state: "closed", closedBy: "t3" });
+  expect(await sessions.get(S1)).toMatchObject({ state: "closed", closedBy: "t3", closedHow: "turn", closedAt: s.clock.now() });
 
   // The host takes the turn that closed it off the path: open again, as it stood before that turn.
   await s.harness.turnLeft({ ...S1, turn: "t3" });
   const reopened = await sessions.get(S1);
   expect(reopened).toMatchObject({ state: "open", turns: 2 });
   expect(reopened?.closedBy).toBeUndefined();
+  expect(reopened?.closedAt).toBeUndefined();
 
   // Its swipe plays on in the open session, and carries only the summary it opened with in the mode "nothing".
   expect((await s.turn(turn("t3b", "nothing", { kind: "swipe", parent: "t2" }))).outcome.status).toBe("released");

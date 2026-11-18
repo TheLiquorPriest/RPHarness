@@ -32,26 +32,35 @@ export function closingOf(file: SessionFile): ClosedEntry | undefined {
   return standing(file.log, new Set(pathTurns(file.log, file.log.leaf).map((turn) => turn.entry.turn))).at(-1);
 }
 
-/** A session of a chat (`scope`) as it stands at its leaf: the newest closing that stands says who closed it. */
+/** A session of a chat (`scope`) as it stands at its leaf: the newest closing that stands says who closed it, what and when. */
 export function viewOf(file: SessionFile, scope: Scope, now: number): SessionView {
   const { log, header } = file;
   const turns = pathTurns(log, log.leaf);
   const closing = standing(log, new Set(turns.map((turn) => turn.entry.turn))).at(-1);
+  const kind = header?.kind ?? "scene";
   return {
     id: scope.session,
     user: scope.user,
     chat: scope.chat,
-    kind: header?.kind ?? "scene",
+    kind,
     ...(header?.parent !== undefined ? { parent: header.parent } : {}),
     ...(header?.agent !== undefined ? { agent: header.agent } : {}),
     state: closing === undefined ? "open" : "closed",
     opened: log.opened?.at ?? header?.at ?? now,
     ...(closing?.turn !== undefined ? { closedBy: closing.turn } : {}),
     ...(closing?.by !== undefined ? { by: closing.by } : {}),
+    ...(closing !== undefined ? { closedAt: closing.at, closedHow: closedHow(closing, kind) } : {}),
     ...(header?.from !== undefined ? { from: header.from } : {}),
     turns: turns.length,
     ...(log.asked !== undefined ? { compactAsked: true as const } : {}),
   };
+}
+
+/** What wrote a closing: the owner's own close; for a scene's session, the host at a turn or of none; for any other, the end of the run (a job's, for a job's session) it belonged to. */
+function closedHow(closing: ClosedEntry, kind: SessionView["kind"]): NonNullable<SessionView["closedHow"]> {
+  if (closing.by === "user") return "user";
+  if (kind === "scene") return closing.turn === undefined ? "host" : "turn";
+  return kind === "job" ? "job" : "run";
 }
 
 /** A listing names no session; places are asked for one only to learn the folder every session's folder is in (§5 `sessions/<session-id>/`). */

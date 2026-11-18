@@ -42,8 +42,8 @@ export function keptWork(log: SessionLog, turn: string, model: Model<Api>, unfin
   for (const entry of entries.slice(summary === undefined ? 0 : entries.indexOf(summary) + 1)) {
     if (entry.type === "message") {
       close();
-      // A message cut short or failed left the transcript as it ran (the runner's settle); so here.
-      if (entry.stop === "error" || entry.stop === "aborted") continue;
+      // A message cut short or failed left the transcript as it ran (the runner's settle, a retry); one a rule cut left it at the cut, its words with it: so here.
+      if (entry.stop === "error" || entry.stop === "aborted" || entry.stop === "cut") continue;
       const message = assistantMessage(entry.text, model, entry.at);
       open = { message: { ...message, content: entry.text === "" ? [] : message.content }, results: new Map() };
     } else if (entry.type === "call" && open !== undefined) {

@@ -49,8 +49,10 @@ export function scriptedFetch(script: Script): { fetch: typeof globalThis.fetch;
     if (signal === undefined || signal === null) return answered;
     signal.throwIfAborted();
     const ended = Promise.withResolvers<never>();
-    signal.addEventListener("abort", () => ended.reject(signal.reason), { once: true });
-    return Promise.race([answered, ended.promise]);
+    const onAbort = (): void => ended.reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    // As a real fetch does, it stops listening once the answer is in.
+    return Promise.race([answered, ended.promise]).finally(() => signal.removeEventListener("abort", onAbort));
   };
   return { fetch: Object.assign(answer, { preconnect: (): void => undefined }), sent };
 }

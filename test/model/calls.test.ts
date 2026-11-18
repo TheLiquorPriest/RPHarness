@@ -117,6 +117,31 @@ describe("a chat-completions call", () => {
     expect(body).toMatchObject({ temperature: 0.7, top_p: 0.9, frequency_penalty: 0.3, presence_penalty: 0.2, seed: 7, stop: ["THE END"] });
     for (const refused of ["top_k", "min_p", "repetition_penalty"]) expect(Object.keys(body)).not.toContain(refused);
   });
+
+  test("leaves nothing listening on its caller's signal once it has ended, so a run's signal, which outlives its calls, keeps none of them", async () => {
+    r = rig({ script: chatAnswer });
+    const saved = await r.layer.api.save(USER, { name: "Local", provider: "openai-compatible", auth: "key", baseUrl: "http://127.0.0.1:8080/v1", model: "served-model" }, SERVER_KEY);
+    const agent = await r.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+    // Every listener for "abort" put on a signal while the calls go, less those taken off; one on a signal that ended has done its work.
+    const listening = new Set<{ signal: AbortSignal; listener: unknown }>();
+    const { addEventListener: add, removeEventListener: remove } = AbortSignal.prototype;
+    AbortSignal.prototype.addEventListener = function (this: AbortSignal, type: string, listener: unknown, ...rest: unknown[]) {
+      if (type === "abort") listening.add({ signal: this, listener });
+      return (add as (...a: unknown[]) => void).call(this, type, listener, ...rest);
+    } as typeof add;
+    AbortSignal.prototype.removeEventListener = function (this: AbortSignal, type: string, listener: unknown, ...rest: unknown[]) {
+      for (const held of listening) if (type === "abort" && held.signal === this && held.listener === listener) listening.delete(held);
+      return (remove as (...a: unknown[]) => void).call(this, type, listener, ...rest);
+    } as typeof remove;
+    try {
+      const run = new AbortController();
+      for (let i = 0; i < 3; i++) expect((await call(agent, ASK, { signal: run.signal })).errorMessage).toBeUndefined();
+      expect([...listening].filter((held) => !held.signal.aborted).map((held) => String(held.listener))).toEqual([]);
+    } finally {
+      AbortSignal.prototype.addEventListener = add;
+      AbortSignal.prototype.removeEventListener = remove;
+    }
+  });
 });
 
 /** The words a call on an Anthropic connection ends in when its API answers as `script` does, the settings as `global` sets them, the rig's clock run through every wait. */

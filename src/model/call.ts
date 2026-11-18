@@ -469,6 +469,11 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   // Ends a call that went silent, beside the caller's own signal, with words that say so.
   const quiet = new AbortController();
   let watch: SilenceWatch | undefined;
+  /**
+   * Takes the call's listener off its signal. The signal joins the caller's, which outlives the call (an agent's run makes many), and a
+   * signal keeps every listener it was given until it ends: one left on it would keep this whole call, its prompt among it, for as long.
+   */
+  let unhook: (() => void) | undefined;
   /** Its hold on its connection's throttle, and what it spent as its provider reported it, which the hold settles with. */
   let hold: Hold | undefined;
   let spent: number | undefined;
@@ -620,7 +625,11 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     // The stream ends the moment the signal or the silence does, whether or not pi-ai's own end has come yet.
     const { promise: stopped, resolve: stop } = Promise.withResolvers<typeof STOPPED>();
     if (ended.aborted) stop(STOPPED);
-    else ended.addEventListener("abort", () => stop(STOPPED), { once: true });
+    else {
+      const onEnded = (): void => stop(STOPPED);
+      ended.addEventListener("abort", onEnded, { once: true });
+      unhook = () => ended.removeEventListener("abort", onEnded);
+    }
     /** Ends `out` with `ending`, the silence's wait let go first, so that nothing of the call waits once its answer has ended. */
     const close = (ending: AssistantMessage): void => {
       watching.stop();
@@ -738,6 +747,7 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
     endWith(out, ending);
   } finally {
     watch?.stop();
+    unhook?.();
     hold?.settle(spent);
     // A call that ended before its request went out was no call; its run hears so before it reads the end.
     if (!sending) ask.heard?.({ kind: "call_unmade" });

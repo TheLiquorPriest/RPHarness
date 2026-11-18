@@ -115,6 +115,16 @@ describe("levels", () => {
     expect((await g.skills()).map((s) => s.name)).toEqual(["mapping"]);
   });
 
+  test("a config that writes `off` in two forms, `off:` and `\"off\":`, switches off what each lists", async () => {
+    b = await bench({
+      shipped: { ".agents/scribe.md": definition("scribe", "Scribe.", "Body."), ".rules/tidy.md": rule("Tidy.", "Keep it tidy.") },
+      chat: { "config.yml": 'stack:\n  "off": [agents/scribe]\n  off:\n    - rules/tidy\n' },
+    });
+    const g = loadGuidance(b.host.files, scope);
+    expect(await g.definition("scribe")).toBeUndefined();
+    expect((await g.rules()).find((r) => r.name === "tidy")).toMatchObject({ inForce: false, why: "off" });
+  });
+
   test("a header that does not parse is reported by path and line; the file is not used, and the farther one does not stand in", async () => {
     b = await bench({
       shipped: { ".agents/scribe.md": definition("scribe", "Shipped scribe.", "Body.") },

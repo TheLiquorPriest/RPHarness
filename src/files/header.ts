@@ -114,6 +114,30 @@ export function blockOf(lines: readonly string[], name: string, firstLine = 2): 
 }
 
 /**
+ * Every value the lines write for `key` at their margin, each read alone, in the order written: one,
+ * or, where the key is written in more than one of the forms YAML takes for one key (`off:`,
+ * `"off":`, `'off':`), each of them, where a reader of the document gets only the last. A value
+ * that does not read alone is passed over. Empty where no line writes the key.
+ */
+export function valuesOf(lines: readonly string[], key: string): unknown[] {
+  const starts = new RegExp(`^(?:${literal(key)}|"${literal(key)}"|'${literal(key)}')[ \\t]*:`);
+  const values: unknown[] = [];
+  for (let row = 0; row < lines.length; row++) {
+    if (!starts.test(lines[row] ?? "")) continue;
+    let end = row + 1;
+    while (end < lines.length && !/^(?:[^\s#-]|-\S)/.test(lines[end] ?? "")) end++;
+    try {
+      const parsed: unknown = Bun.YAML.parse(lines.slice(row, end).join("\n"));
+      if (isMapping(parsed) && parsed[key] !== undefined) values.push(parsed[key]);
+    } catch {
+      // One that does not read alone is the document's to read, as it stands.
+    }
+    row = end - 1;
+  }
+  return values;
+}
+
+/**
  * Where the items of a top-level field's value are written, found by their text in the order YAML
  * reads them: each search goes on from where the last one found its text, so a name written twice is
  * found at each place in turn, in a block (`- STYLE` lines, `gm:` lines below the field) or a flow

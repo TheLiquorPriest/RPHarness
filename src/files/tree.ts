@@ -6,7 +6,7 @@ import type { FileText, FilesPort, FindStopped, GuidanceKind, Layer, LayerLevel,
 import type { Problem } from "./api";
 import { CONFIG_KEYS, CONFIG_SECTION } from "./api";
 import type { At } from "./header";
-import { blockOf, fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, WrittenItems } from "./header";
+import { blockOf, fieldLine, isMapping, nameList, normalized, parseYaml, problemAt, valuesOf, WrittenItems } from "./header";
 
 /** What a listing looks for: instruction files at each level's root, or the files of one kind of guidance (`examples`: the rules under `<rules>/examples/`; `manifests`: the owner's tools' manifests, `<tools>/<name>.json`). */
 export type Listing = "instructions" | "agents" | "rules" | "examples" | "skills" | "prompts" | "tools" | "manifests";
@@ -260,10 +260,13 @@ export class Tree {
         this.problems.push(problemAt(at, block?.field, "`stack` holds `off`, `layered`, `added`, `instructions` and `pins` as a mapping of keys: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
         continue;
       }
-      const off = stack[CONFIG_KEYS.off];
-      const offNames = nameList(off);
-      if (offNames === undefined) this.problems.push(problemAt(at, fieldAt(CONFIG_KEYS.off), "`stack.off` is a list of the files switched off: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
-      else for (const name of offNames) config.off.add(writtenKey(name, layers));
+      // `off:` and `"off":` are one key to YAML, which keeps the last: a file that writes both (as an older switch left it) switches off what each lists.
+      const written = block === undefined ? [] : valuesOf(block.lines, CONFIG_KEYS.off);
+      for (const off of written.length > 1 ? written : [stack[CONFIG_KEYS.off]]) {
+        const offNames = nameList(off);
+        if (offNames === undefined) this.problems.push(problemAt(at, fieldAt(CONFIG_KEYS.off), "`stack.off` is a list of the files switched off: `stack: { off: [rules/perceptions-owed, WORLD] }`."));
+        else for (const name of offNames) config.off.add(writtenKey(name, layers));
+      }
 
       const layered = nameList(stack[CONFIG_KEYS.layered]);
       if (layered === undefined) this.problems.push(problemAt(at, fieldAt(CONFIG_KEYS.layered), "`stack.layered` is a list of instruction files read at every level that has one, farther first: `stack: { layered: [AGENTS] }`."));

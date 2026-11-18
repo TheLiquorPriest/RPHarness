@@ -124,7 +124,7 @@ function shown(settings: object, entry: SettingEntry): JsonValue {
     at = typeof at === "object" && at !== null && Object.hasOwn(at, field) ? (at as Record<string, unknown>)[field] : undefined;
   }
   if (at === undefined) return null;
-  return entry.ms === true ? (at as number) / 1000 : (at as JsonValue);
+  return entry.ms === true && at !== null ? (at as number) / 1000 : (at as JsonValue);
 }
 
 /** Whether a setting is read from a level's file. */
@@ -156,7 +156,7 @@ function untakenValues(def: SettingDef): JsonValue[] {
     t.type === "whole"
       ? [t.least - 1, t.least + 0.5, ...(t.most !== undefined ? [t.most + 1] : [])]
       : t.type === "number"
-        ? [...(t.least !== undefined ? [t.least - 1] : []), ...(t.most !== undefined ? [t.most + 1] : []), Number.NaN]
+        ? [...(t.least !== undefined ? [t.least - 1] : []), ...(t.most !== undefined ? [t.most + 1] : [])]
         : t.type === "oneOf"
           ? ["none-such"]
           : t.type === "yesNo"
@@ -428,7 +428,7 @@ test("a list of names with a blank item: the reader logs it once, naming the key
 
 test("a number JSON cannot write is named as itself in a reason: NaN for a setting, Infinity for a mapping of settings", async () => {
   const silence = SETTINGS.find((def) => def.key === "progress.silenceSeconds")!;
-  expect(checkSettingValue(silence, Number.NaN)).toEqual({ ok: false, why: "progress.silenceSeconds takes a whole number from 1 to 540, not NaN." });
+  expect(checkSettingValue(silence, Number.NaN)).toEqual({ ok: false, why: "progress.silenceSeconds takes a whole number, at least 1, not NaN." });
   // As a config file writes them, in YAML's own words.
   const { log, said } = recorder();
   const files = configFiles({ [CHAT_FILE]: "progress:\n  silenceSeconds: .nan\nlimits: .inf\n" });
@@ -436,7 +436,7 @@ test("a number JSON cannot write is named as itself in a reason: NaN for a setti
   expect({ silenceMs: settings.silenceMs, turn: settings.turn }).toEqual({ silenceMs: DEFAULT_SETTINGS.silenceMs, turn: DEFAULT_SETTINGS.turn });
   expect(said.map(({ setting, why }) => ({ setting, why }))).toEqual([
     { setting: "limits", why: "limits holds the settings under it as a mapping of keys, not Infinity." },
-    { setting: "progress.silenceSeconds", why: "progress.silenceSeconds takes a whole number from 1 to 540, not NaN." },
+    { setting: "progress.silenceSeconds", why: "progress.silenceSeconds takes a whole number, at least 1, not NaN." },
   ]);
 });
 
@@ -478,7 +478,10 @@ test("every listed setting has a name and a line on what it is for", () => {
 
 test("every line of each words file, but the two that open and close its list, is the line of a listed setting", async () => {
   // Each file's own text, so a line no import shows (a comment) is held to it too; the files are found by name, so one added later is as well.
-  const lineOf = (def: SettingDef) => `  ${JSON.stringify(def.key)}: { name: ${JSON.stringify(def.name)}, about: ${JSON.stringify(def.about)} },`;
+  const lineOf = (def: SettingDef) => {
+    const words = [`name: ${JSON.stringify(def.name)}`, `about: ${JSON.stringify(def.about)}`, ...(def.advice ?? []).map((advice) => `${advice.below !== undefined ? "below" : "above"}: ${JSON.stringify(advice.says)}`)];
+    return `  ${JSON.stringify(def.key)}: { ${words.join(", ")} },`;
+  };
   const listed = new Map(SETTINGS.map((def) => [def.key, lineOf(def)]));
   const keys: string[] = [];
   const files = [...new Bun.Glob("*-words.ts").scanSync(GROUP_FOLDER)].sort();
@@ -539,15 +542,13 @@ test("the exported merge is the one readSettings reads by: a chat's value over a
   expect(levels.logged).toEqual([{ setting: "jobs.run", file: CHAT_FILE }]);
 });
 
-test("progress.silenceSeconds takes no value past nine minutes: 600 in a chat's file leaves the default with one log line naming the key and the file", async () => {
-  // §10.7: a generation that sends no text for ten minutes is ended, so a progress line must come inside them.
+test("progress.silenceSeconds takes a value past nine minutes too: 600 in a chat's file is read, and the page advises above 540", async () => {
+  // §10.7: Lumiverse ends a generation that has shown nothing for ten minutes, so the page advises a progress line inside them; no value is refused (§2.1 point 5).
   const past = await settingsOf({ global: { progress: { silenceSeconds: 120 } }, chat: { progress: { silenceSeconds: 600 } } });
-  expect(past.settings.silenceMs).toBe(DEFAULT_SETTINGS.silenceMs);
-  expect(past.logged).toEqual([{ setting: "progress.silenceSeconds", file: CHAT_FILE }]);
-  // Nine minutes is the most it takes.
-  const most = await settingsOf({ global: { progress: { silenceSeconds: 120 } }, chat: { progress: { silenceSeconds: 540 } } });
-  expect({ silenceMs: most.settings.silenceMs, logged: most.logged }).toEqual({ silenceMs: 540_000, logged: [] });
-  expect(SETTINGS.find((def) => def.key === "progress.silenceSeconds")?.takes).toEqual({ type: "whole", least: 1, most: 540 });
+  expect({ silenceMs: past.settings.silenceMs, logged: past.logged }).toEqual({ silenceMs: 600_000, logged: [] });
+  const silence = SETTINGS.find((def) => def.key === "progress.silenceSeconds");
+  expect(silence?.takes).toEqual({ type: "whole", least: 1 });
+  expect(silence?.advice?.map((advice) => advice.above)).toEqual([540]);
 });
 
 test("changing an entry's default changes what the tool uses; no source but the entry holds the old values", async () => {
@@ -605,7 +606,7 @@ test("for every entry of SETTINGS, its default is a value it takes", () => {
 
 test("a chat's `limits.turn.tokensIn: ~` over a global 50,000 leaves that chat's turns with no tokens-in limit, and the global value holds for other chats", async () => {
   const lifted = await settingsOf({ global: { limits: { turn: { tokensIn: 50_000 } } }, chat: { limits: { turn: { tokensIn: null } } } });
-  expect({ turn: lifted.settings.turn, logged: lifted.logged }).toEqual({ turn: { calls: 40 }, logged: [] });
+  expect({ turn: lifted.settings.turn, logged: lifted.logged }).toEqual({ turn: {}, logged: [] });
   // Another chat, whose file lifts nothing, is held to the global limit.
   const other = await settingsOf({ global: { limits: { turn: { tokensIn: 50_000 } } }, chat: { limits: { turn: { calls: 30 } } } });
   expect(other.settings.turn).toEqual({ calls: 30, tokensIn: 50_000 });

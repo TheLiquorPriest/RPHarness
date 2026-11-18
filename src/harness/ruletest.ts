@@ -156,6 +156,8 @@ function actionOf(rule: Rule, moment: RuleMoment): RuleAction {
 /** Runs one rule, as it reads now, against a past turn's record; writes nothing. */
 export async function testRule(d: RuleTestDeps, scope: Scope, name: string, turn: string): Promise<RuleTest> {
   const { env } = d;
+  // A rule is tested against a past turn, and only a chat has turns: a scope of no chat is refused in words.
+  if (typeof scope.chat !== "string") throw new Error("A rule is tested against a turn of a chat: a scope that names only the user has no turn to test it on.");
   const at: Scope = { ...scope, turn };
   const guidance = loadGuidance(env.files, at);
   const [rule, settings, places, definitions] = await Promise.all([guidance.rule(name), readSettings(guidance, env, at), env.files.places(at), guidance.definitions()]);

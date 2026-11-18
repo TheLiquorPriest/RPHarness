@@ -9,7 +9,7 @@
 // time counts as no match, is told (`ranOut`), and the rule stays in force (R-55). A stream rule that
 // interrupts reminds instead where the agent's connection is set to (`stops`), and its firing says so.
 
-import type { AgentRef, FactDef, FactValue, JsonValue, RuleMoment, Scope, ToolResult } from "../contract/index";
+import type { AgentRef, FactDef, FactValue, JsonValue, RuleMoment, RunScope, ToolResult } from "../contract/index";
 import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../loop/rules";
 import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Question, RuleCommandAnswer, RuleMemory, RuleRun, RuleRunOptions, ToolCallFired, ToolCallSeen } from "./api";
 import type { FactTest } from "./facts";
@@ -18,7 +18,8 @@ import type { Rule, RuleScope } from "./rules";
 import { runPattern } from "./pattern";
 
 export interface RuleRunInput extends Pick<RuleRunOptions, "command" | "commandFailed"> {
-  scope: Scope;
+  /** The run's scope: a chat's, or a job of no chat's, whose run is given no rules. */
+  scope: RunScope;
   /** The triggered rules in force when the run begins, each loaded whole. */
   rules: readonly Rule[];
   /** The triggered rules in force as the files stand now. */
@@ -117,7 +118,7 @@ class Run implements RuleRun {
   readonly problems: Problem[] = [];
   readonly runEnd: RunEndRules;
   readonly afterMessage: RunEndRules;
-  readonly #scope: Scope;
+  readonly #scope: RunScope;
   /** The rules in force as last read: at the run's start, then at each moment and each model call's start. */
   #rules: readonly Rule[];
   readonly #inForce: () => Promise<readonly Rule[]>;
@@ -292,7 +293,7 @@ class Run implements RuleRun {
   async #asks(agent: AgentRef, rule: Rule, command: string, moment: RuleMoment, facts: Record<string, FactValue>): Promise<boolean> {
     if (this.#command === undefined) return false;
     const scope = this.#scope;
-    const input = { moment, agent: { id: agent.id, definition: agent.definition, ...(agent.plays !== undefined ? { plays: agent.plays } : {}) }, place: { chat: scope.chat, session: scope.session, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, facts } as unknown as JsonValue;
+    const input = { moment, agent: { id: agent.id, definition: agent.definition, ...(agent.plays !== undefined ? { plays: agent.plays } : {}) }, place: { ...(scope.chat !== undefined ? { chat: scope.chat } : {}), session: scope.session, ...(scope.turn !== undefined ? { turn: scope.turn } : {}) }, facts } as unknown as JsonValue;
     let said: RuleCommandAnswer;
     try {
       said = await this.#command(agent, { rule: rule.name, command }, input);

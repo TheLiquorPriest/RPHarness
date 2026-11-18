@@ -60,7 +60,7 @@
 // `{{stage.unperceived.names}}` the names it counts). A name is looked for in the innermost block's
 // item first, then outwards; a prompt part's own header fields are the outermost.
 
-import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FileProblem, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
+import type { AgentRef, BodyFields, DefinitionView, Effort, FactDef, FactsPort, FactValue, FileProblem, FilesPort, JsonObject, JsonValue, Layer, LayerLevel, RuleView, RunScope, Scope, StackLeft, StackPart, SwitchesPort, ToolResult, ToolsAs, UserScope } from "../contract/index";
 import type { Fired, RunEndRules, StreamRules } from "../loop/rules";
 import type { HookEntry } from "../external/hooks";
 import type { McpRead } from "./mcp";
@@ -344,14 +344,14 @@ export type OwnFactName = "todo.open" | "reply.released" | "reply.owed" | "promp
 export type OwnFactValues = Partial<Record<OwnFactName, FactValue>>;
 
 /** Reads RPH's own facts for an agent at a moment. */
-export type OwnFactsReader = (scope: Scope, agent: AgentRef) => OwnFactValues | Promise<OwnFactValues>;
+export type OwnFactsReader = (scope: RunScope, agent: AgentRef) => OwnFactValues | Promise<OwnFactValues>;
 
 /** Every fact a rule can test: RPH's own and the host's (through `FactsPort`). */
 export interface Facts {
   /** RPH's own first, then the host's. A host's fact of an own fact's name is left out. */
   defs(): FactDef[];
   /** The values of the facts named that have one now. */
-  read(scope: Scope, agent: AgentRef, names: readonly string[]): Promise<Record<string, FactValue>>;
+  read(scope: RunScope, agent: AgentRef, names: readonly string[]): Promise<Record<string, FactValue>>;
 }
 
 // ---------------------------------------------------------------- the rule engine
@@ -575,7 +575,7 @@ export interface Guidance {
   rules(switches?: SwitchesPort): Promise<RuleView[]>;
   /** A rule as its file reads now, in force or not, an example's too (`rules.test`); undefined when no rule of the name reads whole. */
   rule(name: string): Promise<Rule | undefined>;
-  /** The triggered rules in force now, for one run. */
+  /** The triggered rules in force now, for one run. A run of no chat (a job of no chat) has none to run: its run holds no rules, and none fires at any of its moments. */
   ruleRun(options: RuleRunOptions): Promise<RuleRun>;
 }
 

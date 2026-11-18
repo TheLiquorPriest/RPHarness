@@ -713,11 +713,16 @@ class TreeGuidance implements Guidance {
   }
 
   async ruleRun(options: RuleRunOptions): Promise<RuleRun> {
-    const scope = this.scope;
-    if (!("chat" in scope)) throw new Error("Rules run in a chat: a guidance read that names only the user has none.");
-    // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
-    const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope, this.#options).#triggered();
     const { facts, memory, window, patternTime, ranOut, stops, command, commandFailed } = options;
-    return createRuleRun({ scope, rules: await this.#triggered(), read, facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}) });
+    const terms = { facts, patternTime, ...(memory !== undefined ? { memory } : {}), ...(window !== undefined ? { window } : {}), ...(ranOut !== undefined ? { ranOut } : {}), ...(stops !== undefined ? { stops } : {}), ...(command !== undefined ? { command } : {}), ...(commandFailed !== undefined ? { commandFailed } : {}) };
+    const scope = this.scope;
+    if ("chat" in scope) {
+      // Each moment reads the levels' config, the rules and what their `needs:` name as they stand then (decision 16).
+      const read = (): Promise<Rule[]> => new TreeGuidance(this.#files, scope, this.#options).#triggered();
+      return createRuleRun({ scope, rules: await this.#triggered(), read, ...terms });
+    }
+    // A scope of no chat has no rules to run (a job of no chat, C-23): its run is given none and reads none at any moment, whatever rule files its levels hold.
+    if (!("session" in scope) || typeof scope.session !== "string") throw new Error("A rule run is a run's: a guidance read that names only the user, and no run's session, has none to hold rules for.");
+    return createRuleRun({ scope: { user: scope.user, session: scope.session }, rules: [], read: () => Promise.resolve([]), ...terms });
   }
 }

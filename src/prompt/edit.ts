@@ -15,7 +15,7 @@ import { withFinders } from "./learn";
 import { PromptMemory } from "./memory";
 import { SLICE_KINDS, same } from "./names";
 import { TurnPrompt } from "./prompt";
-import { mergedSpans, type Span } from "./text";
+import { isBefore, mergedSpans, type Span } from "./text";
 import { promptWords } from "./words";
 
 type Env = Pick<Environment, "prompt" | "lore" | "log" | "store" | "files">;
@@ -36,6 +36,25 @@ function splitAt(texts: readonly string[], spans: readonly Span[], words: string
     const at = text.indexOf(words, span.start + (n === 0 ? 1 : 0));
     if (at < 0 || at + words.length > span.end) continue;
     return { first: [...spans.slice(0, n), ...(at > span.start ? [{ ...span, end: at }] : [])], second: [{ ...span, start: at }, ...spans.slice(n + 1)] };
+  }
+  return undefined;
+}
+
+/**
+ * What keeps slices from being neighbours: the first two of their stretches, in prompt order and of different slices, that have a part of the
+ * prompt between them which is no slice of theirs (another slice, chat history, lore, or text no slice claims), with the name of that part;
+ * undefined where they sit side by side.
+ */
+export function between(prompt: TurnPrompt, slices: readonly { marker: string; spans: readonly Span[] }[]): { marker: string; other: string; between: string } | undefined {
+  const mine = new Set(slices.map((s) => s.marker));
+  const stretches = slices.flatMap((s) => s.spans.map((span) => ({ marker: s.marker, span }))).sort((a, b) => a.span.message - b.span.message || a.span.start - b.span.start);
+  const others = prompt.slices.filter((s) => !(s.from === "map" && mine.has(s.marker)));
+  for (let n = 1; n < stretches.length; n++) {
+    const a = stretches[n - 1];
+    const b = stretches[n];
+    if (a === undefined || b === undefined || a.marker === b.marker) continue;
+    const found = others.find((s) => s.spans.some((o) => isBefore(a.span, o) && isBefore(o, b.span)));
+    if (found !== undefined) return { marker: a.marker, other: b.marker, between: found.marker };
   }
   return undefined;
 }
@@ -108,6 +127,8 @@ export function promptMapApi(env: Env): PromptMapApi {
       };
 
       let next: PromptMap;
+      // The slices the edit renamed, old marker to new, for the records that name them.
+      let named: ReadonlyMap<string, string> = new Map();
       switch (edit.edit) {
         case "rename": {
           const slice = inMap(edit.marker);
@@ -118,6 +139,7 @@ export function promptMapApi(env: Env): PromptMapApi {
           // Its neighbours' finders follow the new name.
           const renamed = { ...slice, marker: to, edited: true as const };
           next = { ...map, slices: map.slices.map((s) => (s === slice ? renamed : { ...s, find: { ...s.find, ...(s.find.after === slice.marker ? { after: to } : {}), ...(s.find.before === slice.marker ? { before: to } : {}) } })) };
+          named = new Map([[slice.marker, to]]);
           break;
         }
         case "line": {
@@ -142,11 +164,17 @@ export function promptMapApi(env: Env): PromptMapApi {
           const spans = merged.map((s) => spansOf(s));
           const lost = merged.find((_, n) => spans[n] === undefined);
           if (lost !== undefined) return refused("edit_not_found", { marker: lost.marker });
+          // One slice is one stretch of the prompt: slices with a part of the prompt between them are not joined over it.
+          const apart = between(prompt, merged.map((s, n) => ({ marker: s.marker, spans: spans[n] ?? [] })));
+          if (apart !== undefined) return refused("edit_not_neighbours", apart);
           const as = edit.as.trim();
           const bad = badName(as, ...merged);
           if (bad !== undefined) return bad;
           const [first, ...rest] = merged as [PromptSlice, ...PromptSlice[]];
-          next = remade([{ was: first, slice: { ...first, marker: as, find: {} }, spans: mergedSpans(prompt.texts, spans.flatMap((s) => s ?? [])) }], rest);
+          // Its line says what each of its parts is, in the order they stand in the prompt, until the owner corrects it.
+          const inPrompt = merged.map((s, n) => ({ s, at: spans[n]?.[0] })).sort((a, b) => (a.at?.message ?? 0) - (b.at?.message ?? 0) || (a.at?.start ?? 0) - (b.at?.start ?? 0));
+          const line = inPrompt.map(({ s }) => s.line.trim()).filter((l) => l !== "").join(" ");
+          next = remade([{ was: first, slice: { ...first, marker: as, line, find: {} }, spans: mergedSpans(prompt.texts, spans.flatMap((s) => s ?? [])) }], rest);
           break;
         }
         case "split": {
@@ -159,14 +187,17 @@ export function promptMapApi(env: Env): PromptMapApi {
           const second = edit.second.trim();
           const bad = badName(second);
           if (bad !== undefined) return bad;
+          // The second part says it is the second part of the slice it was cut from, until the owner corrects it.
           next = remade([
             { was: slice, slice, spans: parts.first },
-            { was: slice, slice: { ...slice, marker: second, find: {} }, spans: parts.second },
+            { was: slice, slice: { ...slice, marker: second, line: words("edit_second_part", { marker: slice.marker }) ?? "", find: {} }, spans: parts.second },
           ]);
           break;
         }
       }
       await env.prompt.saveMap(scope, next, by);
+      // The records of the chat's turns follow: a renamed slice is named by its new marker in each, and each turn's record is made by the map as it now stands, so the next turn is compared with it and not with the map as it was.
+      await new PromptMemory(env.store, env.files).remark(env, scope, next, named);
       return { status: "saved", map: next };
     },
   };

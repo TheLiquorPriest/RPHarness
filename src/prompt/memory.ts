@@ -57,6 +57,23 @@ function heldOf(text: string): Held | undefined {
   }
 }
 
+/** Where the slices were found in a turn's prompt, with a renamed slice (old marker to new) named by its new marker in the slices, in the notices that name a slice, and as the slice that broke the front. */
+function renamedLocated(located: LocatedSlices, renamed: ReadonlyMap<string, string>): LocatedSlices {
+  if (renamed.size === 0 || typeof located !== "object" || located === null) return located;
+  const to = (marker: string): string => renamed.get(marker) ?? marker;
+  return {
+    ...located,
+    slices: located.slices.map((slice) => ({ ...slice, marker: to(slice.marker) })),
+    notices: located.notices.map((notice) => (notice.kind === "changed" || notice.kind === "gone" ? { ...notice, marker: to(notice.marker) } : notice.kind === "order" ? { ...notice, markers: notice.markers.map(to) } : notice)),
+    front: located.front.brokenBy === undefined ? located.front : { ...located.front, brokenBy: to(located.front.brokenBy) },
+  };
+}
+
+/** What a turn held, with a renamed slice of the map (old marker to new) under its new marker. */
+function renamedRecord(record: PromptRecord, renamed: ReadonlyMap<string, string>): PromptRecord {
+  return renamed.size === 0 ? record : { ...record, slices: record.slices.map((slice) => (slice.from === "map" && renamed.has(slice.marker) ? { ...slice, marker: renamed.get(slice.marker) ?? slice.marker } : slice)) };
+}
+
 /** What a chat's turns' prompts held, each kept in its turn's folder for as long as the host keeps it there. */
 export class PromptMemory {
   readonly #store: StorePort;
@@ -114,6 +131,36 @@ export class PromptMemory {
     const found = await this.#found(scope, turn);
     if (found === undefined) return undefined;
     return { turn: found.kept.turn, session: found.kept.session, messages: found.held.messages, located: found.held.located };
+  }
+
+  /**
+   * After the owner's edit of the map (`map` as saved): each of the chat's kept turns has the record the turn after it is compared with
+   * made again by the map as it now stands, so its slices are the edited ones, named and cut as the map has them now and the turn after is
+   * not told that a slice it knows under its new name is gone; and, for a slice `renamed` (old marker to new), its record of where the
+   * slices were found, its notices and its front name the new marker, here and with the host. What was said of a turn when it was played
+   * is otherwise left as it was said. A file the host does not let RPH write, or that cannot be read as a turn's, is logged and passed.
+   */
+  async remark(env: Pick<Environment, "prompt" | "lore" | "log">, scope: Scope, map: PromptMap, renamed: ReadonlyMap<string, string>): Promise<void> {
+    const earlier = keptOf(await this.#store.get(scope, keyOf(scope)));
+    for (const kept of earlier) {
+      const found = await this.#found(scope, kept.turn);
+      if (found === undefined) continue;
+      const at: Scope = { user: scope.user, chat: scope.chat, session: kept.session, turn: kept.turn };
+      try {
+        const { held } = found;
+        const prompt = await TurnPrompt.read({ env, scope: at, messages: held.messages });
+        const located = renamedLocated(held.located, renamed);
+        const record = prompt.mapped && prompt.preset?.id === map.preset.id ? recordOf(prompt) : renamedRecord(held.record, renamed);
+        const same = JSON.stringify(record) === JSON.stringify(held.record);
+        const told = JSON.stringify(located) === JSON.stringify(held.located);
+        if (same && told) continue;
+        const written = await this.#files.write(at, `${kept.folder}${KEPT_FILE}`, { op: "write", text: JSON.stringify({ ...held, located, record }) }, "harness");
+        if (written.status !== "written") throw new Error(`The host did not let RPH write ${kept.folder}${KEPT_FILE} (${written.status}).`);
+        if (!told) await env.prompt.saveLocated(at, located);
+      } catch (error) {
+        env.log.warn("A kept turn's record could not be made again after an edit of the prompt map.", { turn: kept.turn, error: error instanceof Error ? error.message : String(error) });
+      }
+    }
   }
 }
 

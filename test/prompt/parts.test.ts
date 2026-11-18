@@ -298,7 +298,7 @@ test("the prompt's shape notices are worded in the notices part and no longer in
 test("each refusal of the owner's edit of the prompt map says what is so and fills in", async () => {
   const map = await shippedParts().part("prompt-map");
   if (map?.format !== "lines") throw new Error("prompt-map is a lines part");
-  const fields: Record<string, Record<string, string>> = { edit_unmapped: {}, edit_no_marker: { marker: "style" }, edit_taken: { marker: "style" }, edit_merge_two: {}, edit_not_found: { marker: "style" }, edit_no_words: { marker: "style", words: "At dusk" } };
+  const fields: Record<string, Record<string, string>> = { edit_unmapped: {}, edit_no_marker: { marker: "style" }, edit_taken: { marker: "style" }, edit_merge_two: {}, edit_not_found: { marker: "style" }, edit_no_words: { marker: "style", words: "At dusk" }, edit_not_neighbours: { marker: "style", other: "persona", between: "card" }, edit_second_part: { marker: "style" } };
   for (const [name, given] of Object.entries(fields)) {
     const said = map.line(name, given) ?? "";
     expect({ name, said: said.length > 0, unfilled: said.includes("{{"), asks: ASKS.test(said) }).toEqual({ name, said: true, unfilled: false, asks: false });

@@ -388,9 +388,9 @@ describe("what stops a job", () => {
     const [one, two] = [...new Set(toldJobs(s).map((job) => job.id))];
     expect((await s.harness.jobs!.get(USER, one!))?.state).toBe("running");
 
-    expect((await s.harness.jobs!.cancel(USER, two!))?.state).toBe("cancelled");
+    expect(await s.harness.jobs!.cancel(USER, two!)).toMatchObject({ state: "cancelled", stoppedBy: { by: "user" } });
     await s.harness.turnLeft(request("t1").scope);
-    expect((await s.harness.jobs!.get(USER, one!))?.state).toBe("off-path");
+    expect(await s.harness.jobs!.get(USER, one!)).toMatchObject({ state: "off-path", stoppedBy: { by: "engine", reason: "off-path" } });
     expect(toldJobs(s).filter((job) => job.ended !== undefined).map((job) => [job.id === one ? "one" : "two", job.state])).toEqual([
       ["two", "cancelled"],
       ["one", "off-path"],
@@ -407,14 +407,14 @@ describe("what stops a job", () => {
     await s.trace.seen((record) => record.event.kind === "tool_ended" && record.event.tool === "todo");
     const id = toldJobs(s)[0]!.id;
     await s.harness.close();
-    expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ state: "interrupted", report: "Counted three so far." });
+    expect(await s.harness.jobs!.get(USER, id)).toMatchObject({ state: "interrupted", report: "Counted three so far.", stoppedBy: { by: "engine", reason: "stopping" } });
 
     // A process that ended without closing left a job kept as running.
     const crashed = { ...toldJobs(s)[0]!, id: "crashed-1", state: "running" as const, report: "Half the ledger read." };
     await s.env.store.jobs.set(crashed.scope, crashed);
     const again = createHarness(s.env, { models: { agentModel: async () => scriptedModel([], { clock: s.clock }).agentModel() }, ids: () => "again" });
     try {
-      expect(await again.jobs!.get(USER, "crashed-1")).toMatchObject({ state: "interrupted", report: "Half the ledger read." });
+      expect(await again.jobs!.get(USER, "crashed-1")).toMatchObject({ state: "interrupted", report: "Half the ledger read.", stoppedBy: { by: "engine", reason: "restart" } });
       expect(toldJobs(s).at(-1)).toMatchObject({ id: "crashed-1", state: "interrupted" });
       expect((await again.jobs!.list({ user: USER, states: ["interrupted"] })).jobs.map((job) => job.id).sort()).toEqual(["crashed-1", id].sort());
     } finally {

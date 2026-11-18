@@ -114,7 +114,11 @@ describe("the job tools behind the search", () => {
     expect(read).toContain(jobs.line("report", { report: "Counted seven." })!);
     // Cancelled: it stops, with what it had.
     expect(answerTo(s, "cancel-1")).toBe(jobs.line("cancelled", { id: ids.slow, state: "cancelled" })!);
-    expect((await s.harness.jobs.get(USER, ids.slow))?.state).toBe("cancelled");
+    const cancelled = await s.harness.jobs.get(USER, ids.slow);
+    expect(cancelled?.state).toBe("cancelled");
+    // Who stopped it: the lead, by its definition and the run it worked in (the second turn's).
+    expect(cancelled?.stoppedBy).toMatchObject({ by: "agent", agent: { definition: "lead" } });
+    expect(cancelled?.stoppedBy?.by === "agent" ? cancelled.stoppedBy.run : "").not.toBe("");
 
     // Started again by naming it: a new job with its agent and task, which names the first and was started by the lead, in its turn.
     await jobIn(s, "done", 2);

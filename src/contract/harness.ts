@@ -24,6 +24,14 @@ import type { ExternalApi, SwitchState } from "./switches";
  */
 export type JobState = "queued" | "held" | "running" | "asking" | "done" | "failed" | "cancelled" | "off-path" | "interrupted";
 
+/**
+ * Who ended a job before its agent was done (§13.5): an agent, by its `job_cancel`, with the run it
+ * worked in; the person, by his own press; or RPH itself, and why: a limit of his reached (the job's
+ * `limit` says which), the turn that started it left the path, the host stopping RPH, or a restart
+ * that found it cut off.
+ */
+export type JobStopper = { by: "agent"; agent: AgentRef; run: string } | { by: "user" } | { by: "engine"; reason: "limit" | "off-path" | "stopping" | "restart" };
+
 /** A job as the Jobs page lists it. */
 export interface JobView {
   id: string;
@@ -44,6 +52,8 @@ export interface JobView {
   report?: string;
   /** For a job that ended at one of the user's limits (§10.11): which. It ends with what it has. */
   limit?: LimitHit;
+  /** For a job that was ended before its agent was done (cancelled, at a limit, off the path, interrupted): who ended it. */
+  stoppedBy?: JobStopper;
   /** The attachments its start named, by name, kept with the rest of its start (agent, brief, limits, the turn in `scope`) so a job that waited can wait again after a restart. */
   attach?: string[];
   /** The limits of its own its start gave. */

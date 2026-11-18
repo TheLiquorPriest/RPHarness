@@ -19,7 +19,7 @@
 // not ended, once its tokens reach it: its agents wait at their next call, in the session they have,
 // until he answers.
 import type { DelegateCall } from "../agents/tools";
-import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, TagCheck, ToolCtx, Usage, UserScope } from "../contract";
+import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobStopper, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, TagCheck, ToolCtx, Usage, UserScope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Fields } from "../files/api";
 import { lines } from "../harness/means";
@@ -229,7 +229,7 @@ export class Jobs implements JobsApi, JobsWork {
     if (job.startedBy === "user") return answer(part?.line("not_yours", { id }), true);
     const live = this.#live.get(id);
     if (live === undefined || live.view.scope.user !== scope.user) return answer(part?.line("cancel_ended", { id, state: job.state }));
-    const ended = await this.#stop(live, "cancelled");
+    const ended = await this.#stop(live, "cancelled", { by: "agent", agent: ctx.agent, run: ctx.run });
     return answer(part?.line(ended.state === "cancelled" ? "cancelled" : "cancel_ended", { id, state: ended.state }));
   }
 
@@ -286,7 +286,7 @@ export class Jobs implements JobsApi, JobsWork {
   async cancel(user: string, id: string): Promise<JobView | undefined> {
     const live = this.#live.get(id);
     if (live === undefined || live.view.scope.user !== user) return this.get(user, id);
-    return this.#stop(live, "cancelled");
+    return this.#stop(live, "cancelled", { by: "user" });
   }
 
   // ---------------------------------------------------------------- the owner's controls
@@ -397,7 +397,7 @@ export class Jobs implements JobsApi, JobsWork {
     if (!("run" in prepared)) return { refused: "agent", agent: view.agent };
     const hit = prepared.day.reached(prepared.agent)[0];
     if (hit !== undefined) return { refused: "day-tokens", max: hit.max, value: hit.value };
-    const { ended: _ended, limit: _limit, asks: _asks, ...rest } = view;
+    const { ended: _ended, limit: _limit, asks: _asks, stoppedBy: _stopped, ...rest } = view;
     return { ...this.#enqueue({ ...rest, state: "queued" }, prepared, jobCountsFor(prepared.settings, prepared.connection)).view };
   }
 
@@ -405,7 +405,7 @@ export class Jobs implements JobsApi, JobsWork {
   async answer(user: string, id: string, word: JobAnswer): Promise<JobView | JobRefusal> {
     const live = await this.#control(user, id, ["asking"]);
     if ("refused" in live) return live;
-    if (word.go === "end") return this.#stop(live, "done");
+    if (word.go === "end") return this.#stop(live, "done", { by: "user" });
     const at = word.askAt;
     if (at !== undefined && !(Number.isInteger(at) && at > 0)) return { refused: "limit", limit: "askAt", value: at };
     const { asks: _asked, limits, ...rest } = live.view;
@@ -464,7 +464,7 @@ export class Jobs implements JobsApi, JobsWork {
   async turnLeft(scope: Scope): Promise<void> {
     if (scope.turn === undefined) return;
     const cut = [...this.#live.values()].filter((live) => live.view.scope.user === scope.user && live.view.scope.chat === scope.chat && live.view.scope.turn === scope.turn);
-    await Promise.all(cut.map((live) => this.#stop(live, "off-path")));
+    await Promise.all(cut.map((live) => this.#stop(live, "off-path", { by: "engine", reason: "off-path" })));
   }
 
   /**
@@ -476,7 +476,7 @@ export class Jobs implements JobsApi, JobsWork {
     await Promise.all(
       [...this.#live.values()].map((live) => {
         const waiting = this.#queue.indexOf(live);
-        if (waiting < 0) return this.#stop(live, "interrupted");
+        if (waiting < 0) return this.#stop(live, "interrupted", { by: "engine", reason: "stopping" });
         this.#queue.splice(waiting, 1);
         this.#live.delete(live.view.id);
         live.settle({ ...live.view });
@@ -620,7 +620,7 @@ export class Jobs implements JobsApi, JobsWork {
           // What his job-end hooks added goes into its report (§5.4 "Hooks").
           const said = outcome.text.trim() !== "" ? outcome.text : live.view.report;
           const report = end.added !== undefined ? joined([said ?? "", ...end.added]) : said;
-          this.#end(live, { ...live.view, state, usage: end.usage, ...(report !== undefined ? { report } : {}), ...(end.limit !== undefined && stoppedAs === undefined ? { limit: end.limit } : {}) });
+          this.#end(live, { ...live.view, state, usage: end.usage, ...(report !== undefined ? { report } : {}), ...(end.limit !== undefined && stoppedAs === undefined ? { limit: end.limit, stoppedBy: { by: "engine", reason: "limit" } } : {}) });
         },
         (error: unknown) => {
           this.#core.env.log.error("A job failed in the harness.", { job: live.view.id, error: errorWords(error) });
@@ -649,8 +649,9 @@ export class Jobs implements JobsApi, JobsWork {
     return this.#switches.get(user) ?? { off: false, held: false };
   }
 
-  /** Stops a job where it stands, to end in `state`: one waiting ends at once, one running once its agents have stopped. */
-  #stop(live: Live, state: JobState): Promise<JobView> {
+  /** Stops a job where it stands, to end in `state`, and keeps who stopped it: one waiting ends at once, one running once its agents have stopped. A later stop finds it stopped already. */
+  #stop(live: Live, state: JobState, by: JobStopper): Promise<JobView> {
+    if (live.view.stoppedBy === undefined) live.view = { ...live.view, stoppedBy: by };
     const waiting = this.#queue.indexOf(live);
     if (waiting >= 0) {
       this.#queue.splice(waiting, 1);
@@ -738,7 +739,7 @@ export class Jobs implements JobsApi, JobsWork {
       }
       if ((view.state === "queued" || view.state === "held") && (await this.#again(view))) continue;
       const { asks: _asked, ...cut } = view;
-      const interrupted: JobView = { ...cut, state: "interrupted", ended: clock.now() };
+      const interrupted: JobView = { ...cut, state: "interrupted", ended: clock.now(), stoppedBy: { by: "engine", reason: "restart" } };
       done.push(this.#keep(interrupted), this.#tell(interrupted));
     }
     // Its own writes and words alone: other users' jobs may be running and writing meanwhile.

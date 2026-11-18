@@ -56,3 +56,14 @@ test("a request with no parent follows the session's latest turn, and one whose 
   // Once a session: used up by the first turn for the second; fresh for the attempt that follows no turn, and used up by it for the turn after.
   expect(s.model.requests.map((req) => textOf(req.messages.at(-1)!).includes("Fixture rule: the storm is the scene's clock."))).toEqual([true, false, true, false]);
 });
+
+test("what the harness keeps between turns is counted by name: the session's file held read with its characters, and nothing of a run once it has ended", async () => {
+  const s = (open = await stage({ answers: [{ pieces: [{ text: "<reply>The lamp turns.</reply>" }] }] }));
+  expect((await s.turn(request("t1", { lead: "lead" }))).outcome.status).toBe("released");
+  const kept = new Map(s.harness.kept().map((k) => [k.name, k]));
+  const file = kept.get("Session files held in memory");
+  expect(file?.count).toBe(1);
+  expect(file?.chars ?? 0).toBeGreaterThan(0);
+  expect(kept.get("Sessions' opening blocks held")?.count).toBe(1);
+  for (const gone of ["Turns being answered", "Runs going on", "Jobs held in memory"]) expect(kept.get(gone)?.count).toBe(0);
+});

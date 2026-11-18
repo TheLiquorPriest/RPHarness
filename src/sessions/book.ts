@@ -54,6 +54,8 @@ export class SessionFile {
   /** Where it is, in the agents' view: `<session>.jsonl` in the session's folder (§5). */
   readonly path: string;
   readonly log: SessionLog;
+  /** The characters of its lines held in memory: those read, and those added since. */
+  chars = 0;
   header: SessionHeader | undefined;
   readonly #d: FileDeps;
   /** Whether the file has its first line on disk, or holds something that is not to be written over. */
@@ -147,6 +149,7 @@ export class SessionFile {
 
   #write(text: string): void {
     this.#changed = true;
+    this.chars += text.length;
     this.#queued += text;
     this.#d.held(Buffer.byteLength(text, "utf8"));
     this.#writing ??= this.#drain();
@@ -213,6 +216,8 @@ export interface HeldFile {
 interface Kept {
   file: Promise<SessionFile>;
   holds: number;
+  /** The file once read. */
+  read?: SessionFile;
 }
 
 /**
@@ -251,6 +256,13 @@ export class SessionBook {
     return this.#heldBytes > this.heldMost;
   }
 
+  /** How many session files are held in memory now, those worked on and those kept read between their turns, and the characters of their lines. */
+  heldNow(): { files: number; chars: number } {
+    let chars = 0;
+    for (const kept of this.#files.values()) chars += kept.read?.chars ?? 0;
+    return { files: this.#files.size, chars };
+  }
+
   /** The file of the session a scope names, held until released: read from disk when nothing holds it, and the same file for all that hold it at once. */
   async hold(scope: RunScope): Promise<HeldFile> {
     const key = JSON.stringify([scope.user, scope.chat ?? null, scope.session]);
@@ -265,6 +277,7 @@ export class SessionBook {
     let file: SessionFile;
     try {
       file = await held.file;
+      held.read = file;
     } catch (error) {
       this.#let(key, held);
       throw error;
@@ -351,6 +364,8 @@ export class SessionBook {
     }
     const parsed = parseSession(read.text);
     if (parsed.unread.length > 0) log.warn("Lines of the session file could not be read and are passed over.", { session: scope.session, path, lines: parsed.unread });
-    return new SessionFile(this.#fileDeps, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"), parsed.unread.length > 0 ? { lines: parsed.unread } : undefined);
+    const file = new SessionFile(this.#fileDeps, scope, path, parsed.header, parsed.entries, true, read.text !== "" && !read.text.endsWith("\n"), parsed.unread.length > 0 ? { lines: parsed.unread } : undefined);
+    file.chars = read.text.length;
+    return file;
   }
 }

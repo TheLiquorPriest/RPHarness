@@ -57,6 +57,10 @@ the user and its session.
   hooks file that does not parse among them), `rebuildRequest` (a kept call's messages, each naming
   the file of the turn's folder it points into). The members on `OWNER_ONLY` (from
   `rp-harness/helpers`) are called only from the owner's own presses.
+- `harness.kept()`: what RPH keeps in memory now that can grow with play, each by its name in plain
+  words (turns being answered, runs going on, session files held with their characters, the sessions'
+  opening blocks and rule memories, live listeners and the items waiting for them, jobs), for a
+  host's page of what its process holds.
 - **At start,** list each user's jobs (`harness.jobs.list({ user })`): a job a restart cut off is then
   kept as interrupted and told, and one that only waited is queued again.
 - **At shutdown,** `harness.close()`: it stops every run and job (a running job is kept as

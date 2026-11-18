@@ -83,6 +83,13 @@ export class LiveHub implements LiveApi {
     this.holds.close(run);
   }
 
+  /** What the hub holds now: the runs going on, the listeners, and the items waiting in their queues. */
+  heldNow(): { runs: number; listeners: number; waiting: number } {
+    let waiting = 0;
+    for (const subscriber of this.#subscribers) waiting += subscriber.queue.length;
+    return { runs: this.#runs.size, listeners: this.#subscribers.size, waiting };
+  }
+
   running(user: string): RunView[] {
     return [...this.#runs.values()].filter((view) => view.scope.user === user).map((view) => ({ ...view, agents: [...view.agents], held: this.holds.held(view.run) }));
   }

@@ -758,9 +758,18 @@ export interface FileProblem {
   message: string;
 }
 
+/** A thing the harness keeps in memory that can grow with play: its name in plain words, how many, and the characters of their text where that is counted (null where it is not). */
+export interface KeptCount {
+  name: string;
+  count: number;
+  chars: number | null;
+}
+
 // ---------------------------------------------------------------- the harness
 
 export interface Harness {
+  /** What the harness keeps in memory now that can grow with play, each by its name: for a host's page of what its process holds. Counting walks only the harness's own maps. */
+  kept(): KeptCount[];
   /**
    * Answers one turn. The reply goes to `sink` as it is written, ending at release with `finish`;
    * the lead's run may go on after (§10.9), and a kept sub-agent past it (§13.4). `TurnEvents.ended`

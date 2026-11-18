@@ -105,6 +105,23 @@ export function createHarness(env: Environment, options: CreateHarnessOptions = 
   };
 
   return {
+    kept() {
+      const files = book.heldNow();
+      const live = hub.heldNow();
+      const held = core.sessions.heldNow();
+      const jobsHeld = jobs.heldNow();
+      return [
+        { name: "Turns being answered", count: turns.size, chars: null },
+        { name: "Runs going on", count: live.runs, chars: null },
+        { name: "Session files held in memory", count: files.files, chars: files.chars },
+        { name: "Sessions' opening blocks held", count: held.openings, chars: held.openingChars },
+        { name: "Sessions' rule memories held", count: held.memories, chars: null },
+        { name: "Live view listeners", count: live.listeners, chars: null },
+        { name: "Live items waiting for a listener", count: live.waiting, chars: null },
+        { name: "Jobs held in memory", count: jobsHeld.live, chars: null },
+        { name: "Jobs waiting for a place", count: jobsHeld.queued, chars: null },
+      ];
+    },
     external: { list: (scope) => external.list(scope) },
     parts: partsApi(env),
     async answer(req, sink, signal) {

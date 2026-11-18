@@ -173,4 +173,17 @@ export class Sessions {
   drop(scope: Scope): void {
     this.#sessions.delete(keyOf(scope));
   }
+
+  /** How many sessions' states are held, and of them the opening blocks with the characters of their text, and the turns' rule memories. */
+  heldNow(): { sessions: number; openings: number; openingChars: number; memories: number } {
+    let openings = 0;
+    let openingChars = 0;
+    let memories = 0;
+    for (const state of this.#sessions.values()) {
+      openings += state.openings.size;
+      for (const opening of state.openings.values()) openingChars += opening.text.length;
+      memories += state.memories.size;
+    }
+    return { sessions: this.#sessions.size, openings, openingChars, memories };
+  }
 }

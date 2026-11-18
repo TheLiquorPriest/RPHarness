@@ -238,6 +238,11 @@ export class Jobs implements JobsApi, JobsWork {
     return answer(part?.line(ended.state === "cancelled" ? "cancelled" : "cancel_ended", { id, state: ended.state }));
   }
 
+  /** How many jobs are held in memory now: those running or waiting, and those waiting for a place among them. */
+  heldNow(): { live: number; queued: number } {
+    return { live: this.#live.size, queued: this.#queue.length };
+  }
+
   // ---------------------------------------------------------------- the Jobs page (`JobsApi`)
 
   async list(filter: { user: string } & JobQuery): Promise<JobPage> {

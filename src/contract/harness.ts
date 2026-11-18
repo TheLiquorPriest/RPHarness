@@ -147,6 +147,23 @@ export interface JobSwitches {
   held: boolean;
 }
 
+/**
+ * A count of jobs in a day (§10.11), as `jobs.perDay` holds the user to it: the jobs RPH let start
+ * over the window (one it refused is never counted, one cancelled still is), of every connection, or
+ * on one connection's own count (`connections.<connection>.jobs.perDay`); with the most the settings
+ * allow over that window.
+ */
+export interface JobDayCount {
+  /** Jobs started over the window. */
+  count: number;
+  /** The window counted over, in milliseconds back from now: the last 24 hours. */
+  window: number;
+  /** The most the settings allow over the window, at the levels asked for; null where none is set. */
+  max: number | null;
+  /** For a connection's own count: the connection, by the settings key it was asked by (its id or name). */
+  connection?: string;
+}
+
 /** The owner's answer to a job that asks: go on, with the point it asks at next (none: it asks no more), or end it with what it has. */
 export type JobAnswer = { go: "on"; askAt?: number } | { go: "end" };
 
@@ -193,6 +210,12 @@ export interface JobsApi {
   get(user: string, id: string): Promise<JobView | undefined>;
   /** The user's two switches over all his jobs. */
   switches(user: string): Promise<JobSwitches>;
+  /**
+   * The count of jobs in a day the user is held to, with its window and its limit as the settings
+   * at `scope` give it (a chat's levels, or the shared ones for the user alone); with `connection`
+   * (a connection's id or name, as its settings key), that connection's own count and limit.
+   */
+  dayCount(scope: Scope | UserScope, connection?: string): Promise<JobDayCount>;
   /**
    * The user starts a job, or learns why none was started. Code never does (§13.5). Called only
    * from the owner's own presses (C-5, C-24). A scope with a chat starts a job of that chat; one that

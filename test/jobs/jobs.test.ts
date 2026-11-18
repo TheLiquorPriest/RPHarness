@@ -107,6 +107,9 @@ describe("a job an agent starts", () => {
     expect(answerTo(s, "start-3")).toBe("No job was started: 2 jobs were started in the last day on fixture-line, and the player allows 2.");
     expect(s.trace.of("limit").map((record) => record.event.hit)).toEqual([{ limit: "jobs", per: "day", max: 2, value: 2, connection: "fixture-line" }]);
     expect(toldJobs(s).map((job) => `${job.id === one ? "one" : "two"}:${job.state}`)).toEqual(["one:queued", "one:running", "two:queued"]);
+    // The count the limit holds him to, as a read: its window, and the limit at the levels asked for.
+    expect(await s.harness.jobs!.dayCount({ user: USER }, "fixture-line")).toEqual({ count: 2, window: 24 * 60 * 60 * 1000, max: 2, connection: "fixture-line" });
+    expect(await s.harness.jobs!.dayCount({ user: USER })).toEqual({ count: 2, window: 24 * 60 * 60 * 1000, max: null });
 
     first.open();
     await jobEnded(s, "done", 2);

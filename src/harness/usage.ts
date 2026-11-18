@@ -68,6 +68,11 @@ interface Started {
   connections: Record<string, number>;
 }
 
+/** How many of `starts` count: every job, or those on a connection's own count (its settings key). */
+function startedOf(starts: readonly Started[], connection: string | undefined): number {
+  return starts.reduce((n, started) => n + (connection === undefined ? started.all : (started.connections[connection] ?? 0)), 0);
+}
+
 /** What would pass a count of jobs a day: the user's count of every job, or of those on a connection's own count (its settings key). */
 export interface JobCount {
   max: number;
@@ -331,6 +336,11 @@ export class UsageBook implements UsageApi {
     return gauge === undefined ? undefined : { ...gauge };
   }
 
+  /** The jobs started in the user's last 24 hours that the count of jobs a day holds him to: of every job, or on a connection's own count (its settings key). */
+  async jobsStarted(user: string, connection?: string): Promise<number> {
+    return startedOf(this.#startsOf(await this.#day(user)), connection);
+  }
+
   /**
    * Counts a job started in the user's day, unless one of `counts` is reached already (his count of
    * every job, or of those on a connection's own count): then the limit it would pass, and it is not
@@ -339,17 +349,23 @@ export class UsageBook implements UsageApi {
    */
   async countJob(user: string, counts: readonly JobCount[], connections: readonly string[]): Promise<LimitHit | undefined> {
     const day = await this.#day(user);
-    const now = this.#d.clock.now();
-    const since = now - DAY_MS;
-    if (day.starts.some((started) => started.at <= since)) day.starts = day.starts.filter((started) => started.at > since);
+    const starts = this.#startsOf(day);
     for (const { max, connection } of counts) {
-      const value = day.starts.reduce((n, started) => n + (connection === undefined ? started.all : (started.connections[connection] ?? 0)), 0);
+      const value = startedOf(starts, connection);
       if (value >= max) return { limit: "jobs", per: "day", max, value, ...(connection !== undefined ? { connection } : {}) };
     }
+    const now = this.#d.clock.now();
     const started: Started = { at: now, all: 1, connections: Object.fromEntries(connections.map((key) => [key, 1])) };
     day.starts.push(started);
     this.#pend(this.#keepIn(user, day, now, (doc) => ({ ...doc, starts: [...hourStarts(doc).map(startedValue), startedValue(started)] })), "A job's start could not be kept in the day's count of jobs.", { at: now });
     return undefined;
+  }
+
+  /** The jobs started of the user's day within the last 24 hours, older ones let go. */
+  #startsOf(day: Day): Started[] {
+    const since = this.#d.clock.now() - DAY_MS;
+    if (day.starts.some((started) => started.at <= since)) day.starts = day.starts.filter((started) => started.at > since);
+    return day.starts;
   }
 
   /** Counts a spend in the user's day at once and keeps it in its hour's document. */

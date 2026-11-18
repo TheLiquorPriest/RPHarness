@@ -19,11 +19,11 @@
 // not ended, once its tokens reach it: its agents wait at their next call, in the session they have,
 // until he answers.
 import type { DelegateCall } from "../agents/tools";
-import type { JobAnswer, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobStopper, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, TagCheck, ToolCtx, Usage, UserScope } from "../contract";
+import type { JobAnswer, JobDayCount, JobLimits, JobPage, JobQuery, JobRefusal, JobsApi, JobStart, JobState, JobStopper, JobSwitches, JobView, JsonValue, LimitHit, RunScope, Scope, TagCheck, ToolCtx, Usage, UserScope } from "../contract";
 import { loadGuidance } from "../files";
 import type { Fields } from "../files/api";
 import { lines } from "../harness/means";
-import { type ConnectionCounts, jobCountsFor, type Settings } from "../harness/settings";
+import { type ConnectionCounts, jobCountsFor, readSettings, type Settings } from "../harness/settings";
 import type { JobCount } from "../harness/usage";
 import { Budget, emptyUsage, type LoopToolResult } from "../loop";
 import { answer } from "../tools";
@@ -260,6 +260,15 @@ export class Jobs implements JobsApi, JobsWork {
   async switches(user: string): Promise<JobSwitches> {
     await this.#recovery(user);
     return { ...this.#switchesOf(user) };
+  }
+
+  /** The count of jobs in a day the user is held to, its window and its limit as the settings at `scope` give it; with `connection`, that connection's own. */
+  async dayCount(scope: Scope | UserScope, connection?: string): Promise<JobDayCount> {
+    const { env, usage } = this.#core;
+    const [settings, count] = await Promise.all([readSettings(loadGuidance(env.files, scope), env, scope), usage.jobsStarted(scope.user, connection)]);
+    const own = connection === undefined ? undefined : Object.hasOwn(settings.jobs.byConnection, connection) ? settings.jobs.byConnection[connection] : undefined;
+    const max = connection === undefined ? settings.jobs.perDay : own?.perDay;
+    return { count, window: DAY_MS, max: max ?? null, ...(connection !== undefined ? { connection } : {}) };
   }
 
   /** The user starts a job, tied to no turn: of the scope's chat, or of none where it names only him (C-23). The limits of his start stand in place of the settings' for it. The job, or why none could be started. */

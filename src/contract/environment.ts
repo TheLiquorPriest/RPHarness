@@ -6,10 +6,11 @@
 
 import type { ApprovalsPort } from "./approvals";
 import type { ChatPort } from "./chat";
-import type { Clock, Log } from "./common";
+import type { AgentRef, Clock, Log, Scope } from "./common";
 import type { TurnEvents } from "./events";
 import type { FactsPort } from "./facts";
 import type { FilesPort } from "./files";
+import type { JsonObject } from "./json";
 import type { LorePort } from "./lore";
 import type { ModelsPort } from "./models";
 import type { PromptPort } from "./prompt";
@@ -54,6 +55,8 @@ export interface Environment {
   approvals?: ApprovalsPort;
   /** Whether each thing that runs a command or calls out is switched on from the host's own command line (§16). Without it, every such thing is off. */
   switches?: SwitchesPort;
+  /** What a person calls an agent, in the lines a person reads. Without it, an agent is named by its definition's name. */
+  names?: NamesPort;
   /**
    * The host's own setting keys, as its `SettingDef.key` writes them (`turn.passConnection`), read from
    * the same config files as RPH's. A host's keys share groups with RPH's, so RPH, which logs each key
@@ -63,4 +66,13 @@ export interface Environment {
   readonly settingKeys?: readonly string[];
   clock: Clock;
   log: Log;
+}
+
+/**
+ * What a person calls an agent (§10.7): the fields that name it in the lines a person reads, the progress lines among them, as the
+ * host names it in its own (its thinking block's headings, its pages). `nth` is which of the turn's agents of its definition, playing
+ * the same, it is, counted from 1 in the order they were first named; a line has it as its own field `nth` where it is above 1.
+ */
+export interface NamesPort {
+  agent(scope: Scope, agent: AgentRef, nth: number): JsonObject;
 }

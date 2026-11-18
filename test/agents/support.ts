@@ -115,8 +115,8 @@ export interface Stage {
   close(): Promise<void>;
 }
 
-/** Progress lines as RPE's drafted file has them, with the rows for agents at work, which RPH's own file does not show. */
-export const PROGRESS = "---\ndescription: Fixture progress lines.\nformat: lines\n---\nstarted: Reading the turn.\ntool: {{tool}}\ndelegate: Asking {{agent}}.\nagents: {{count}} agents at work.\nquestion: {{agent}} has a question.\nstill: Still working ({{elapsed}}).\n";
+/** Progress lines as RPE's drafted file has them, with the rows for agents at work, which RPH's own file does not show; an agent named as the rig names it, by its definition. */
+export const PROGRESS = "---\ndescription: Fixture progress lines.\nformat: lines\n---\nstarted: Reading the turn.\ntool: {{tool}}\ndelegate: Asking {{name}}.\nagents: {{count}} agents at work.\nquestion: {{name}} has a question.\nstill: Still working ({{elapsed}}).\n";
 
 /** A tool's answer in plain text. */
 export function said(text: string): ToolResult {
@@ -288,8 +288,9 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
         return () => working.delete(entry);
       },
       gauge: (agent, limits) => usage.gauge(scope, turn, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
-      progress: (name, fields) => {
-        const line = progressPart?.format === "lines" ? progressPart.line(name, fields) : undefined;
+      // The agent a line is about, named as the harness names one with no host's names: by its definition.
+      progress: (name, fields, about) => {
+        const line = progressPart?.format === "lines" ? progressPart.line(name, about === undefined ? fields : { ...fields, name: about.definition }) : undefined;
         if (line !== undefined) progress.push(line);
       },
       ...(options.compaction !== undefined ? { compaction: options.compaction } : {}),

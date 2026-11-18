@@ -14,10 +14,14 @@ export interface OwnTool extends LoopTool {
   lane?: string;
 }
 
-/** A tool's file: its description for the model, and each argument's, by name. */
+/**
+ * A tool's file: its description for the model, and each argument's, by name; and, from its header's `doing`, what a person is told
+ * the tool is doing while it runs, in a few words ("reading a file"), where the file gives it.
+ */
 export interface ToolText {
   description: string;
   arguments: Readonly<Record<string, string>>;
+  doing?: string;
 }
 
 /** A line of the tool answers' file, filled in; undefined when the file has no line of that name. */

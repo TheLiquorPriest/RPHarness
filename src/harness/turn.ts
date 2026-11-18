@@ -25,6 +25,7 @@ import type { AgentDefinition, Facts, Fields, Guidance, LinesPart, OwnFactValues
 import { factFields, factsNamed } from "../files/facts";
 import { type AgentOutcome, type AgentRecord, AgentRunner, Budget, type Judged, type KeepRequest, leftFact, type LoopTool, type LoopToolResult, type ParentCall, type RunnerOptions, type RunnerTexts, RunTrace, type TextChannel, type Work } from "../loop";
 import { promptTokens, tokensOf } from "../model/tokens";
+import { durationWords } from "../model/words";
 import type { AgentModel, ModelSource } from "../model/source";
 import { heldSentences, KeepAlive, MessageReply, outsideTags, ReplyDesk, TagReply, ThinkingFeed } from "../reply";
 import { SILENCE_MOST_MS } from "../reply/progress";
@@ -46,7 +47,7 @@ import { AgentRuns } from "./agent-run";
 import { Judges } from "./judge";
 import { agentJson, hookSettings, Hooks, scopeJson } from "../external/hooks";
 import type { LiveHub } from "./live";
-import { type Connection, connectionOf, lines, runnerTexts, template } from "./means";
+import { type Connection, connectionOf, lines, runnerTexts, template, toolTextOf } from "./means";
 import { assistantMessage, promptMessages, promptText, type RoleMark, roleMark, systemMessage, userMessage } from "./prompt";
 import { type PointedFile, placed, sentMessages } from "./requests";
 import { keepMemory, keptOpening, memoryAt, type Opening, type Sessions, unsaid } from "./sessions";
@@ -141,6 +142,13 @@ export class Turn {
   /** The agents' thinking on its way to the chat's thinking block, where the sink takes it (`progress.thinking`). */
   #thinking: ThinkingFeed | undefined;
   #progress: LinesPart | undefined;
+  /** What each tool is doing in a person's words (its file's `doing`), by its name, as far as it is read: none where its file gives none. */
+  readonly #doing = new Map<string, string | undefined>();
+  /** The tool lines whose tool's file is being read, and the one after which the next goes out, so the lines keep the order the tools began in. */
+  #toolLines: Promise<void> = Promise.resolve();
+  #toolPending = 0;
+  /** The turn's agents named so far, by their definition and what they play, in the order they were first named: the second and later are numbered. */
+  readonly #nths = new Map<string, string[]>();
   #words: Words = () => undefined;
   #texts: RunnerTexts = { continueAfterRule: () => "" };
   #guidance: Guidance | undefined;
@@ -414,6 +422,7 @@ export class Turn {
     for (const problem of rules.problems) env.log.warn("A rule cannot be used.", { path: problem.path, problem: problem.message });
 
     const texts = await ownTexts(guidance);
+    for (const [name, text] of texts) this.#doing.set(name, text.doing);
     // A `prompt:` name, given by `delegate` or a definition's `given:`, the lead's or a sub-agent's, read as the prompt tool reads it.
     const slice = promptSlice(async () => this.#prompt, guidance);
     const team = new Team({
@@ -439,7 +448,7 @@ export class Turn {
         return () => this.#working.delete(entry);
       },
       gauge: (agent, limits) => this.#c.usage.gauge(scope, this.run, agent.id, limits.contextWindow?.tokens ?? 0, limits.maxTokens?.tokens ?? 0),
-      progress: (name, fields) => this.#say(name, fields),
+      progress: (name, fields, about) => this.#say(name, about === undefined ? fields : { ...fields, ...this.#named(about) }),
       keep: (agent, kind) => this.#keeper(agent, kind).keep,
       session: (agent, kind, by) => this.#agentRuns().session(agent, kind, by),
       compacted: (agent, summary, facts) => this.#agentRuns().compacted(agent, summary, facts),
@@ -1302,6 +1311,40 @@ export class Turn {
     if (line !== undefined) this.#keep.sink.progress(line);
   }
 
+  /** What a person calls `agent` in a progress line: the host's fields for it (`names`), else its definition's name; with `nth` where the turn named another of its definition playing the same first. */
+  #named(agent: AgentRef): Fields {
+    const key = `${agent.definition}\u0000${agent.plays ?? ""}`;
+    let seen = this.#nths.get(key);
+    if (seen === undefined) this.#nths.set(key, (seen = []));
+    if (!seen.includes(agent.id)) seen.push(agent.id);
+    const nth = seen.indexOf(agent.id) + 1;
+    return { ...(this.#c.env.names?.agent(this.scope, agent, nth) ?? { name: agent.definition }), ...(nth > 1 ? { nth } : {}) };
+  }
+
+  /**
+   * A tool began: its progress line says what the tool is doing in a person's words, its file's `doing` (a tool whose file gives none
+   * by its own name, `tool`), and who runs it. A tool not RPH's own has its file read the first time it runs in the turn; while one is
+   * read, the tool lines after it wait for it, so they go out in the order the tools began.
+   */
+  #sayTool(agent: AgentRef, tool: string): void {
+    const named = this.#named(agent);
+    const fields = (doing: string | undefined): Fields => ({ tool, ...(doing !== undefined ? { doing } : {}), ...named });
+    if (this.#doing.has(tool) && this.#toolPending === 0) {
+      this.#say("tool", fields(this.#doing.get(tool)));
+      return;
+    }
+    this.#toolPending += 1;
+    this.#toolLines = this.#toolLines
+      .then(async () => {
+        if (!this.#doing.has(tool)) this.#doing.set(tool, toolTextOf(await this.#guidance?.tool(tool).catch(() => undefined))?.doing);
+        this.#say("tool", fields(this.#doing.get(tool)));
+      })
+      .catch((error: unknown) => this.#c.env.log.warn("A tool's progress line could not be said.", { turn: this.scope.turn, tool, error: errorWords(error) }))
+      .finally(() => {
+        this.#toolPending -= 1;
+      });
+  }
+
   /** The turn's own time ran out: every agent ends where it stands, at that limit. */
   #outOfTime(max: number): void {
     const hit = { limit: "time" as const, per: "turn" as const, max, value: (this.#earlier?.ms ?? 0) + this.#c.env.clock.now() - this.#startedAt };
@@ -1321,7 +1364,7 @@ export class Turn {
         this.#calls.set(agent, event.call);
         return;
       case "tool_started":
-        this.#say("tool", { tool: event.tool });
+        this.#sayTool(record.agent, event.tool);
         return;
       case "rule_fired":
         this.#firings.push({ firing: event.firing, call: this.#calls.get(agent) ?? 0 });
@@ -1331,7 +1374,7 @@ export class Turn {
         // The failed try's thinking is over; a try made again thinks under its own heading.
         this.#thinking?.ended(record.agent, event.call);
         // A call made again: said in the progress file's words, with what broke it, the wait and the try it goes on to.
-        if (event.retried) this.#say("retrying", { failure: event.failure, is: { [event.failure]: true }, seconds: Math.ceil((event.wait ?? 0) / 1000), next: event.tries + 1, most: event.retries + 1 });
+        if (event.retried) this.#say("retrying", { failure: event.failure, is: { [event.failure]: true }, ...((event.wait ?? 0) > 0 ? { wait: durationWords(event.wait ?? 0) } : {}), next: event.tries + 1, most: event.retries + 1 });
         return;
       case "call_ended": {
         this.#thinking?.ended(record.agent, event.call);

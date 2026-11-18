@@ -67,7 +67,7 @@ test("a sub-agent's calls are counted and shown under its own name", async () =>
   const text = items.flatMap((item) => (item.type === "delta" && item.delta.agent === "gm-1" && item.delta.text !== undefined ? [item.delta.text] : []));
   expect(text.join("")).toBe("Rolling.A four: the jump fails.");
   // The thinking block says who is at work, in the progress file's words.
-  expect(s.progress).toEqual(["Asking gm-1."]);
+  expect(s.progress).toEqual(["Asking gm."]);
 });
 
 const HOUR = 3_600_000;

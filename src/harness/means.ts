@@ -18,7 +18,7 @@ export function lines(part: PromptPart | undefined): LinesPart | undefined {
   return part?.format === "lines" ? part : undefined;
 }
 
-/** A tool's file as the tool takes it: its body for the model, and its header's `arguments`. */
+/** A tool's file as the tool takes it: its body for the model, its header's `arguments`, and its header's `doing` for a person. */
 export function toolTextOf(part: PromptPart | undefined): ToolText | undefined {
   const body = template(part);
   if (body === undefined) return undefined;
@@ -27,7 +27,8 @@ export function toolTextOf(part: PromptPart | undefined): ToolText | undefined {
   if (typeof given === "object" && given !== null && !Array.isArray(given)) {
     for (const [name, text] of Object.entries(given)) if (typeof text === "string") args[name] = text;
   }
-  return { description: joined([body.render().text]), arguments: args };
+  const doing = body.header["doing"];
+  return { description: joined([body.render().text]), arguments: args, ...(typeof doing === "string" && doing.trim() !== "" ? { doing: doing.trim() } : {}) };
 }
 
 /**

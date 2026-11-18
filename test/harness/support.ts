@@ -11,7 +11,7 @@ import { onTestFinished } from "bun:test";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, PromptMessage, ReplyError, RunScope, Scope, StoresPort, Switchable, SwitchesPort, ToolResult, ToolsPort, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
+import type { ApprovalsPort, ChatRole, Environment, FilesPort, Harness, JsonValue, Log, NamesPort, PromptMessage, ReplyError, RunScope, Scope, StoresPort, Switchable, SwitchesPort, ToolResult, ToolsPort, TraceRecord, TurnEvents, TurnOutcome, TurnRequest, Usage, WebSearchPort } from "../../src/contract";
 import { loadGuidance } from "../../src/files";
 import { createFolderHost, type FolderHost, type ToolHandler } from "../../src/hosts/folder";
 import { SHIPPED_GUIDANCE } from "../../src/helpers";
@@ -151,6 +151,8 @@ export interface StageOptions {
   web?: WebSearchPort;
   /** The host's registry of what is switched on; without it, everything that calls out is off. */
   switches?: SwitchesPort;
+  /** What the host calls each agent; without it, an agent is named by its definition's name. */
+  names?: NamesPort;
 }
 
 export interface Stage {
@@ -279,6 +281,7 @@ async function staged(dir: string, options: StageOptions, hosted: (host: FolderH
     ...(options.stores !== undefined ? { stores: options.stores } : {}),
     ...(options.web !== undefined ? { web: options.web } : {}),
     ...(options.switches !== undefined ? { switches: options.switches } : {}),
+    ...(options.names !== undefined ? { names: options.names } : {}),
   };
   const model = scriptedModel(options.answers, { clock, contextWindow: 64_000, maxTokens: 4_000 });
   let next = 0;

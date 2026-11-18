@@ -21,7 +21,7 @@ test("a call reset part-way through the reply: one reply, nothing twice, a progr
 
   expect(outcome).toMatchObject({ status: "released", reply: "The hall is dark. Her candle gutters. Something moves." });
   expect(sink.text).toBe("The hall is dark. Her candle gutters. Something moves.");
-  expect(sink.lines.map((line) => line.line)).toContain("A call to the model failed (the connection was lost). Trying again in 0s, try 2 of 3.");
+  expect(sink.lines.map((line) => line.line)).toContain("A call to the model failed (the connection was lost). Trying again at once, try 2 of 3.");
   expect(s.trace.of("call_failed").map((record) => record.event)).toEqual([{ kind: "call_failed", call: 1, failure: "connection", words: RESET, at: "shown", tries: 1, retries: 2, retried: true, wait: 0 }]);
 });
 
@@ -36,6 +36,19 @@ test("with its tries used up, the turn fails naming how many tries were made and
     [2, true, "before"],
     [3, false, "before"],
   ]);
+});
+
+test("the wait before a call is made again is said in words, never as a count of seconds", async () => {
+  const s = await stage({ config: "calls:\n  retryWaitSeconds: 5\n", answers: [{ pieces: [], end: { error: "529: Overloaded (overloaded_error)" } }, { pieces: [{ text: "<intent>Calm.</intent><reply>The hall is dark.</reply>" }] }] });
+  const sink = new WatchedSink(s.clock);
+
+  const turn = s.turn(request("t1", { lead: "lead" }), sink);
+  await s.trace.seen((record) => record.event.kind === "call_failed");
+  await s.clock.idle();
+  s.clock.advance(5_000);
+
+  expect((await turn).outcome.status).toBe("released");
+  expect(sink.lines.map((line) => line.line)).toContain("A call to the model failed (the provider is busy). Trying again in 5 seconds, try 2 of 3.");
 });
 
 test("while a call has been sent and nothing of its answer has come, the chat is told the turn still works, once a minute", async () => {

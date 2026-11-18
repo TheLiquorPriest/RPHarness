@@ -86,8 +86,11 @@ export interface TeamDeps {
   track(entry: { runner: AgentRunner; work: Work }): () => void;
   /** A sub-agent's model's room, for its window gauge. */
   gauge?(agent: AgentRef, limits: ModelLimits): void;
-  /** A progress line, by its name in the progress part (`delegate`, `agents`, `question`), with its fields. */
-  progress?(name: string, fields: Fields): void;
+  /**
+   * A progress line, by its name in the progress part (`delegate`, `agents`, `question`), with its fields; `about`, the agent the
+   * line is about, which the turn names as a person calls it, never by its handle.
+   */
+  progress?(name: string, fields: Fields, about?: AgentRef): void;
   /** A slice of the prompt by its name as written (`prompt:persona`), from the prompt map. Without it, such a name is not found. */
   slice?(ref: string, reader: AgentRef): Promise<string | undefined>;
   /** What keeps a sub-agent's requests, as the user's setting asks (`trace.requests`); `save`, its save call's at the moment before compaction; none keeps nothing. */
@@ -271,11 +274,10 @@ export class Team implements TeamWork {
       return "runner" in made ? said("") : made;
     }
     const member: Member = { ref: made.ref, runner: made.runner, level, parent, messages: 0, waiting: false, kept: call.keep === true, ending: false, over: false, task: call.brief, again: made.again, session: made.session, ...(made.most !== undefined ? { most: made.most } : {}) };
-    const fields = fieldsOf(member.ref);
     this.#members.set(member.ref.id, member);
     d.session?.(member.ref, "agent", parent);
     d.gauge?.(member.ref, made.limits);
-    d.progress?.("delegate", fields);
+    d.progress?.("delegate", {}, member.ref);
     const working = [...this.#members.values()].filter((other) => other.runner.working).length + 1;
     if (working > 1) d.progress?.("agents", { count: working });
     const work = this.#begin(member, { messages: [] }, { parent: member.parent, given: made.given }, ctx.signal, free);
@@ -599,7 +601,7 @@ export class Team implements TeamWork {
     }
     member.ended?.(outcome);
     if (member.ending) this.#finish(member);
-    if (outcome.status === "asked") this.#d.progress?.("question", fieldsOf(member.ref));
+    if (outcome.status === "asked") this.#d.progress?.("question", {}, member.ref);
     if (outcome.status === "failed") this.#d.env.log.warn("A sub-agent's work failed.", { agent: member.ref.id, failure: outcome.failure ?? "harness", error: outcome.error ?? "" });
     return this.#result(member.ref, outcome, missing, loaded);
   }
@@ -628,7 +630,7 @@ export class Team implements TeamWork {
 
   /** A member's work that ended on a question, as the answer to the call that started it: the question laid out by its part, and marked (§10.5). */
   async asked(ref: AgentRef, outcome: AgentOutcome): Promise<LoopToolResult> {
-    this.#d.progress?.("question", fieldsOf(ref));
+    this.#d.progress?.("question", {}, ref);
     return this.#result(ref, outcome, [], await this.#load());
   }
 

@@ -70,8 +70,8 @@ test("the lines this lane words say what is so and ask for nothing", async () =>
   }
 });
 
-/** The header fields of a part or a tool file that something reads: its description and format, a tool's arguments, and the fields code reads of one part by name. */
-const READ: Record<string, true> = { description: true, format: true, arguments: true, yes: true, record: true, views: true, tags: true, intent_file: true };
+/** The header fields of a part or a tool file that something reads: its description and format, a tool's arguments and what it is doing for a person, and the fields code reads of one part by name. */
+const READ: Record<string, true> = { description: true, format: true, arguments: true, doing: true, yes: true, record: true, views: true, tags: true, intent_file: true };
 
 function headerOf(text: string): Record<string, unknown> {
   if (!text.startsWith("---\n")) return {};
@@ -87,7 +87,7 @@ test("no header of RPH's own parts or tools holds a field nothing reads, and wri
     }
   }
   expect(unread).toEqual([]);
-  expect(Object.keys(headerOf(readFileSync(join(SHIPPED_GUIDANCE, ".tools", "write_reply.md"), "utf8")))).toEqual(["description", "arguments"]);
+  expect(Object.keys(headerOf(readFileSync(join(SHIPPED_GUIDANCE, ".tools", "write_reply.md"), "utf8")))).toEqual(["description", "doing", "arguments"]);
 });
 
 test("RPH ships no agent definition: its own layer is parts, rules and tools, and a host's folder holds its lead", () => {

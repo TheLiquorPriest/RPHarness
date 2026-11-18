@@ -66,7 +66,7 @@ test("two started in one step work side by side; both ask, both are answered, bo
   const order = ended.map((record) => `${record.agent?.id} ${record.event.status}`);
   expect(Math.max(order.indexOf("gm-1 asked"), order.indexOf("keeper-1 asked"))).toBeLessThan(Math.min(order.indexOf("gm-1 done"), order.indexOf("keeper-1 done")));
   // The thinking block says who is at work, how many at once, and who has a question, in the progress file's words.
-  expect([...s.progress].sort()).toEqual(["2 agents at work.", "Asking gm-1.", "Asking keeper-1.", "gm-1 has a question.", "keeper-1 has a question."]);
+  expect([...s.progress].sort()).toEqual(["2 agents at work.", "Asking gm.", "Asking keeper.", "gm has a question.", "keeper has a question."]);
 });
 
 test("a stop ends every one of them where it stands, and leaves no model call running", async () => {

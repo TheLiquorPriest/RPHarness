@@ -709,6 +709,8 @@ export async function makeCall(deps: CallDeps, shape: CallShape, context: Transc
   } finally {
     watch?.stop();
     hold?.settle(spent);
+    // A call that ended before its request went out was no call; its run hears so before it reads the end.
+    if (!sending) ask.heard?.({ kind: "call_unmade" });
   }
 }
 

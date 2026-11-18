@@ -287,6 +287,23 @@ describe("a call that failed before any piece of its answer came", () => {
     expect(heard).toEqual([{ kind: "call_facts", facts: { status: 429, asked: 7_000 } }]);
   });
 
+  test("a call stopped before its request went out tells its run it was no call; one whose request went out does not", async () => {
+    const made = rig({ script: () => eventStream(anthropicStream(anthropicTurn({ text: "At the quay." }))) });
+    r = made;
+    const saved = await made.layer.api.save(USER, claude("claude-sonnet-4-5"), ANTHROPIC_KEY);
+    const agent = await made.layer.agentModel({ user: USER, connectionId: saved.id, model: null, effort: "off" });
+    const heard: LayerEvent[] = [];
+    const stop = new AbortController();
+    stop.abort(new Error("The job was cancelled."));
+    const stopped: SimpleStreamOptions & LayerOptions = { signal: stop.signal, heard: (event) => heard.push(event) };
+    expect((await made.clock.settle(call(agent, ASK, stopped))).stopReason).toBe("aborted");
+    expect([heard, made.sent.length]).toEqual([[{ kind: "call_unmade" }], 0]);
+    heard.length = 0;
+    const sent: SimpleStreamOptions & LayerOptions = { heard: (event) => heard.push(event) };
+    expect((await made.clock.settle(call(agent, ASK, sent))).stopReason).toBe("stop");
+    expect([heard, made.sent.length]).toEqual([[], 1]);
+  });
+
   test("never holds a key or a header's value, even where the provider repeats one", async () => {
     const refused = await serverFailure(() => failed(401, { error: { message: `Incorrect API key provided: ${SERVER_KEY}.`, type: "invalid_request_error", code: "invalid_api_key" } }));
     expect(refused.startsWith("401: Incorrect API key provided: [secret]")).toBe(true);

@@ -88,6 +88,7 @@ test("on the fake clock the requests and tokens per minute hold across the agent
   expect(refused).toEqual([
     { kind: "limit", hit: { limit: "tokensPerMinute", per: "connection", max: 1, value: estimate, connection: "Writer" } },
     { kind: "call_facts", facts: { unmade: true } },
+    { kind: "call_unmade" },
   ]);
   expect(big.errorMessage).toBe(`This call comes to about ${estimate} tokens, more than the 1 a minute the connection "Writer" takes, so it was not made. The setting "Tokens a minute on a connection" on the Settings page says how many it takes.`);
   expect(made.sent).toHaveLength(3);
@@ -153,9 +154,10 @@ test("calls past the connection's count wait in order; a stopped one leaves the 
   expect(asked(made.sent)).toEqual(["first", "second", "fourth"]);
   gates[2]?.resolve();
   expect((await fourth).errorMessage).toBeUndefined();
+  // The one stopped in line never went out: its run is told it was no call.
   expect(heard.slice(1)).toEqual([
     [placeWait(), placeWait(0)],
-    [placeWait(), placeWait(0)],
+    [placeWait(), placeWait(0), { kind: "call_unmade" }],
     [placeWait(), placeWait(0)],
   ]);
 

@@ -256,6 +256,8 @@ interface Stint {
   shownAt: number;
   /** What broke the call the work ended on, failed, and how many times that call was made. */
   broke?: { failure: CallFailureKind; tries: number };
+  /** The call under way ended before its request went out (the model layer's `call_unmade`): it was no call. */
+  unmade: boolean;
   /** Its hooks at the work's end were asked this stretch. */
   hooked: boolean;
   /**
@@ -419,6 +421,7 @@ export class AgentRunner {
       resent: 0,
       retried: 0,
       shownAt: 0,
+      unmade: false,
       hooked: false,
     };
     this.#stint = stint;
@@ -788,6 +791,7 @@ export class AgentRunner {
     stint.callSent = context.messages;
     stint.facts = undefined;
     stint.shownAt = this.#o.channel?.shown.length ?? 0;
+    stint.unmade = false;
     const callTime = this.#o.limits?.callTime;
     if (callTime !== undefined) stint.callTimer = this.#clock.setTimeout(() => this.#halt(stint, { status: "limit", hit: { limit: "callTime", per: "agent", max: callTime, value: this.#clock.now() - stint.callStartedAt, agent: this.agent } }), callTime);
     stint.callFrom = this.#pi.state.messages.length;
@@ -816,6 +820,7 @@ export class AgentRunner {
         ...streamSettings(settings),
         heard: (event) => {
           if (event.kind === "call_facts") stint.facts = event.facts;
+          else if (event.kind === "call_unmade") stint.unmade = true;
           else if (event.kind === "limit") this.#halt(stint, { status: "limit", hit: event.hit });
           else this.#emit(stint, event);
         },
@@ -858,7 +863,8 @@ export class AgentRunner {
           this.#clock.clearTimeout(stint.callTimer);
           stint.callTimer = undefined;
         }
-        const used = this.#spent(stint, message);
+        // A call whose request never went out (stopped while it waited for its connection, refused before it was sent) was no call: the one counted as it began is given back.
+        const used = { ...this.#spent(stint, message), ...(stint.unmade ? { calls: -1 } : {}) };
         addUsage(stint.usage, used);
         this.#budget.count(used);
         // An answer that calls tools is a tool round, the agent's and every budget's above it.
@@ -894,7 +900,7 @@ export class AgentRunner {
             return [{ id: part.id, name: part.name, args: part.arguments as JsonValue, ...(began !== undefined ? { began } : {}) }];
           }),
           stop: stint.cut !== undefined ? "cut" : message.stopReason,
-          usage: { ...used, calls: 1 },
+          usage: { ...used, calls: stint.unmade ? 0 : 1 },
           ms: this.#clock.now() - stint.callStartedAt,
           ...(message.errorMessage !== undefined ? { error: message.errorMessage } : {}),
         });

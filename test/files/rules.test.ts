@@ -365,4 +365,20 @@ describe("when a run begins", () => {
       ["@shipped/.rules/perceptions-missing.md", 9, "The text shows {{path.unperceived.list}}, and path.unperceived has no `list`: it gives its count, `names`, `by`. It stays empty."],
     ]);
   });
+
+  test("inside a block over a fact's list a name is its item's field as the fact declares it, filled from each item; one neither gives is reported by the list it stands in", async () => {
+    const held = "---\ndescription: Held.\nagents: all\nfact: stage.untaken > 0\nat: run-end\n---\nWaiting: {{stage.untaken.names}}.\n{{#stage.untaken.held}}\n- {{name}}: {{perceptions}}{{#turns}}, {{turns}} turn(s) ago{{/turns}}{{#scenes}}; {{title}}{{/scenes}}.\n{{/stage.untaken.held}}\n";
+    const typo = "---\ndescription: Typo.\nagents: all\nat: run-end\n---\n{{#stage.untaken.held}}\n- {{nmae}}\n{{/stage.untaken.held}}\n{{#asked.held}}{{what}}{{/asked.held}}\n";
+    b = await bench({ chat: { "rules/held.md": held, "rules/typo.md": typo } }, [
+      { name: "stage.untaken", counts: "Who holds perceptions not taken in.", fields: ["held", "held.name", "held.perceptions", "held.turns", "held.scenes", "held.scenes.title"] },
+      { name: "asked", counts: "Presses.", fields: ["held"] },
+    ]);
+    await b.facts({ "stage.untaken": { count: 1, names: ["Wren Hale"], fields: { held: [{ name: "Wren Hale", perceptions: 3, turns: 2, scenes: [{ title: "The harbour" }] }] } } });
+    const r = await run();
+    expect(r.problems.map((p) => [p.path, p.line, p.message])).toEqual([
+      ["rules/typo.md", 7, "The text shows {{nmae}} inside the list {{#stage.untaken.held}}, and neither an item of it nor any fact gives it, so it stays empty. An item of it gives name, perceptions, turns, scenes."],
+      ["rules/typo.md", 9, "The text shows {{what}} inside the list {{#asked.held}}, and neither an item of it nor any fact gives it, so it stays empty. asked does not say what an item of `held` carries: its definition names each as a field `held.<name>`."],
+    ]);
+    expect((await r.runEnd.due({ agent: author, call: 1 })).find((f) => f.firing.rule === "held")?.text).toBe("Waiting: Wren Hale.\n- Wren Hale: 3, 2 turn(s) ago; The harbour.\n");
+  });
 });

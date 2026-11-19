@@ -9,7 +9,7 @@ import { problemAt } from "./header";
 
 type Node =
   | { type: "text"; text: string }
-  | { type: "field"; path: string }
+  | { type: "field"; path: string; line: number }
   | { type: "block"; path: string; inverted: boolean; line: number; children: Node[] };
 
 type Token = { kind: "text"; text: string } | { kind: "field"; path: string } | { kind: "open" | "inverted" | "close"; path: string };
@@ -92,6 +92,33 @@ export function renderWith(template: Template, contexts: readonly Value[]): Rend
   return { text: out.join(""), missing: [...missing] };
 }
 
+/** A field or a block's tag of a template, where it stands: its path, its line, whether it opens a block shown when its field is present (whose item the names inside it are looked for in first), and the paths of such blocks it stands inside, outermost first. */
+export interface TemplateName {
+  path: string;
+  line: number;
+  opens: boolean;
+  within: readonly string[];
+}
+
+/** Every field and block of a template made by `parseTemplate`, in the order written, `{{.}}` left out. A block shown when its field is absent gives what it holds no item of its own, so it is in no name's `within`. */
+export function namesOf(template: Template): TemplateName[] {
+  const nodes = NODES.get(template);
+  if (nodes === undefined) throw new Error("This template was not made by parseTemplate.");
+  const out: TemplateName[] = [];
+  const walk = (list: readonly Node[], within: readonly string[]) => {
+    for (const node of list) {
+      if (node.type === "text" || node.path === ".") continue;
+      if (node.type === "field") out.push({ path: node.path, line: node.line, opens: false, within });
+      else {
+        out.push({ path: node.path, line: node.line, opens: !node.inverted, within });
+        walk(node.children, node.inverted ? within : [...within, node.path]);
+      }
+    }
+  };
+  walk(nodes, []);
+  return out;
+}
+
 /** The parsed nodes of each template made here. */
 const NODES = new WeakMap<Template, readonly Node[]>();
 
@@ -153,7 +180,7 @@ export const parseTemplate: ParseTemplate = (text, at) => {
         if (!alone) addText(t.text);
       } else if (t.kind === "field") {
         named(t.path);
-        into().push({ type: "field", path: t.path });
+        into().push({ type: "field", path: t.path, line: lineNo });
       } else if (t.kind === "open" || t.kind === "inverted") {
         named(t.path);
         const block: Node = { type: "block", path: t.path, inverted: t.kind === "inverted", line: lineNo, children: [] };

@@ -126,7 +126,11 @@ A header and a body, the text the rule puts in front of an agent. `.rules/exampl
   - `every:` a number of turns, with or without `fact:`.
 - `repeat:` `once per turn` (left out), `once per session`, `after N turns`, `always`.
 
-The facts a rule can test are RPH's own and the host's; the host's Rules page lists them.
+The facts a rule can test are RPH's own and the host's; the host's Rules page lists them. A rule's
+text shows a fact by its name (its count), `names`, a group under `by` and the fields the fact
+declares; inside a block over a list field, a name is first an item's field, which the fact declares
+as `<field>.<name>` (`{{#stage.untaken.held}}{{name}}{{/stage.untaken.held}}`). When a run begins,
+each name the text shows that nothing gives is reported, with the list it stands in.
 
 ## Prompt parts and tool descriptions (`.prompts/<name>.md`, `.tools/<name>.md`)
 

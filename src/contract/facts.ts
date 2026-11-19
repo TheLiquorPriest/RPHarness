@@ -19,7 +19,11 @@ export interface FactDef {
   by?: string[];
   /**
    * The fields its value may carry beyond its count and names, which a rule's text shows by the
-   * fact's full name and the field's (`{{history.leaving.uncovered.range}}`). Absent: it has none.
+   * fact's full name and the field's (`{{history.leaving.uncovered.range}}`). A dotted one says what
+   * each item of a list field carries (or a field's object): `held.name` is the `name` of each item
+   * of `held`, and `missing.turns.message` that of each item of the list `turns` in each item of
+   * `missing`. A rule's text shows those inside a block over the list, by the item's name alone
+   * (`{{#stage.untaken.held}}{{name}}{{/stage.untaken.held}}`). Absent: it has none.
    */
   fields?: string[];
 }
@@ -45,7 +49,7 @@ export interface FactValue {
    * (`stage.unperceived(principal, supporting)`) can name only theirs.
    */
   namesBy?: Record<string, string[]>;
-  /** The value of each field `FactDef.fields` declares. */
+  /** The value of each field `FactDef.fields` declares, by its name; what a dotted one names is carried in the items of its field. */
   fields?: Record<string, JsonValue>;
 }
 

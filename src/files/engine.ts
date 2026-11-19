@@ -14,6 +14,7 @@ import type { Fired, RunEndRules, StreamFired, StreamRules, Written } from "../l
 import type { Answered, BriefingFired, Facts, Fields, MessageSeen, Problem, Question, RuleCommandAnswer, RuleMemory, RuleRun, RuleRunOptions, ToolCallFired, ToolCallSeen } from "./api";
 import type { FactTest } from "./facts";
 import { factFields, factsNamed, holds } from "./facts";
+import { namesOf } from "./template";
 import { firedRule, type Rule, type RuleScope } from "./rules";
 import { runPattern } from "./pattern";
 
@@ -73,6 +74,42 @@ export function resultText(result: ToolResult): string {
     .join("\n");
 }
 
+/** The fields a fact declares one level under `key` (a field's dotted path; "" for the fact's own value): what an item there carries. */
+function declared(def: FactDef, key: string): string[] {
+  const prefix = key === "" ? "" : `${key}.`;
+  return (def.fields ?? []).flatMap((f) => (f.startsWith(prefix) && !f.slice(prefix.length).includes(".") ? [f.slice(prefix.length)] : []));
+}
+
+/** What a block's value gives the names inside it, as the facts declare it: the fact's own value (`key` "") or each item of its field `key`, opened as `section`; undefined where nothing is known of it (a count, a name). */
+type Given = { def: FactDef; key: string; section: string } | undefined;
+
+/** Where a name was looked for: what its path reaches, or the part of it the value it was found in has not. */
+type Reached = { gives: Given } | { lacks: string; at: { def: FactDef; key: string } };
+
+/** Follows `parts` from what `from` gives, as the renderer does, strictly: a part the fact does not declare there is lacking, and past a field whose items are not declared nothing is known. */
+function follow(from: { def: FactDef; key: string }, parts: readonly string[], section: string): Reached {
+  const { def } = from;
+  let key = from.key;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i] as string;
+    if (key === "" && part === "names") return { gives: undefined };
+    if (key === "" && part === "by") {
+      const group = parts[i + 1];
+      return group === undefined || (def.by ?? []).includes(group) ? { gives: undefined } : { lacks: parts.slice(i).join("."), at: { def, key } };
+    }
+    const names = declared(def, key);
+    if (key !== "" && names.length === 0) return { gives: undefined };
+    if (!names.includes(part)) return { lacks: parts.slice(i).join("."), at: { def, key } };
+    key = key === "" ? part : `${key}.${part}`;
+  }
+  return { gives: { def, key, section } };
+}
+
+/** The names a block's value gives the names inside it. */
+function givenNames(given: NonNullable<Given>): string[] {
+  return given.key === "" ? ["names", "by", ...declared(given.def, "")] : declared(given.def, given.key);
+}
+
 /** The problems a rule's `fact:` and text have against the facts there are. */
 function checkFacts(rule: Rule, defs: ReadonlyMap<string, FactDef>): Problem[] {
   const problems: Problem[] = [];
@@ -88,24 +125,58 @@ function checkFacts(rule: Rule, defs: ReadonlyMap<string, FactDef>): Problem[] {
     }
   }
   const onStreamOnly = rule.when.trigger === "pattern" && rule.when.scope.every(isStreamScope);
-  const bodyLines = rule.text.text.split("\n");
-  for (const path of rule.text.fields) {
+  const factNames = new Set(defs.keys());
+  // What each block opened so far gives, by the blocks it stands in and its path: a name is looked for in the innermost first.
+  const opened = new Map<string, Given>();
+  const seen = new Set<string>();
+  for (const name of namesOf(rule.text)) {
+    const { path, line, within } = name;
+    const scopes = within.map((_, i) => opened.get(within.slice(0, i + 1).join("\n")));
+    const key = [...within, path].join("\n");
+    const resolve = (): Reached | undefined => {
+      const parts = path.split(".");
+      for (let i = scopes.length - 1; i >= 0; i--) {
+        const given = scopes[i];
+        if (given !== undefined && givenNames(given).includes(parts[0] as string)) return follow(given, parts, path);
+      }
+      if (rule.when.trigger === "pattern" && PATTERN_FIELDS.includes(path)) return { gives: undefined };
+      const [fact] = factsNamed([path], factNames);
+      const def = fact === undefined ? undefined : defs.get(fact);
+      if (fact === undefined || def === undefined) return undefined;
+      return follow({ def, key: "" }, path === fact ? [] : path.slice(fact.length + 1).split("."), path);
+    };
+    const reached = resolve();
+    if (name.opens && !opened.has(key)) opened.set(key, reached !== undefined && "gives" in reached ? reached.gives : undefined);
+    if (seen.has(key)) continue;
+    seen.add(key);
     if (rule.when.trigger === "pattern" && PATTERN_FIELDS.includes(path)) continue;
-    const line = rule.lines.body + Math.max(0, bodyLines.findIndex((l) => l.includes(path)));
     if (onStreamOnly) {
       problems.push(at(line, `On what an agent writes, a rule's text is filled from {{matched}} alone, so {{${path}}} stays empty.`));
       continue;
     }
-    const [name] = factsNamed([path], new Set(defs.keys()));
-    if (name === undefined) {
-      problems.push(at(line, `The text shows {{${path}}}, and no fact gives it, so it stays empty.`));
+    if (reached !== undefined && "gives" in reached) continue;
+    // The innermost block over a fact's field this name stands in whose items are declared (else the innermost over a field), and what an item of it gives.
+    const fieldScopes = scopes.filter((s): s is NonNullable<Given> => s !== undefined && s.key !== "");
+    const list = fieldScopes.findLast((s) => givenNames(s).length > 0) ?? fieldScopes.at(-1);
+    if (reached === undefined) {
+      if (list === undefined) problems.push(at(line, `The text shows {{${path}}}, and no fact gives it, so it stays empty.`));
+      else {
+        const items = givenNames(list);
+        const what = items.length > 0 ? `An item of it gives ${items.join(", ")}.` : `${list.def.name} does not say what an item of \`${list.key}\` carries: its definition names each as a field \`${list.key}.<name>\`.`;
+        problems.push(at(line, `The text shows {{${path}}} inside the list {{#${list.section}}}, and neither an item of it nor any fact gives it, so it stays empty. ${what}`));
+      }
       continue;
     }
-    const def = defs.get(name);
-    const rest = path.slice(name.length + 1).split(".");
-    const field = rest[0] ?? "";
-    const fine = field === "" || field === "names" || (field === "by" && (rest[1] === undefined || (def?.by ?? []).includes(rest[1]))) || (def?.fields ?? []).includes(field);
-    if (!fine) problems.push(at(line, `The text shows {{${path}}}, and ${name} has no \`${rest.join(".")}\`: it gives its count, \`names\`, \`by\`${(def?.fields ?? []).length > 0 ? ` and ${(def?.fields ?? []).join(", ")}` : ""}. It stays empty.`));
+    const { def, key: where } = reached.at;
+    const has = declared(def, where);
+    problems.push(
+      at(
+        line,
+        where === ""
+          ? `The text shows {{${path}}}, and ${def.name} has no \`${reached.lacks}\`: it gives its count, \`names\`, \`by\`${has.length > 0 ? ` and ${has.join(", ")}` : ""}. It stays empty.`
+          : `The text shows {{${path}}}, and an item of ${def.name}'s \`${where}\` has no \`${reached.lacks}\`: it gives ${has.join(", ")}. It stays empty.`,
+      ),
+    );
   }
   return problems;
 }

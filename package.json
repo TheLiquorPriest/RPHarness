@@ -1,6 +1,6 @@
 {
   "name": "rp-harness",
-  "version": "0.0.1",
+  "version": "1.1.1",
   "private": true,
   "type": "module",
   "description": "RPH: a harness for roleplay and creative writing on pi's agent loop. A host hands it an environment; it runs a lead agent with tools, sub-agents, sessions, rules and one reply per generation.",
